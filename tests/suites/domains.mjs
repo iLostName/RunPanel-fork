@@ -101,6 +101,31 @@ export async function run({ base }) {
   res = await owner.call(`/api/projects/${projectId}/hosts/${hostId}`, json("PATCH", { publicAccess: true }));
   r.check("a name can be opened to everyone", res.status === 200 && res.body.host?.publicAccess === true, show(res));
 
+  res = await owner.call(`/api/projects/${projectId}/hosts/${hostId}`, json("PATCH", { auth: { user: "admin", password: "una-password" } }));
+  r.check("a name can ask for a password", res.status === 200 && res.body.host?.authUser === "admin", show(res));
+  r.check("the hash never leaves the server", !JSON.stringify(res.body).includes("$6$") && !("authHash" in (res.body.host ?? {})), show(res));
+  res = await owner.call(`/api/projects/${projectId}/hosts`);
+  r.check("the project's names say so", res.body.hosts?.[0]?.authUser === "admin" && res.body.hosts[0].publicAccess === true, show(res));
+  res = await owner.call(`/api/projects/${projectId}`);
+  r.check(
+    "the header gets the name to open, marked as locked",
+    res.body.hosts?.length === 1 && res.body.hosts[0].url === "http://app.esempio.it" && res.body.hosts[0].locked === true,
+    show(res)
+  );
+  for (const [label, auth] of [
+    ["a user with a colon", { user: "ad:min", password: "una-password" }],
+    ["a user with a newline", { user: "admin\nroot", password: "una-password" }],
+    ["a short password", { user: "admin", password: "corta" }],
+    ["a missing password", { user: "admin" }],
+  ]) {
+    res = await owner.call(`/api/projects/${projectId}/hosts/${hostId}`, json("PATCH", { auth }));
+    r.check(`${label} is a 400`, res.status === 400, show(res));
+  }
+  res = await owner.call(`/api/projects/${projectId}/hosts/${hostId}`, json("PATCH", {}));
+  r.check("a change of nothing is a 400", res.status === 400, show(res));
+  res = await owner.call(`/api/projects/${projectId}/hosts/${hostId}`, json("PATCH", { auth: null }));
+  r.check("the password can be taken away", res.status === 200 && res.body.host?.authUser === null && res.body.host.publicAccess === true, show(res));
+
   res = await owner.call(`/api/projects/${projectId}/hosts/${hostId}`, json("POST", { action: "retry" }));
   r.check("a certificate is not asked for while the proxy is disabled", res.status === 409 && typeof res.body.error === "string", show(res));
   res = await owner.call(`/api/projects/${projectId}/hosts/${hostId}`, json("POST", { action: "renew-all" }));

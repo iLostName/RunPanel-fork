@@ -31,7 +31,9 @@ import {
   certbotRenewArgs,
   certificatePaths,
   conflictingNames,
+  htpasswdFileName,
   renderCloudflareHook,
+  renderHtpasswd,
   renderSite,
   renewalChallenge,
   renewalConfPath,
@@ -109,6 +111,8 @@ export function hostView(row: ProjectHostsTable & { project_name?: string }) {
     applyError: row.apply_error,
     certExpiresAt: row.cert_expires_at,
     publicAccess: row.public_access === 1,
+    // Who the password is for; the hash never leaves the server.
+    authUser: row.auth_hash ? row.auth_user : null,
     createdAt: row.created_at,
   };
 }
@@ -129,6 +133,8 @@ async function loadHosts() {
       "project_hosts.id",
       "project_hosts.hostname",
       "project_hosts.public_access",
+      "project_hosts.auth_user",
+      "project_hosts.auth_hash",
       "project_hosts.check_token",
       "project_hosts.status",
       "projects.port",
@@ -180,6 +186,7 @@ function siteFor(found: ProxyProbe, row: HostRow, withoutCertificate: boolean): 
     ipv6: found.ipv6,
     http2: found.nginx.http2,
     cloudflare: row.cloudflare === 1,
+    auth: row.auth_user && row.auth_hash ? { user: row.auth_user, hash: row.auth_hash } : null,
   };
 }
 
@@ -229,8 +236,12 @@ async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
     for (const row of rows) {
       if (left.has(row.hostname)) continue;
       const site = siteFor(found, row, httpOnly.has(row.hostname));
-      if (typeof site === "string") left.set(row.hostname, site);
-      else files.set(siteFileName(row.hostname), renderSite(site));
+      if (typeof site === "string") {
+        left.set(row.hostname, site);
+        continue;
+      }
+      files.set(siteFileName(row.hostname), renderSite(site));
+      if (site.auth) files.set(htpasswdFileName(row.hostname), renderHtpasswd(site.auth));
     }
 
     const swap = stage(files);

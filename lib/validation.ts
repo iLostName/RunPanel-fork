@@ -987,7 +987,19 @@ export const createHostSchema = z.object({
   publicAccess: z.boolean().optional(),
 });
 
-export const updateHostSchema = z.object({ publicAccess: z.boolean() });
+export const HOST_USER_RULE = "Lettere, numeri e . _ @ -, fino a 64 caratteri";
+export const HOST_PASSWORD_MIN = 8;
+
+/** The password nginx asks for in front of a name. The user lands in an htpasswd line: no colon, no newline. */
+export const hostAuthSchema = z.object({
+  user: z.string().trim().regex(/^[A-Za-z0-9._@-]{1,64}$/, HOST_USER_RULE),
+  password: z.string().min(HOST_PASSWORD_MIN, `Almeno ${HOST_PASSWORD_MIN} caratteri`).max(128, "Al massimo 128 caratteri"),
+});
+
+/** Either or both; `auth: null` takes the password away. */
+export const updateHostSchema = z
+  .object({ publicAccess: z.boolean().optional(), auth: hostAuthSchema.nullable().optional() })
+  .refine((body) => body.publicAccess !== undefined || body.auth !== undefined, { message: "Niente da cambiare" });
 
 export const hostActionSchema = z.object({ action: z.literal("retry") });
 

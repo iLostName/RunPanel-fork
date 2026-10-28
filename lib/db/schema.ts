@@ -652,6 +652,10 @@ export interface ProjectHostsTable {
   apply_error: string | null;
   /** The certificate's expiry as last read from disk. */
   cert_expires_at: string | null;
+  /** Who nginx lets in through the name, with `auth_hash`. Both null: no password. */
+  auth_user: string | null;
+  /** SHA-512 crypt of the password — never the password itself. */
+  auth_hash: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -93,6 +93,21 @@ export async function GET(_request: NextRequest, { params }: Params) {
     // fetched by the section that shows it, so a project with two years of
     // chores does not widen a payload re-read on every deploy status change.
     oneTimeCommands: await queuedForProject(projectId, project.runtime_type),
+    // The names it answers on, so the header can open one without a trip to
+    // Settings. HTTPS once the certificate is there, as the Domain section links.
+    hosts: (
+      await db
+        .selectFrom("project_hosts")
+        .select(["hostname", "status", "auth_hash"])
+        .where("project_id", "=", projectId)
+        .where("apply_error", "is", null)
+        .orderBy("hostname", "asc")
+        .execute()
+    ).map((host) => ({
+      hostname: host.hostname,
+      url: `${host.status === "active" ? "https" : "http"}://${host.hostname}`,
+      locked: host.auth_hash !== null,
+    })),
   });
 }
 

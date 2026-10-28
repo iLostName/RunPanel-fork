@@ -79,6 +79,7 @@ export async function run({ repoRoot }) {
     ipv6: true,
     http2: "directive",
     cloudflare: false,
+    auth: null,
   };
   const plain = render.renderSite(base);
   r.check("it listens on 80, both families", plain.includes("    listen 80;") && plain.includes("    listen [::]:80;"));
@@ -126,6 +127,36 @@ export async function run({ repoRoot }) {
   r.check("the allow list still applies, to the visitor", proxied443.includes("allow 192.168.1.0/24;") && proxied443.includes("deny all;"));
   r.check("a name not on Cloudflare believes no header", !plain.includes("real_ip") && !tls.includes("real_ip"));
   r.check("Cloudflare's ranges are all plain CIDR", render.CLOUDFLARE_RANGES.every((range) => /^[0-9a-f.:]+\/\d{1,3}$/.test(range)));
+
+  // --- behind a password -------------------------------------------------------------------
+  const password = await import(pathToFileURL(join(repoRoot, "services", "proxy", "password.ts")).href);
+  r.check(
+    "SHA-512 crypt matches the reference vector",
+    password.sha512Crypt("Hello world!", "saltstring") ===
+      "$6$saltstring$svn8UoSVapNtMuq1ukKS4tPQd8iKwSMHWjl/O817G3uBnIFNjnQJuesI68u4OTLiBFdcbYEdFCoEOfaS35inz1"
+  );
+  const hash = password.hashPassword("una-password-lunga");
+  r.check("a hash is $6$ with a fresh 16-character salt", /^\$6\$[./0-9A-Za-z]{16}\$[./0-9A-Za-z]{86}$/.test(hash) && hash !== password.hashPassword("una-password-lunga"), hash);
+  r.check("and checks against its own salt", password.sha512Crypt("una-password-lunga", hash.split("$")[2]) === hash);
+
+  const auth = { user: "admin", hash };
+  const locked = render.renderSite({ ...base, certificate, auth });
+  const [locked80, locked443] = locked.split("\nserver {").slice(1);
+  const usersFile = `${render.SITES_DIR}/${render.htpasswdFileName("app.esempio.it")}`;
+  r.check("443 asks for the password", locked443?.includes('auth_basic "app.esempio.it";') && locked443.includes(`auth_basic_user_file ${usersFile};`));
+  r.check("the app never gets the credentials", locked443?.includes('proxy_set_header Authorization "";'));
+  r.check("port 80 only redirects, with no password", !locked80.includes("auth_basic"));
+  const lockedPlain = render.renderSite({ ...base, auth });
+  r.check("without a certificate it is asked on 80, for the app only", (lockedPlain.match(/auth_basic /g) ?? []).length === 1 && lockedPlain.indexOf("auth_basic ") > lockedPlain.indexOf(render.CHECK_PATH));
+  r.check("an open name asks for nothing", !plain.includes("auth_basic") && !tls.includes("Authorization"));
+  r.check("the users file is not a .conf the include would read", !render.htpasswdFileName("app.esempio.it").endsWith(".conf"));
+  r.check("the users file is one line, user:hash", render.renderHtpasswd(auth) === `admin:${hash}\n`);
+  for (const bad of ["ad:min", "ad min", "admin\nroot", "", "a".repeat(65)]) {
+    r.check(`the user ${JSON.stringify(bad)} is refused`, throws(() => render.renderSite({ ...base, auth: { user: bad, hash } })) && throws(() => render.renderHtpasswd({ user: bad, hash })));
+  }
+  for (const bad of ["plain-password", "$apr1$abc$def", `${hash}\nroot:${hash}`, "$2b$10$abcdefghijklmnopqrstuuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012"]) {
+    r.check(`the hash ${JSON.stringify(bad.slice(0, 20))} is refused`, throws(() => render.renderSite({ ...base, auth: { user: "admin", hash: bad } })));
+  }
 
   // --- refusals -------------------------------------------------------------------------
   r.check("a hostname with a semicolon is refused", throws(() => render.renderSite({ ...base, hostname: "app.esempio.it; include /etc/shadow" })));

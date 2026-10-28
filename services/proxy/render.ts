@@ -98,6 +98,10 @@ const HOSTNAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0
 const CIDR = /^[0-9a-f.:]+\/\d{1,3}$/;
 const TOKEN = /^[A-Za-z0-9_-]{16,64}$/;
 const USER = /^[a-z_][a-z0-9_-]{0,31}$/;
+/** Who a password-protected name asks for: no colon, no line break, nothing htpasswd would split on. */
+const AUTH_USER = /^[A-Za-z0-9._@-]{1,64}$/;
+/** SHA-512 crypt, the one scheme every libc nginx may hand it to can read — see `services/proxy/password.ts`. */
+const AUTH_HASH = /^\$6\$[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{86}$/;
 const SAFE_PATH = /^\/[A-Za-z0-9_./-]+$/;
 
 /** How this nginx switches HTTP/2 on, read from `nginx -v`. */
@@ -137,6 +141,12 @@ export interface SiteInput {
    * Cloudflare, so the visitor's address is read from `CF-Connecting-IP`.
    */
   cloudflare: boolean;
+  /**
+   * A password in front of the app, asked by the browser. Null is none. Only
+   * where the app is served: the challenge and the routing check stay open,
+   * or a password would stop a certificate from renewing.
+   */
+  auth: { user: string; hash: string } | null;
 }
 
 /**
@@ -155,6 +165,9 @@ function assertSite(input: SiteInput): void {
     if (!CIDR.test(rule)) throw new Error(`Regola non valida per nginx: ${rule}`);
   }
   if (!TOKEN.test(input.checkToken)) throw new Error("Token di verifica non valido");
+  if (input.auth && (!AUTH_USER.test(input.auth.user) || !AUTH_HASH.test(input.auth.hash))) {
+    throw new Error("Credenziali non valide per nginx");
+  }
   if (input.certificate) {
     for (const file of [input.certificate.fullchain, input.certificate.privkey]) {
       if (!SAFE_PATH.test(file) || !file.startsWith(`${LETSENCRYPT_DIR}/`)) {
@@ -175,10 +188,20 @@ function proxyLocation(input: SiteInput): string[] {
           "        allow ::1;",
           "        deny all;",
         ];
+  // With the allow list both must pass: nginx's default is `satisfy all`.
+  const auth = input.auth
+    ? [
+        `        auth_basic "${input.hostname}";`,
+        `        auth_basic_user_file ${htpasswdPath(input.hostname)};`,
+        // The password is nginx's business: the app never sees it.
+        '        proxy_set_header Authorization "";',
+      ]
+    : [];
 
   return [
     "    location / {",
     ...rules,
+    ...auth,
     `        proxy_pass http://127.0.0.1:${input.upstreamPort};`,
     "        proxy_http_version 1.1;",
     "        proxy_set_header Host $host;",
@@ -285,6 +308,25 @@ export function renderInclude(): string {
 export function siteFileName(hostname: string): string {
   if (!HOSTNAME.test(hostname)) throw new Error(`Nome non valido per nginx: ${hostname}`);
   return `${hostname}.conf`;
+}
+
+/**
+ * The password file sits beside the block, so the same swap that changes one
+ * changes the other — and the include's `*.conf` never reads it as configuration.
+ */
+export function htpasswdFileName(hostname: string): string {
+  if (!HOSTNAME.test(hostname)) throw new Error(`Nome non valido per nginx: ${hostname}`);
+  return `${hostname}.htpasswd`;
+}
+
+function htpasswdPath(hostname: string): string {
+  return `${SITES_DIR}/${htpasswdFileName(hostname)}`;
+}
+
+/** Read by nginx's workers on every request, so world-readable like the blocks: it holds only the hash. */
+export function renderHtpasswd(auth: { user: string; hash: string }): string {
+  if (!AUTH_USER.test(auth.user) || !AUTH_HASH.test(auth.hash)) throw new Error("Credenziali non valide per nginx");
+  return `${auth.user}:${auth.hash}\n`;
 }
 
 /** Exactly two commands, so the panel's user gains no other way into root. */

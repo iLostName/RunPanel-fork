@@ -105,6 +105,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       last_error: null,
       apply_error: null,
       cert_expires_at: null,
+      auth_user: null,
+      auth_hash: null,
       created_at: now,
       updated_at: now,
     };

@@ -3,6 +3,8 @@ import { isDenied, requireProject } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import { hostActionSchema, updateHostSchema } from "@/lib/validation";
+import type { ProjectHostsTable } from "@/lib/db/schema";
+import { hashPassword } from "@/services/proxy/password";
 import {
   applyProxy,
   applyProxySoon,
@@ -34,7 +36,10 @@ async function readBody(request: NextRequest): Promise<unknown | NextResponse> {
   }
 }
 
-/** Open the name to everyone while the port stays restricted, or make it follow the port again. */
+/**
+ * Open the name to everyone while the port stays restricted, or make it follow
+ * the port again; put a password in front of it, or take it away.
+ */
 export async function PATCH(request: NextRequest, { params }: Params) {
   return withAudit(request, { category: "config", action: "project.host.update", scope: "project", scopeId: async () => (await params).projectId }, async () => {
     const { projectId, hostId } = await params;
@@ -51,12 +56,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const host = await findHost(projectId, hostId);
     if (!host) return NextResponse.json({ error: "Nome non trovato" }, { status: 404 });
 
+    const { publicAccess, auth } = parsed.data;
+    const values: Partial<ProjectHostsTable> = {};
+    if (publicAccess !== undefined) values.public_access = publicAccess ? 1 : 0;
+    if (auth !== undefined) {
+      values.auth_user = auth?.user ?? null;
+      values.auth_hash = auth ? hashPassword(auth.password) : null;
+    }
+
     const db = await getDb();
-    const public_access = parsed.data.publicAccess ? 1 : 0;
-    await db.updateTable("project_hosts").set({ public_access, updated_at: nowIso() }).where("id", "=", hostId).execute();
+    await db.updateTable("project_hosts").set({ ...values, updated_at: nowIso() }).where("id", "=", hostId).execute();
     applyProxySoon();
 
-    return NextResponse.json({ host: hostView({ ...host, public_access }) });
+    return NextResponse.json({ host: hostView({ ...host, ...values }) });
   });
 }
 
