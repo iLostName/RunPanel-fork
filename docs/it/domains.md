@@ -60,6 +60,10 @@ nginx inoltra alla porta su cui l'app ascolta davvero, in loopback, passando `Ho
 
 **Progetti limitati.** Un nome segue le [regole di rete](network.md) del progetto: nginx consente gli stessi indirizzi (e questa macchina) e rifiuta gli altri. Per esporre un progetto **solo** in HTTPS, limita la sua porta con la lista vuota ("solo questa macchina") e spunta **Raggiungibile da tutti tramite il nome**: la porta resta chiusa all'esterno, il nome è aperto.
 
+**Password.** Spunta **Chiedi una password** sotto un nome e scegli utente e password (almeno 8 caratteri): nginx li chiede (`auth_basic`) prima che qualsiasi richiesta arrivi all'app, che non li vede mai. Il pannello tiene solo l'hash (SHA-512 crypt), quindi una password dimenticata si sostituisce, non si recupera. Vale solo per il nome — la porta non cambia — e con una lista di indirizzi devono passare entrambi. Finché non arriva il certificato il nome è servito in HTTP e la password viaggia in chiaro.
+
+I nomi su cui risponde un progetto compaiono anche sotto il suo titolo, così si apre con un clic senza passare dalle Impostazioni; un lucchetto segna quelli protetti da password.
+
 ## Cosa viene rifiutato
 
 - Un nome già servito da un altro blocco di nginx: nginx ne terrebbe uno solo e vincerebbe quello gestito, quindi il pannello lo lascia fuori e lo scrive sotto il nome.

@@ -60,6 +60,10 @@ nginx forwards to the port the app really listens on, over loopback, with `Host`
 
 **Restricted projects.** A name follows the project's [network rules](network.md): nginx allows the same addresses (and this machine) and refuses the rest. To expose a project **only** over HTTPS, restrict its port with an empty list ("this machine only") and tick **Raggiungibile da tutti tramite il nome**: the port stays closed to the outside, the name is open.
 
+**Password.** Tick **Chiedi una password** under a name and choose a user and a password (at least 8 characters): nginx asks for them (`auth_basic`) before anything reaches the app, which never sees them. Only the hash is kept (SHA-512 crypt), so a forgotten password is replaced, not recovered. It applies to the name only — the port is unchanged — and with an allow list both must pass. Until the certificate arrives the name is served over HTTP and the password travels in clear.
+
+The names a project answers on are also shown under its title, so it opens with one click without going through Settings; a lock marks the ones behind a password.
+
 ## What is refused
 
 - A name already served by another nginx block: nginx would keep only one of the two, and the managed one would win, so the panel leaves it out and says so under the name.
