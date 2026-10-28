@@ -80,6 +80,8 @@ export interface Project {
    * say, before you press Deploy, that this one will not be an ordinary run.
    */
   oneTimeCommands: OneTimeCommand[];
+  /** The names nginx serves it on, minus any an apply left out. Optional for the same reason as `permission`. */
+  hosts?: { hostname: string; url: string; locked: boolean }[];
   /** Who may reach the published port, and whether the gate enforcing it is up. */
   access: AccessValue;
   gate: GateValue;

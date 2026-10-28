@@ -493,6 +493,12 @@ export default function DomainsPage() {
                       {host.certExpiresAt && (
                         <span className="text-muted text-xs">scade {formatWhen(host.certExpiresAt)}</span>
                       )}
+                      {host.authUser && (
+                        <span className="text-muted inline-flex items-center gap-1 text-xs">
+                          <Icon icon="solar:lock-keyhole-minimalistic-linear" width={12} aria-hidden />
+                          con password
+                        </span>
+                      )}
                       <Link
                         href={href(`/projects/${host.projectId}/settings`)}
                         className="text-muted hover:text-foreground text-xs"

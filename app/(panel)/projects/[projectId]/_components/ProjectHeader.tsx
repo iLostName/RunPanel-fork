@@ -121,6 +121,24 @@ export function ProjectHeader({
             <span className="font-mono">:{project.port ?? "auto"}</span>
             <span aria-hidden>·</span>
             <span className="font-mono">{project.source_branch}</span>
+            {/* Up here for every account, read-only included: opening the
+                app is the one thing everybody who sees the project wants. */}
+            {(project.hosts ?? []).map((host) => (
+              <span key={host.hostname} className="contents">
+                <span aria-hidden>·</span>
+                <a
+                  href={host.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={host.locked ? "Apri — chiede la password" : "Apri"}
+                  className="text-accent inline-flex items-center gap-1 font-mono hover:underline"
+                >
+                  <Icon icon={host.locked ? "solar:lock-keyhole-minimalistic-linear" : "solar:global-linear"} width={13} aria-hidden />
+                  {host.hostname}
+                  <Icon icon="solar:square-arrow-right-up-linear" width={12} aria-hidden />
+                </a>
+              </span>
+            ))}
           </p>
         </div>
       </div>

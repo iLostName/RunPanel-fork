@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Button, Input, TextField } from "@heroui/react";
+import { FormDialog } from "@/components/ui/FormDialog";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { Section } from "@/components/ui/Section";
@@ -19,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
-import { SUBDOMAIN_RULE, subdomainSchema } from "@/lib/validation";
+import { HOST_PASSWORD_MIN, HOST_USER_RULE, SUBDOMAIN_RULE, hostAuthSchema, subdomainSchema } from "@/lib/validation";
 import type { HostView } from "@/services/proxy";
 
 /**
@@ -54,6 +55,11 @@ export function DomainSection({ projectId }: { projectId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [removing, setRemoving] = useState<HostView | null>(null);
+  const [locking, setLocking] = useState<HostView | null>(null);
+  const [unlocking, setUnlocking] = useState<HostView | null>(null);
+  const [authUser, setAuthUser] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authErrors, setAuthErrors] = useState<{ user?: string; password?: string }>({});
 
   const hosts = data?.hosts ?? [];
   const domains = data?.domains ?? [];
@@ -114,6 +120,47 @@ export function DomainSection({ projectId }: { projectId: string }) {
     if (body) await refresh();
   }
 
+  function openLock(host: HostView) {
+    setLocking(host);
+    setAuthUser(host.authUser ?? "admin");
+    setAuthPassword("");
+    setAuthErrors({});
+  }
+
+  async function lock(): Promise<boolean> {
+    if (!locking) return true;
+    const parsed = hostAuthSchema.safeParse({ user: authUser, password: authPassword });
+    if (!parsed.success) {
+      const errors: { user?: string; password?: string } = {};
+      for (const issue of parsed.error.issues) {
+        const field = issue.path[0] === "user" ? "user" : "password";
+        errors[field] ??= issue.message;
+      }
+      setAuthErrors(errors);
+      return false;
+    }
+    const body = await send(`/api/projects/${projectId}/hosts/${locking.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ auth: parsed.data }),
+    });
+    if (!body) return false;
+    toast.success(`${locking.hostname} ora chiede la password`);
+    await refresh();
+    return true;
+  }
+
+  async function unlock(): Promise<boolean> {
+    if (!unlocking) return true;
+    const body = await send(`/api/projects/${projectId}/hosts/${unlocking.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ auth: null }),
+    });
+    if (!body) return false;
+    toast.success(`${unlocking.hostname} non chiede più la password`);
+    await refresh();
+    return true;
+  }
+
   async function remove(): Promise<boolean> {
     if (!removing) return true;
     const body = await send(`/api/projects/${projectId}/hosts/${removing.id}`, { method: "DELETE" });
@@ -162,6 +209,12 @@ export function DomainSection({ projectId }: { projectId: string }) {
                         {status.label}
                       </span>
                       {host.certExpiresAt && <span>scade {formatWhen(host.certExpiresAt)}, si rinnova da solo</span>}
+                      {host.authUser && (
+                        <span className="inline-flex items-center gap-1">
+                          <Icon icon="solar:lock-keyhole-minimalistic-linear" width={12} aria-hidden />
+                          password per <span className="font-mono">{host.authUser}</span>
+                        </span>
+                      )}
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-1.5">
@@ -193,6 +246,27 @@ export function DomainSection({ projectId }: { projectId: string }) {
                     isDisabled={busy === host.id}
                   />
                 )}
+
+                <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+                  <CheckboxField
+                    label="Chiedi una password"
+                    description={
+                      host.authUser
+                        ? "Il browser chiede utente e password prima di mostrare il progetto. La porta non cambia."
+                        : "Chi apre il nome deve inserire utente e password. La porta non cambia."
+                    }
+                    isSelected={host.authUser !== null}
+                    onChange={(next) => (next ? openLock(host) : setUnlocking(host))}
+                    isDisabled={busy === host.id}
+                    className="flex-1"
+                  />
+                  {host.authUser && (
+                    <Button variant="ghost" size="sm" onPress={() => openLock(host)}>
+                      <Icon icon="solar:key-minimalistic-linear" width={16} aria-hidden />
+                      Cambia password
+                    </Button>
+                  )}
+                </div>
               </li>
             );
           })}
@@ -254,6 +328,58 @@ export function DomainSection({ projectId }: { projectId: string }) {
         confirmLabel="Rimuovi"
         destructive
         onConfirm={remove}
+      />
+
+      <FormDialog
+        isOpen={locking !== null}
+        onOpenChange={(open) => !open && setLocking(null)}
+        title={locking?.authUser ? `Cambia la password di ${locking.hostname}` : `Password per ${locking?.hostname ?? ""}`}
+        description="nginx la chiede prima di passare qualsiasi richiesta al progetto. Il pannello ne tiene solo l'hash: se la dimentichi, ne imposti una nuova."
+        submitLabel={locking?.authUser ? "Cambia" : "Proteggi"}
+        isSubmitDisabled={!authUser.trim() || !authPassword}
+        onSubmit={lock}
+      >
+        <Field label="Utente" hint={HOST_USER_RULE} error={authErrors.user}>
+          <TextField
+            value={authUser}
+            onChange={(value) => {
+              setAuthUser(value);
+              setAuthErrors((errors) => ({ ...errors, user: undefined }));
+            }}
+            aria-label="Utente"
+          >
+            <Input className="font-mono" autoComplete="off" />
+          </TextField>
+        </Field>
+        <Field label="Password" hint={`Almeno ${HOST_PASSWORD_MIN} caratteri`} error={authErrors.password}>
+          <TextField
+            type="password"
+            value={authPassword}
+            onChange={(value) => {
+              setAuthPassword(value);
+              setAuthErrors((errors) => ({ ...errors, password: undefined }));
+            }}
+            aria-label="Password"
+          >
+            <Input autoComplete="new-password" />
+          </TextField>
+        </Field>
+        {locking && locking.status !== "active" && (
+          <Hint tone="warn" title="Ancora senza certificato">
+            Finché il nome è servito in HTTP la password viaggia in chiaro: aspetta il certificato prima di usarla
+            su una rete che non controlli.
+          </Hint>
+        )}
+      </FormDialog>
+
+      <ConfirmDialog
+        isOpen={unlocking !== null}
+        onOpenChange={(open) => !open && setUnlocking(null)}
+        title={`Togliere la password da ${unlocking?.hostname ?? ""}?`}
+        description="Il nome torna aperto a chi lo raggiunge, secondo le regole di accesso del progetto."
+        confirmLabel="Togli la password"
+        destructive
+        onConfirm={unlock}
       />
     </Section>
   );
