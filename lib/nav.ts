@@ -175,6 +175,12 @@ const PAGE = {
     icon: "solar:code-linear",
     iconActive: "solar:code-bold-duotone",
   },
+  mcp: {
+    label: "AI e API",
+    href: "/mcp",
+    icon: "solar:stars-linear",
+    iconActive: "solar:stars-bold-duotone",
+  },
 } satisfies Record<string, NavPage>;
 
 export type NavSectionId = "system" | "access" | "settings";
@@ -189,7 +195,7 @@ export const NAV_SECTIONS: Record<NavSectionId, { label: string; tabs: NavPage[]
     tabs: [PAGE.diagnostics, PAGE.autostart, PAGE.updates, PAGE.domains, PAGE.storage, PAGE.servers],
   },
   access: { label: "Accessi", tabs: [PAGE.users, PAGE.audit] },
-  settings: { label: "Impostazioni", tabs: [PAGE.account, PAGE.settings, PAGE.github] },
+  settings: { label: "Impostazioni", tabs: [PAGE.account, PAGE.settings, PAGE.github, PAGE.mcp] },
 };
 
 /** Every permission any tab of a section needs; any one shows the entry. */
