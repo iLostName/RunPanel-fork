@@ -486,6 +486,25 @@ export interface SessionsTable {
   user_id: string | null;
 }
 
+export type ApiTokenAccess = "read" | "full";
+
+/** A token an AI assistant or a script signs in with — see migration 028. */
+export interface ApiTokensTable {
+  id: string;
+  user_id: string;
+  name: string;
+  /** SHA-256 of the token. The token itself is shown once and never stored. */
+  token_hash: string;
+  /** The token's last four characters, to tell two apart in a list. */
+  hint: string;
+  /** `read` refuses every write; `full` is everything the user may do. */
+  access: ApiTokenAccess;
+  created_at: string;
+  last_used_at: string | null;
+  /** Null: until revoked. */
+  expires_at: string | null;
+}
+
 /** An account — see migration 023 and lib/authz.ts. */
 export interface UsersTable {
   id: string;
@@ -663,6 +682,7 @@ export interface ProjectHostsTable {
 export interface Database {
   settings: SettingsTable;
   sessions: SessionsTable;
+  api_tokens: ApiTokensTable;
   users: UsersTable;
   user_permissions: UserPermissionsTable;
   user_grants: UserGrantsTable;

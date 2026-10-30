@@ -26,6 +26,7 @@ import * as cluster from "./024-cluster";
 import * as domains from "./025-domains";
 import * as domainCloudflare from "./026-domain-cloudflare";
 import * as hostPassword from "./027-host-password";
+import * as apiTokens from "./028-api-tokens";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -62,6 +63,7 @@ export const migrations: Record<string, Migration> = {
   "025-domains": domains,
   "026-domain-cloudflare": domainCloudflare,
   "027-host-password": hostPassword,
+  "028-api-tokens": apiTokens,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

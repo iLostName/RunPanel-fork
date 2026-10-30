@@ -1,3 +1,4 @@
+import { isTokenSession, isTokenSessionAlive } from "./api-tokens";
 import { isClusterSession } from "./auth";
 import { getDb } from "./db";
 import {
@@ -79,7 +80,10 @@ export function watchAccess(
       if (!user || user.disabled === 1) return lose();
       // A request forwarded by another panel has no `sessions` row here: the
       // signature was its session, and it was checked when the stream opened.
-      if (who.sessionId && !isClusterSession(who.sessionId)) {
+      // An API token has its own row, and the panel-wide switch over it.
+      if (who.sessionId && isTokenSession(who.sessionId)) {
+        if (!(await isTokenSessionAlive(who.sessionId))) return lose();
+      } else if (who.sessionId && !isClusterSession(who.sessionId)) {
         const session = await db.selectFrom("sessions").select("id").where("id", "=", who.sessionId).executeTakeFirst();
         if (!session) return lose();
       }

@@ -2,6 +2,7 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { cookies, headers } from "next/headers";
 
+import { HDR_API_TOKEN_MARK, TOKEN_SESSION_PREFIX, isApiTokenMark, lookupApiToken, readBearer } from "./api-tokens";
 import { verifySignedHeaders } from "./cluster-auth";
 import { HDR_MEMBER } from "./cluster-sign";
 import { getDb, rowCount } from "./db";
@@ -51,6 +52,8 @@ export interface SessionUser {
 export interface SessionInfo {
   sessionId: string;
   user: SessionUser;
+  /** Set when the request signed in with an API token rather than a cookie. */
+  apiToken?: { id: string; access: "read" | "full" };
 }
 
 function generateToken(): string {
@@ -166,6 +169,9 @@ export async function getSession(): Promise<SessionInfo | null> {
     const requestHeaders = await headers();
     if (requestHeaders.get(HDR_MEMBER)) return await clusterSession(requestHeaders);
 
+    const bearer = readBearer((name) => requestHeaders.get(name));
+    if (bearer) return await tokenSession(bearer, requestHeaders.get(HDR_API_TOKEN_MARK));
+
     const cookieStore = await cookies();
     const token = cookieStore.get(SESSION_COOKIE)?.value;
     if (!token) return null;
@@ -194,6 +200,21 @@ async function clusterSession(requestHeaders: { get(name: string): string | null
   return {
     sessionId: `cluster:${caller.member.id}`,
     user: { id: user.id, email: user.email, isOwner: user.is_owner === 1 },
+  };
+}
+
+/**
+ * A request that signed in with an API token. Only accepted with the mark
+ * `proxy.ts` sets after checking the token itself and its `read` limit, so a
+ * route the proxy does not cover never takes a token for a session.
+ */
+async function tokenSession(token: string, mark: string | null): Promise<SessionInfo | null> {
+  const info = await lookupApiToken(token, true);
+  if (!info || !isApiTokenMark(info.tokenHash, mark)) return null;
+  return {
+    sessionId: `${TOKEN_SESSION_PREFIX}${info.id}`,
+    user: info.user,
+    apiToken: { id: info.id, access: info.access },
   };
 }
 

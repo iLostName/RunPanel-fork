@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { HDR_API_TOKEN_MARK, MCP_PATH, apiTokenMark, lookupApiToken, readBearer } from "@/lib/api-tokens";
 import { SESSION_COOKIE, isSessionTokenValid } from "@/lib/auth";
 import { HDR_PROXIED, proxiedMark, verifySignedHeaders } from "@/lib/cluster-auth";
 import { EMPTY_BODY_SHA256, HDR_MEMBER, sha256Hex } from "@/lib/cluster-sign";
@@ -41,6 +42,22 @@ export async function proxy(request: NextRequest) {
     if (!caller) return NextResponse.json({ error: "Firma non valida" }, { status: 401 });
     const headers = new Headers(request.headers);
     headers.set(HDR_PROXIED, proxiedMark(caller.markSecret, request.headers.get("x-runpanel-signature") ?? ""));
+    return NextResponse.next({ request: { headers } });
+  }
+
+  // An API token instead of a cookie. A read-only one is refused every write
+  // here, before any handler runs — except talking MCP, which is a POST of its
+  // own and whose tools apply the same limit. The mark is what lets
+  // `getSession()` take the token for a session; without the proxy there is none.
+  const bearer = readBearer((name) => request.headers.get(name));
+  if (bearer) {
+    const info = await lookupApiToken(bearer, false).catch(() => null);
+    if (!info) return NextResponse.json({ error: "Token non valido" }, { status: 401 });
+    if (info.access === "read" && !BODYLESS.has(request.method) && request.nextUrl.pathname !== MCP_PATH) {
+      return NextResponse.json({ error: "Questo token è in sola lettura" }, { status: 403 });
+    }
+    const headers = new Headers(request.headers);
+    headers.set(HDR_API_TOKEN_MARK, apiTokenMark(info.tokenHash));
     return NextResponse.next({ request: { headers } });
   }
 
