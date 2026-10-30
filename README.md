@@ -301,6 +301,15 @@ Everything lives in `.env` (see `.env.example` for the annotated version) and is
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+**[🤖 AI and MCP](docs/en/mcp.md)**<br>
+<sub>Let Claude run the panel: API tokens, read-only or full control, the MCP endpoint</sub>
+
+</td>
+<td valign="top"></td>
+</tr>
 </table>
 
 ## 🔒 Security

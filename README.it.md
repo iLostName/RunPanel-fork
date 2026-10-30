@@ -298,6 +298,15 @@ Tutto sta in `.env` (vedi `.env.example` per la versione commentata) ed è contr
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+**[🤖 AI e MCP](docs/it/mcp.md)**<br>
+<sub>Far gestire il pannello a Claude: token API, sola lettura o controllo completo, l'endpoint MCP</sub>
+
+</td>
+<td valign="top"></td>
+</tr>
 </table>
 
 ## 🔒 Sicurezza
