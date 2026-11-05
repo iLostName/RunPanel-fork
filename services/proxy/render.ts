@@ -479,7 +479,10 @@ export function certbotIssueArgs(hostname: string, email: string | null, challen
 }
 
 export function certbotRenewArgs(): string[] {
-  return ["renew", "--non-interactive", ...certbotDirs()];
+  // `--no-directory-hooks`: certbot would otherwise run whatever sits in
+  // `renewal-hooks/` under its config dir, which the panel's user, and so
+  // every native project, can write to.
+  return ["renew", "--non-interactive", "--no-directory-hooks", ...certbotDirs()];
 }
 
 export function certbotDeleteArgs(hostname: string): string[] {
@@ -612,7 +615,9 @@ try {
   else throw new Error("fase sconosciuta: " + process.argv[2]);
 } catch (err) {
   console.error("RunPanel: " + (err instanceof Error ? err.message : String(err)));
-  process.exit(1);
+  // exitCode, not exit(): exiting while fetch still holds its sockets aborts
+  // Node on Windows with a libuv assertion instead of a clean 1.
+  process.exitCode = 1;
 }
 `;
 }

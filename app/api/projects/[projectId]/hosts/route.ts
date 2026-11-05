@@ -7,15 +7,17 @@ import { getSetting } from "@/lib/settings";
 import { generateId } from "@/lib/utils";
 import { hostnameFor } from "@/lib/proxy-names";
 import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
-import { readAccess } from "@/lib/access-columns";
+import { listenPort, readAccess } from "@/lib/access-columns";
 import { createHostSchema } from "@/lib/validation";
 import {
   applyProxySoon,
   canApply,
+  claimedPorts,
   hostView,
   issueCertificate,
   newCheckToken,
   proxyProbe,
+  upstreamConflict,
 } from "@/services/proxy";
 
 type Params = { params: Promise<{ projectId: string }> };
@@ -51,6 +53,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     const { projectId } = await params;
     const denied = await requireProject(projectId, "settings");
     if (isDenied(denied)) return denied;
+    // A new name takes a label on a domain other projects share and spends its
+    // Let's Encrypt quota, so it is the Domains page's permission, not only the project's.
+    if (!hasPermission(denied.principal, "host")) {
+      return NextResponse.json({ error: "Per assegnare un nome serve il permesso Accesso all'host" }, { status: 403 });
+    }
 
     // A malformed body is a bad request, not a 500.
     let body: unknown;
@@ -65,7 +72,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     const db = await getDb();
-    const project = await db.selectFrom("projects").select(["id", "port"]).where("id", "=", projectId).executeTakeFirst();
+    const project = await db
+      .selectFrom("projects")
+      .select(["id", "port", "access_mode", "access_allow", "access_port"])
+      .where("id", "=", projectId)
+      .executeTakeFirst();
     if (!project) return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
     if (!project.port) {
       return NextResponse.json(
@@ -73,6 +84,10 @@ export async function POST(request: NextRequest, { params }: Params) {
         { status: 409 }
       );
     }
+    // Checked again at every apply, since the port can change after: this is
+    // only so the refusal comes with a reason instead of a name left out.
+    const conflict = upstreamConflict(await claimedPorts(), projectId, listenPort(project, project.port));
+    if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
 
     const { domainId, subdomain, publicAccess } = parsed.data;
     const domain = await db.selectFrom("domains").select(["id", "name"]).where("id", "=", domainId).executeTakeFirst();

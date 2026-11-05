@@ -217,6 +217,7 @@ export async function run({ repoRoot }) {
   r.check("without an email certbot is told so", noEmail.includes("--register-unsafely-without-email") && !noEmail.includes("--email"));
   r.check("certbot is never given an invalid name", throws(() => render.certbotIssueArgs("--help", null)));
   r.check("renew is non-interactive", render.certbotRenewArgs().slice(0, 2).join(" ") === "renew --non-interactive");
+  r.check("renew skips the hook directories a project could write to", render.certbotRenewArgs().includes("--no-directory-hooks"));
   r.check("delete names the certificate", render.certbotDeleteArgs("app.esempio.it").slice(0, 3).join(" ") === "delete --cert-name app.esempio.it");
 
   const viaDns = render.certbotIssueArgs("app.esempio.it", null, "cloudflare");
