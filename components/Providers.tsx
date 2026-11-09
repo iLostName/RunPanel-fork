@@ -5,6 +5,7 @@ import { RouterProvider } from "@heroui/react";
 import { addCollection } from "@iconify/react";
 import { useRouter } from "next/navigation";
 import { Toaster } from "sonner";
+import { ErrorDetailsDialog } from "@/components/ErrorDetailsDialog";
 import { solarSubset } from "@/lib/icons.generated";
 import { DEFAULT_ACCENT, type AccentPreset } from "@/lib/themes";
 import {
@@ -118,6 +119,8 @@ export function Providers({
             },
           }}
         />
+        {/* What a long error's "Dettagli" opens: see lib/toast.ts. */}
+        <ErrorDetailsDialog />
       </RouterProvider>
     </AccentContext.Provider>
     </ThemeModeContext.Provider>

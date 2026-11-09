@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Button, Modal } from "@heroui/react";
-import { toast } from "sonner";
+import { outsideToasts, toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
 
 /**
@@ -65,6 +65,7 @@ export function FormDialog({
         if (!open && busyRef.current) return;
         onOpenChange(open);
       }}
+      shouldCloseOnInteractOutside={outsideToasts}
     >
       <Modal.Container>
         <Modal.Dialog className={wide ? "max-w-2xl" : undefined}>

@@ -5,7 +5,7 @@ import { LoadError } from "@/components/ui/LoadError";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { DeleteButton } from "./DangerAction";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useResource } from "@/lib/hooks/useResource";
 import { SkeletonBlock } from "./Skeletons";
 import { useNodeApi } from "@/lib/hooks/useNode";

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useResource } from "@/lib/hooks/useResource";
 import { Segmented } from "@/components/ui/Segmented";
 import { LoadError } from "@/components/ui/LoadError";

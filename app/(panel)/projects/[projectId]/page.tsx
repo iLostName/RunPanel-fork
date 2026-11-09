@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
 import { useProjectStream } from "@/lib/hooks/useProjectStream";
 import { useResource } from "@/lib/hooks/useResource";

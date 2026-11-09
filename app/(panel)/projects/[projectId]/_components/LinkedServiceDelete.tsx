@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { DeleteButton } from "@/components/ui/DangerAction";
 import { CheckboxField } from "@/components/ui/CheckboxField";
 import { serviceLabel } from "@/lib/service-env";

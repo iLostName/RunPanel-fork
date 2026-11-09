@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { CheckboxField } from "@/components/ui/CheckboxField";
 import { DangerZone } from "@/components/ui/DangerAction";
 import type { LogLine } from "@/components/ui/LogViewer";

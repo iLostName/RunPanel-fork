@@ -4,7 +4,7 @@ import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { usePanelUpdate } from "@/lib/hooks/usePanelUpdate";

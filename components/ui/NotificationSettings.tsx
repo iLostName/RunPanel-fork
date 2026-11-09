@@ -4,7 +4,7 @@ import { useState } from "react";
 import { LoadError } from "@/components/ui/LoadError";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { SettingToggle } from "./SettingToggle";
 import { FieldHint, Hint } from "./Hint";
 import { SkeletonBlock } from "./Skeletons";

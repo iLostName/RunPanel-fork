@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
 import { useResource } from "@/lib/hooks/useResource";
 import { Panel, PanelHeader } from "@/components/ui/Panel";

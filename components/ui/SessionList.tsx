@@ -4,7 +4,7 @@ import { Button } from "@heroui/react";
 import { LoadError } from "@/components/ui/LoadError";
 import { formatRelative } from "@/lib/format";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useResource } from "@/lib/hooks/useResource";
 import { SkeletonBlock } from "./Skeletons";
 

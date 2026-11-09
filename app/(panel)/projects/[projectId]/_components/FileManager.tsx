@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";

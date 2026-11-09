@@ -4,7 +4,7 @@ import { memo, useMemo, useState } from "react";
 import Link from "next/link";
 import { Button, Input } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadError } from "@/components/ui/LoadError";

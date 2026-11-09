@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { LinkButton } from "@/components/ui/LinkButton";

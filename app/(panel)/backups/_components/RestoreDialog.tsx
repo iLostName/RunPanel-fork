@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Input, Label, TextField } from "@heroui/react";
 import { FormDialog } from "@/components/ui/FormDialog";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Hint } from "@/components/ui/Hint";
 import { SelectField } from "@/components/ui/SelectField";
 import { CheckboxField } from "@/components/ui/CheckboxField";

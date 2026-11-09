@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useAccent } from "@/components/Providers";
 import { ACCENT_PRESETS, ACCENT_SETTING_KEY, type AccentPreset } from "@/lib/themes";

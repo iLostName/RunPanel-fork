@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { Field } from "@/components/ui/Field";

@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { Button } from "@heroui/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Section } from "@/components/ui/Section";
 import { CopyField } from "@/components/ui/CopyField";
 import { CheckList, type Check } from "@/components/ui/CheckList";

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@heroui/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Field } from "@/components/ui/Field";
 import { FieldHint } from "@/components/ui/Hint";
 import { SettingToggle } from "@/components/ui/SettingToggle";

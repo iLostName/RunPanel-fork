@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { TextField, Label, Input, Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Panel } from "@/components/ui/Panel";
 import { FieldHint } from "@/components/ui/Hint";
 

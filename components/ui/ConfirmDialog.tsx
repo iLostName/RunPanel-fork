@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AlertDialog, Button } from "@heroui/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
 
 /**

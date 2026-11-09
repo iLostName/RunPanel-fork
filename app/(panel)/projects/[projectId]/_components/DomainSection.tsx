@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button, Input, TextField } from "@heroui/react";
 import { FormDialog } from "@/components/ui/FormDialog";
 import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Section } from "@/components/ui/Section";
 import { Field } from "@/components/ui/Field";
 import { SelectField } from "@/components/ui/SelectField";

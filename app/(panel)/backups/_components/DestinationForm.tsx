@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Input, Label, TextField } from "@heroui/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { FormDialog } from "@/components/ui/FormDialog";
 import { Segmented } from "@/components/ui/Segmented";
 import { Field } from "@/components/ui/Field";

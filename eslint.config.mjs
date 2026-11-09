@@ -18,6 +18,17 @@ const config = [
   },
   ...nextCoreWebVitals,
   ...nextTypeScript,
+  {
+    // A long error has to open in a dialog, not fill the screen: lib/toast.ts.
+    files: ["**/*.{ts,tsx}"],
+    ignores: ["lib/toast.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { paths: [{ name: "sonner", importNames: ["toast"], message: "Importa toast da @/lib/toast." }] },
+      ],
+    },
+  },
 ];
 
 export default config;

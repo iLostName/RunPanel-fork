@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button, Input, Label, TextField } from "@heroui/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { Segmented } from "@/components/ui/Segmented";
