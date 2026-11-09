@@ -78,6 +78,7 @@ export class MountRefused extends Error {
     readonly code:
       | "destination-not-empty"
       | "apply-in-progress"
+      | "project-busy"
       | "insufficient-space"
       | "data-mount-removed"
       /** Project-side, where a bind is a container concept and a build is needed. */
@@ -105,10 +106,6 @@ export function parseMounts(raw: string | null): ServiceMount[] {
   } catch {
     return [];
   }
-}
-
-export function newMountId(): string {
-  return generateId();
 }
 
 export function parseApplyJournal(raw: string | null): MountJournal | null {
@@ -235,12 +232,12 @@ async function captureInventory(service: ServicesTable): Promise<Inventory> {
   const target = serviceTarget(service);
 
   if (service.type === "redis") {
+    const env: Record<string, string> = target.credentials.password
+      ? { REDISCLI_AUTH: target.credentials.password }
+      : {};
     const result = await dockerTry(
-      [
-        ...execArgs(target, target.credentials.password ? { REDISCLI_AUTH: target.credentials.password } : {}),
-        "redis-cli", "--no-auth-warning", "DBSIZE",
-      ],
-      { timeout: 15_000 }
+      [...execArgs(target, env), "redis-cli", "--no-auth-warning", "DBSIZE"],
+      { env, timeout: 15_000 }
     );
     // It throws rather than answering `{}`. An engine that cannot be asked has
     // not answered "empty" — and a container crash-looping on a data directory

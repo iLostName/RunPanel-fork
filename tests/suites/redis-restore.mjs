@@ -79,6 +79,20 @@ export async function run({ base }) {
   r.check("redis provisioned inside the project", service.status === 201, JSON.stringify(service.body));
   if (service.status !== 201) return r.result();
 
+  // The password used to be an argument of the container's command, and so of the
+  // docker client's command line while it ran.
+  {
+    const name = service.body.container_name;
+    await sleep(1500);
+    const cmd = docker("inspect", "-f", "{{json .Config.Cmd}} {{json .Config.Entrypoint}}", name);
+    r.check("the password is not in the container's command", !cmd.includes(PASSWORD), cmd);
+    const uid = docker("exec", name, "sh", "-c", "grep '^Uid:' /proc/1/status");
+    r.check("redis still drops to its own user", /^Uid:\s+[1-9]/.test(uid), uid);
+    const anonymous = docker("exec", name, "redis-cli", "ping");
+    r.check("and still asks for the password", /NOAUTH/i.test(anonymous) || anonymous === "", anonymous);
+    r.check("which still opens it", docker("exec", "-e", `REDISCLI_AUTH=${PASSWORD}`, name, "redis-cli", "--no-auth-warning", "ping") === "PONG");
+  }
+
   const serviceId = service.body.id;
   const container = service.body.container_name;
 

@@ -3,6 +3,7 @@ import { decrypt } from "@/lib/crypto";
 import type { ServicesTable } from "@/lib/db/schema";
 import { buildConnectionString } from "@/lib/service-env";
 import { CONTAINER_LOG_ARGS } from "@/lib/docker-cleanup";
+import { envFlags, REDIS_PASSWORD_VAR } from "@/lib/service-exec";
 import { IServiceTemplate, ServiceConfig } from "./service-templates/types";
 import { postgresqlTemplate } from "./service-templates/postgresql";
 import { mysqlTemplate } from "./service-templates/mysql";
@@ -159,12 +160,22 @@ export async function provisionService(
     ...CONTAINER_LOG_ARGS,
   ];
 
-  for (const [key, value] of Object.entries(dockerConfig.env)) {
-    // Values go through argv, so only the key shape needs validating.
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-      args.push("-e", `${key}=${value}`);
-    }
-  }
+  // Only the names go on argv, and a pull can keep this command alive for
+  // minutes: the values reach Docker through its own environment.
+  const env = Object.fromEntries(
+    Object.entries(dockerConfig.env).filter(([key]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key))
+  );
+
+  /*
+    Redis takes its password as an argument, and Docker does not expand a
+    variable in one. A shell does: the image's own entrypoint still runs, so the
+    server still drops to its `redis` user, and the value travels like the
+    others above.
+  */
+  const redisPassword = config.type === "redis" && config.credentials.password ? config.credentials.password : null;
+  if (redisPassword) env[REDIS_PASSWORD_VAR] = redisPassword;
+  args.push(...envFlags(env));
+  if (redisPassword) args.push("--entrypoint", "sh");
 
   for (const mount of mounts) {
     args.push("-v", `${mount.source}:${mount.target}`);
@@ -172,11 +183,11 @@ export async function provisionService(
 
   args.push(dockerConfig.image);
 
-  if (config.type === "redis" && config.credentials.password) {
-    args.push("redis-server", "--requirepass", config.credentials.password);
+  if (redisPassword) {
+    args.push("-c", `exec docker-entrypoint.sh redis-server --requirepass "$${REDIS_PASSWORD_VAR}"`);
   }
 
-  const { stdout } = await docker(args, { timeout: 180_000 });
+  const { stdout } = await docker(args, { env, timeout: 180_000 });
 
   if (projectSlug) {
     try {

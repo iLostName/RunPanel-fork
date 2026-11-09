@@ -246,7 +246,13 @@ export function buildConnectionString(
   type: string,
   opts: { host: string; port: number; user?: string; password?: string; database?: string }
 ): string {
-  const { host, port, user = "", password = "", database = "" } = opts;
+  const { host, port } = opts;
+  // Only in this string: the values are stored and reach the container as they
+  // were typed, and every client decodes them back. Without it a `#` or an `@`
+  // in a password moves the host, and the app cannot find a healthy database.
+  const user = encodeURIComponent(opts.user ?? "");
+  const password = encodeURIComponent(opts.password ?? "");
+  const database = encodeURIComponent(opts.database ?? "");
 
   switch (type) {
     case "redis":

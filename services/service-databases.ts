@@ -1,6 +1,10 @@
 import { docker, dockerTry, lines } from "./docker/cli";
 import { decrypt } from "@/lib/crypto";
 import type { ServicesTable } from "@/lib/db/schema";
+import { execArgs, mongoShellCall, type ServiceTarget } from "@/lib/service-exec";
+
+export { execArgs };
+export type { ServiceTarget };
 
 /**
  * The logical databases inside one service.
@@ -17,18 +21,13 @@ import type { ServicesTable } from "@/lib/db/schema";
  * defence. Nothing in this module may be called with a name that has not been
  * through it.
  *
- * On the password reaching the engine: it travels as `docker exec -e`, which
- * puts it on the docker client's argv and so in the host's process list. That
- * is not a new exposure — anyone who can read that list can also run
- * `docker inspect` and read `POSTGRES_PASSWORD` out of the container's own
- * environment. It is preferred to `-p<password>` because the MySQL client
- * writes a warning to stderr for that form, which would end up parsed as data.
+ * On the password reaching the engine: as an environment variable named on the
+ * command line and valued in the docker process's own environment, never on
+ * argv, because the host's process list needs no privilege to read — see
+ * `lib/service-exec.ts`. It is also preferred to `-p<password>` because the
+ * MySQL client writes a warning to stderr for that form, which would end up
+ * parsed as data.
  */
-
-export interface ServiceTarget {
-  containerName: string;
-  credentials: { user: string; password: string; database: string };
-}
 
 export interface DatabaseAdmin {
   /** False where the engine has no named databases to manage. */
@@ -38,6 +37,25 @@ export interface DatabaseAdmin {
   list(target: ServiceTarget): Promise<string[]>;
   create(target: ServiceTarget, name: string): Promise<void>;
   drop(target: ServiceTarget, name: string): Promise<void>;
+}
+
+/** Whether the credentials the panel holds still open this engine. */
+export async function canSignIn(target: ServiceTarget, engine: string): Promise<boolean> {
+  if (engine === "mysql") {
+    const env = { MYSQL_PWD: target.credentials.password };
+    const result = await dockerTry([...execArgs(target, env), "mysql", "-u", "root", "-e", "SELECT 1"], {
+      env,
+      timeout: EXEC_TIMEOUT,
+    });
+    return Boolean(result);
+  }
+  if (engine === "mongodb") {
+    return mongo(target, "admin", "1").then(
+      () => true,
+      () => false
+    );
+  }
+  return true;
 }
 
 /** Raised where the engine's refusal is a state the operator can resolve. */
@@ -71,13 +89,14 @@ const postgresqlAdmin: DatabaseAdmin = {
   system: ["postgres", "template0", "template1"],
 
   async list(target) {
+    const env = { PGPASSWORD: target.credentials.password };
     const result = await dockerTry(
       [
-        ...execArgs(target, { PGPASSWORD: target.credentials.password }),
+        ...execArgs(target, env),
         "psql", "-U", target.credentials.user, "-d", "postgres", "-Atc",
         "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname",
       ],
-      { timeout: EXEC_TIMEOUT }
+      { env, timeout: EXEC_TIMEOUT }
     );
     return result ? lines(result.stdout) : [];
   },
@@ -109,12 +128,10 @@ const mysqlAdmin: DatabaseAdmin = {
   system: ["information_schema", "mysql", "performance_schema", "sys"],
 
   async list(target) {
+    const env = { MYSQL_PWD: target.credentials.password };
     const result = await dockerTry(
-      [
-        ...execArgs(target, { MYSQL_PWD: target.credentials.password }),
-        "mysql", "-u", "root", "-N", "-B", "-e", "SHOW DATABASES",
-      ],
-      { timeout: EXEC_TIMEOUT }
+      [...execArgs(target, env), "mysql", "-u", "root", "-N", "-B", "-e", "SHOW DATABASES"],
+      { env, timeout: EXEC_TIMEOUT }
     );
     return result ? lines(result.stdout) : [];
   },
@@ -193,45 +210,23 @@ export function serviceTarget(service: ServicesTable): ServiceTarget {
 
 // --- engine plumbing --------------------------------------------------------
 
-/**
- * Exported so the backup dumpers build the call the same way. How a password
- * reaches an engine is a decision with a rationale (see the module header); it
- * should be made once, not re-made by whoever writes the next caller.
- */
-export function execArgs(
-  target: ServiceTarget,
-  env: Record<string, string>,
-  opts: { interactive?: boolean } = {}
-): string[] {
-  const args = ["exec"];
-  // Only for a session that keeps reading: every one-shot caller here runs a
-  // command and wants its stdin closed. Never `-t` — with piped stdio Docker
-  // refuses to allocate a TTY at all, which is why the console has to pass the
-  // flags each client would otherwise infer from one.
-  if (opts.interactive) args.push("-i");
-  for (const [key, value] of Object.entries(env)) args.push("-e", `${key}=${value}`);
-  args.push(target.containerName);
-  return args;
-}
-
 async function psql(target: ServiceTarget, statement: string): Promise<void> {
+  const env = { PGPASSWORD: target.credentials.password };
   await docker(
     [
-      ...execArgs(target, { PGPASSWORD: target.credentials.password }),
+      ...execArgs(target, env),
       "psql", "-U", target.credentials.user, "-d", "postgres",
       "-v", "ON_ERROR_STOP=1", "-c", statement,
     ],
-    { timeout: EXEC_TIMEOUT }
+    { env, timeout: EXEC_TIMEOUT }
   );
 }
 
 async function mysqlExec(target: ServiceTarget, statement: string): Promise<void> {
+  const env = { MYSQL_PWD: target.credentials.password };
   await docker(
-    [
-      ...execArgs(target, { MYSQL_PWD: target.credentials.password }),
-      "mysql", "-u", "root", "-e", statement,
-    ],
-    { timeout: EXEC_TIMEOUT }
+    [...execArgs(target, env), "mysql", "-u", "root", "-e", statement],
+    { env, timeout: EXEC_TIMEOUT }
   );
 }
 
@@ -240,18 +235,9 @@ async function mysqlExec(target: ServiceTarget, statement: string): Promise<void
  * than branched on the version string, which is a label and not a promise.
  */
 async function mongo(target: ServiceTarget, database: string, script: string): Promise<string> {
-  const { user, password } = target.credentials;
-
   for (const binary of ["mongosh", "mongo"]) {
-    const result = await dockerTry(
-      [
-        ...execArgs(target, {}),
-        binary, "--quiet",
-        ...(user ? ["-u", user, "-p", password, "--authenticationDatabase", "admin"] : []),
-        database, "--eval", script,
-      ],
-      { timeout: EXEC_TIMEOUT }
-    );
+    const { env, argv } = mongoShellCall(target, binary, { database, script });
+    const result = await dockerTry([...execArgs(target, env), ...argv], { env, timeout: EXEC_TIMEOUT });
     if (result) return result.stdout;
   }
 
