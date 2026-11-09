@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
 import { useProjectStream } from "@/lib/hooks/useProjectStream";
 import { useResource } from "@/lib/hooks/useResource";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
@@ -20,14 +21,14 @@ import { ProjectHeader } from "./_components/ProjectHeader";
 import { ProjectStats } from "./_components/ProjectStats";
 import { LogsTab } from "./_components/LogsTab";
 import { DeploymentsTab } from "./_components/DeploymentsTab";
-import { EnvTab } from "./_components/EnvTab";
+import { ProjectEnvTab } from "./_components/EnvTab";
 import { LoadError } from "@/components/ui/LoadError";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TerminalTab } from "./_components/TerminalTab";
 import { SettingsTab } from "./_components/SettingsTab";
 import { VersionDialog } from "./_components/VersionDialog";
 import { FileManager } from "./_components/FileManager";
-import type { Deployment, EnvVar, ProcessInfo, Project, TabId } from "./_components/types";
+import type { Deployment, ProcessInfo, Project, TabId } from "./_components/types";
 import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { locateMember } from "@/lib/locate-member";
 
@@ -56,13 +57,9 @@ export default function ProjectDetailPage() {
   const poll5000 = usePollInterval(5000);
   const params = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const projectId = params.projectId as string;
 
-  const tabParam = searchParams.get("tab") as TabId | null;
-  const [activeTab, setActiveTab] = useState<TabId>(
-    tabParam && TAB_IDS.includes(tabParam) ? tabParam : "logs"
-  );
+  const [activeTab, setActiveTab] = useUrlTab(TAB_IDS, "logs");
 
   const [project, setProject] = useState<Project | null>(null);
   useCrumbLabel(projectId, project?.name);
@@ -116,7 +113,6 @@ export default function ProjectDetailPage() {
           if (!p) return;
           setLoadError(null);
           setProject(p);
-          setRenameValue(p.name);
           prevStatus.current = p.status;
           setLoading(false);
         })
@@ -173,11 +169,23 @@ export default function ProjectDetailPage() {
   // Process stats are a snapshot, not an event, so they still poll — but the
   // hook stops while the tab is hidden. Derived rather than copied into state:
   // mirroring fetched data into a useState is what turns one render into two.
-  const { data: statusData } = useResource<{ process?: ProcessInfo | null }>(
+  const { data: statusData } = useResource<{ status?: string; process?: ProcessInfo | null }>(
     api(`/api/projects/${projectId}/status`),
     { intervalMs: poll5000 }
   );
   const processInfo = statusData?.process ?? null;
+
+  // The row changes without a deploy too: the sweep that notices a process
+  // died, a scheduled restart, autostart, a Stop pressed by someone else. Only
+  // deploys reach the stream, so the header kept the status it loaded with
+  // until a reload. The poll above already reads the column every few seconds;
+  // when it disagrees, the project is read again — the row, not just the
+  // status, since whatever moved it may have moved more.
+  const polledStatus = statusData?.status;
+  const shownStatus = project?.status;
+  useEffect(() => {
+    if (polledStatus && shownStatus && polledStatus !== shownStatus) void refreshProject();
+  }, [polledStatus, shownStatus, refreshProject]);
 
   // Seed the process log from the tail; the stream carries it from there.
   //
@@ -209,10 +217,6 @@ export default function ProjectDetailPage() {
   const deployments = useMemo(
     () => (Array.isArray(deploymentsData) ? deploymentsData : []),
     [deploymentsData]
-  );
-
-  const { data: envData, loading: envLoading, error: envError, refresh: refreshEnv } = useResource<EnvVar[]>(
-    activeTab === "env" ? api(`/api/projects/${projectId}/env?reveal=true`) : null
   );
 
   // The env tab explains which prefixes reach the build, and the project can
@@ -390,7 +394,12 @@ export default function ProjectDetailPage() {
         busy={deploying}
         onDeploy={handleDeploy}
         onControl={handleControl}
-        onOpenSettings={() => setRenameOpen(true)}
+        onOpenSettings={() => {
+          // Seeded on opening, not on every refresh of the project, which
+          // would overwrite what is being typed.
+          setRenameValue(project.name);
+          setRenameOpen(true);
+        }}
         onOpenVersions={openVersions}
         onReleasePin={handleReleasePin}
       />
@@ -445,23 +454,12 @@ export default function ProjectDetailPage() {
         />
       )}
 
-      {/* Never mount the editor over a failed load: it would start empty, and
-          saving replaces the whole set, which would delete every variable. */}
-      {activeTab === "env" && envError && !envData && (
-        <LoadError what="le variabili" error={envError} onRetry={() => void refreshEnv()} />
-      )}
-
-      {activeTab === "env" && !(envError && !envData) && (
-        <EnvTab
-          // Keyed on whether the data has arrived, so the editable copy is
-          // seeded by React remounting the component rather than by an effect
-          // that copies props into state.
-          key={envData ? "loaded" : "loading"}
+      {/* Fetches its variables on every visit: see ProjectEnvTab. */}
+      {activeTab === "env" && (
+        <ProjectEnvTab
           projectId={projectId}
           runtimeType={project.runtime_type}
           buildEnvPrefixes={buildEnvPrefixes}
-          initialVars={envData ?? []}
-          loading={envLoading}
           readOnly={(project.permission?.level ?? "manage") !== "manage"}
         />
       )}

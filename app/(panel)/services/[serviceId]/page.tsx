@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
 import { useResource } from "@/lib/hooks/useResource";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
@@ -67,7 +68,6 @@ export default function ServiceDetailPage() {
   const poll5000 = usePollInterval(5000);
   const params = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const serviceId = params.serviceId as string;
 
   const { data: service, loading, error: loadError, refresh } = useResource<Service>(
@@ -100,10 +100,7 @@ export default function ServiceDetailPage() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
 
-  const tabParam = searchParams.get("tab") as ServiceTabId | null;
-  const [activeTab, setActiveTab] = useState<ServiceTabId>(
-    tabParam && TAB_IDS.includes(tabParam) ? tabParam : "connection"
-  );
+  const [activeTab, setActiveTab] = useUrlTab(TAB_IDS, "connection");
 
   // The project the service belongs to, if any: without one nothing is injected
   // anywhere, and that is worth saying out loud rather than leaving to be

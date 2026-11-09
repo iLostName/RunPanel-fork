@@ -16,8 +16,34 @@ import { InfoTip } from "@/components/ui/Tooltip";
 import { ServiceLink } from "@/components/ServiceLink";
 import { StickySaveBar } from "@/components/ui/StickySaveBar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { LoadError } from "@/components/ui/LoadError";
 import type { EnvVar } from "./types";
 import { useNodeApi } from "@/lib/hooks/useNode";
+
+/**
+ * The env tab as the project page mounts it: the variables are fetched here,
+ * on every visit, and the editor mounts once they have arrived.
+ *
+ * The page used to fetch them and keep them while another tab was open. The
+ * editor seeds its copy once, so coming back after a save seeded it from the
+ * copy fetched before the save — the old values, which the next save would
+ * have written back over the new ones.
+ */
+export function ProjectEnvTab(props: Omit<Parameters<typeof EnvTab>[0], "initialVars" | "loading">) {
+  const api = useNodeApi();
+  const { data, loading, error, refresh } = useResource<EnvVar[]>(
+    api(`/api/projects/${props.projectId}/env?reveal=true`)
+  );
+
+  // Never mount the editor over a failed load: it would start empty, and
+  // saving replaces the whole set, which would delete every variable.
+  if (error && !data) return <LoadError what="le variabili" error={error} onRetry={() => void refresh()} />;
+
+  // Keyed on whether the data has arrived, so the editable copy is seeded by
+  // React remounting the component rather than by an effect that copies props
+  // into state.
+  return <EnvTab key={data ? "loaded" : "loading"} {...props} initialVars={data ?? []} loading={loading} />;
+}
 
 interface LinkedService {
   id: string;
