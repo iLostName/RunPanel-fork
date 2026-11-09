@@ -45,14 +45,15 @@ export async function run({ repoRoot }) {
 
   r.check("a subdomain is lowercased", normalizeSubdomain(" App ") === "app");
   r.check("a subdomain may hold hyphens and digits", normalizeSubdomain("api-v2") === "api-v2");
-  for (const bad of ["a.b", "-app", "app-", "*", "", "ap p", "app;", "_app"]) {
+  r.check("an empty subdomain means the domain itself", normalizeSubdomain("  ") === "" && hostnameFor("", "esempio.it") === "esempio.it");
+  for (const bad of ["a.b", "-app", "app-", "*", "ap p", "app;", "_app"]) {
     r.check(`the subdomain ${JSON.stringify(bad)} is refused`, normalizeSubdomain(bad) === null, String(normalizeSubdomain(bad)));
   }
 
   r.check("the full name is the two joined", hostnameFor("app", "esempio.it") === "app.esempio.it");
   r.check("a full name past 253 characters is refused", hostnameFor("a".repeat(63), `${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(63)}.it`) === null);
   r.check("a stored hostname passes the renderer's check", isHostname("app.esempio.it") === true);
-  r.check("a bare domain is not a hostname here", isHostname("esempio.it") === false);
+  r.check("the domain itself is a hostname too", isHostname("esempio.it") === true);
 
   r.check("a domain is in its own zone", zoneFor("esempio.it", ["altro.it", "esempio.it"]) === "esempio.it");
   r.check("a domain under a zone is in it", zoneFor("clienti.esempio.it", ["esempio.it"]) === "esempio.it");

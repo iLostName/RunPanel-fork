@@ -9,7 +9,7 @@ Ogni progetto con una porta può essere servito su un sottodominio in HTTPS: `ap
 ## Cosa serve
 
 - Linux, con nginx e certbot installati (per esempio `sudo apt install nginx certbot`).
-- Un dominio tuo e, presso il suo provider DNS, **un solo record wildcard**: `*.esempio.it` → l'indirizzo pubblico del server (`A`, più `AAAA` se ha IPv6). Un record copre tutti i sottodomini e ogni nome ha il suo certificato.
+- Un dominio tuo e, presso il suo provider DNS, **un solo record wildcard**: `*.esempio.it` → l'indirizzo pubblico del server (`A`, più `AAAA` se ha IPv6). Un record copre tutti i sottodomini e ogni nome ha il suo certificato. Per servire anche il dominio intero (`esempio.it`) serve un secondo record, sul nome stesso: la wildcard non lo copre.
 - Le porte 80 e 443 che arrivano a nginx: sulla 80 Let's Encrypt verifica il nome, per il primo certificato e a ogni rinnovo. Per i domini su [Cloudflare](#domini-su-cloudflare) la verifica passa invece dal DNS.
 
 ## Preparare nginx
@@ -34,7 +34,7 @@ Cancellare `/etc/nginx/conf.d/runpanel.conf` e ricaricare spegne in un colpo tut
 ## Dare un nome a un progetto
 
 1. In **Sistema › Domini** aggiungi il dominio (`esempio.it`).
-2. Nel progetto, **Impostazioni › Dominio**: scrivi il sottodominio, scegli il dominio, **Assegna**.
+2. Nel progetto, **Impostazioni › Dominio**: scrivi il sottodominio (o lascialo vuoto per il dominio intero), scegli il dominio, **Assegna**.
 
 Il pannello scrive il blocco, ricarica nginx, controlla che il nome arrivi davvero a questo server e chiede il certificato in background: dopo qualche secondo il nome risulta *HTTPS attivo*. Se la richiesta non va, il motivo compare sotto il nome (il messaggio di Let's Encrypt, per esempio `NXDOMAIN` quando manca il record DNS) con **Richiedi il certificato** per riprovare.
 
@@ -72,7 +72,7 @@ I nomi su cui risponde un progetto compaiono anche sotto il suo titolo, così si
 
 ## Limiti
 
-- Un solo livello di sottodominio (`app.esempio.it`, non `api.app.esempio.it`) e niente dominio principale.
+- Un solo livello di sottodominio (`app.esempio.it`, non `api.app.esempio.it`) oppure il dominio intero (`esempio.it`).
 - Per server: il record wildcard punta a una macchina, quindi con [più server](multi-server.md) ciascuno ha i suoi domini — per esempio `*.s1.esempio.it`.
 - I nomi sconosciuti sotto la wildcard finiscono sul server di default di nginx. Se è il pannello, valuta un blocco catch-all che risponde `444`.
 - L'include funziona dove `nginx.conf` carica `/etc/nginx/conf.d/*.conf` dentro `http {}`, come fanno Debian, Ubuntu e RHEL di serie. Con un `nginx.conf` scritto a mano che non lo fa, aggiungi tu quella riga.

@@ -651,8 +651,9 @@ export interface ProjectHostsTable {
   id: string;
   project_id: string;
   domain_id: string;
+  /** One label, or empty for the domain itself. */
   subdomain: string;
-  /** `subdomain.domain`, stored so uniqueness is one index and nginx needs no join. */
+  /** `subdomain.domain` (or the domain alone), stored so uniqueness is one index and nginx needs no join. */
   hostname: string;
   /**
    * 0 | 1 — open to everyone through the name while the project's port stays

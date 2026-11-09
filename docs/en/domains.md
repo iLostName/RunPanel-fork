@@ -9,7 +9,7 @@ Every project with a port can be served on a subdomain over HTTPS: `app.example.
 ## What you need
 
 - Linux, with nginx and certbot installed (for instance `sudo apt install nginx certbot`).
-- A domain you own, and at its DNS provider **one wildcard record**: `*.example.com` → the server's public address (`A`, plus `AAAA` if it has IPv6). One record covers every subdomain, and each name gets its own certificate.
+- A domain you own, and at its DNS provider **one wildcard record**: `*.example.com` → the server's public address (`A`, plus `AAAA` if it has IPv6). One record covers every subdomain, and each name gets its own certificate. To serve the domain itself (`example.com`) too, add a second record on the name itself: the wildcard does not cover it.
 - Ports 80 and 443 reaching nginx: port 80 is where Let's Encrypt checks the name, for the first certificate and every renewal. For domains on [Cloudflare](#domains-on-cloudflare) the check goes through DNS instead.
 
 ## Setting nginx up
@@ -34,7 +34,7 @@ Deleting `/etc/nginx/conf.d/runpanel.conf` and reloading takes every managed nam
 ## Giving a project a name
 
 1. In **Sistema › Domini**, add the domain (`example.com`).
-2. In the project, **Impostazioni › Dominio**: type the subdomain, choose the domain, **Assegna**.
+2. In the project, **Impostazioni › Dominio**: type the subdomain (or leave it empty for the domain itself), choose the domain, **Assegna**.
 
 The panel writes the block, reloads nginx, checks that the name really reaches this server and asks for the certificate in the background: a few seconds later the name reads *HTTPS attivo*. If the request fails, the reason shows under the name (Let's Encrypt's own message, for instance `NXDOMAIN` when the DNS record is missing) with **Richiedi il certificato** to try again.
 
@@ -72,7 +72,7 @@ The names a project answers on are also shown under its title, so it opens with 
 
 ## Limits
 
-- One level of subdomain (`app.example.com`, not `api.app.example.com`) and no apex domain.
+- One level of subdomain (`app.example.com`, not `api.app.example.com`), or the domain itself (`example.com`).
 - Per server: the wildcard record points at one machine, so with [several servers](multi-server.md) each one has its own domains — `*.s1.example.com`, for instance.
 - Unknown names under the wildcard land on nginx's default server. If that is the panel, consider a catch-all block returning `444`.
 - The include works where `nginx.conf` loads `/etc/nginx/conf.d/*.conf` inside `http {}`, as Debian, Ubuntu and RHEL do out of the box. With a hand-written `nginx.conf` that does not, add that line yourself.

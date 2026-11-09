@@ -307,10 +307,10 @@ export default function DomainsPage() {
                         Record DNS: <Code>*.{domain.name}</Code> → {target}
                         {" · "}
                         {domain.hostCount === 0
-                          ? "nessun sottodominio"
+                          ? "nessun nome"
                           : domain.hostCount === 1
-                            ? "1 sottodominio"
-                            : `${domain.hostCount} sottodomini`}
+                            ? "1 nome"
+                            : `${domain.hostCount} nomi`}
                       </p>
                     </div>
                     <Button variant="ghost" size="sm" className="text-danger shrink-0" onPress={() => setRemoving(domain)}>
@@ -343,7 +343,7 @@ export default function DomainsPage() {
             <FieldHint>
               Prima di assegnare un nome, crea presso il tuo provider DNS un record <Code>A</Code> (e{" "}
               <Code>AAAA</Code> se hai IPv6) per <Code>*.dominio</Code> che punti a questo server. Un solo
-              record copre tutti i sottodomini.
+              record copre tutti i sottodomini; per il dominio intero serve anche un record per <Code>dominio</Code>.
             </FieldHint>
           </div>
         </Panel>
@@ -460,14 +460,14 @@ export default function DomainsPage() {
 
         <Panel padding="flush">
           <PanelHeader
-            title="Sottodomini assegnati"
+            title="Nomi assegnati"
             description="Si assegnano dalle impostazioni di ogni progetto"
             className="px-4 pt-4"
           />
           {(data?.hosts.length ?? 0) === 0 ? (
             <EmptyState
               icon="solar:link-round-linear"
-              title="Nessun sottodominio"
+              title="Nessun nome assegnato"
               description="Apri un progetto, Impostazioni › Dominio."
               className="py-8"
             />
@@ -520,7 +520,7 @@ export default function DomainsPage() {
         isOpen={removing !== null}
         onOpenChange={(open) => !open && setRemoving(null)}
         title={`Rimuovere ${removing?.name ?? ""}?`}
-        description="Il dominio sparisce dalla lista. Si può togliere solo quando nessun progetto ne usa un sottodominio."
+        description="Il dominio sparisce dalla lista. Si può togliere solo quando nessun progetto lo usa."
         confirmLabel="Rimuovi"
         destructive
         onConfirm={removeDomain}

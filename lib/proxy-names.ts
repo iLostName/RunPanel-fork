@@ -38,15 +38,18 @@ export function normalizeDomain(raw: string): string | null {
   return value;
 }
 
-/** The part before the domain: one label, so it is covered by `*.domain`. */
+/**
+ * The part before the domain: one label, so it is covered by `*.domain` — or
+ * empty, for the domain itself, which needs a DNS record of its own.
+ */
 export function normalizeSubdomain(raw: string): string | null {
   const value = raw.trim().toLowerCase();
-  return isDnsLabel(value) ? value : null;
+  return value === "" || isDnsLabel(value) ? value : null;
 }
 
 /** The full name, or null when the two together exceed what DNS allows. */
 export function hostnameFor(subdomain: string, domain: string): string | null {
-  const hostname = `${subdomain}.${domain}`;
+  const hostname = subdomain === "" ? domain : `${subdomain}.${domain}`;
   return hostname.length <= 253 ? hostname : null;
 }
 
@@ -66,5 +69,5 @@ export function zoneFor(domain: string, zones: readonly string[]): string | null
 
 /** Whether a stored name still passes, for the renderer's own last check. */
 export function isHostname(value: string): boolean {
-  return normalizeDomain(value) === value && value.split(".").length >= 3;
+  return normalizeDomain(value) === value;
 }

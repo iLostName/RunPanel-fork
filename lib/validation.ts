@@ -952,7 +952,7 @@ export const autostartFixSchema = z.object({
 // --- Domains ---
 
 export const DOMAIN_RULE = "Un dominio come esempio.it: lettere, numeri e trattini, senza http:// né *";
-export const SUBDOMAIN_RULE = "Una sola parola: minuscole, numeri e trattini, es. app";
+export const SUBDOMAIN_RULE = "Una sola parola: minuscole, numeri e trattini, es. app. Vuoto per il dominio intero";
 
 /** Canonicalised on the way in, so `Esempio.IT.` and `esempio.it` are the same row. */
 export const domainNameSchema = z

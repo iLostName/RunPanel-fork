@@ -30,7 +30,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     if (count > 0) {
       return NextResponse.json(
         {
-          error: `${domain.name} serve ancora ${count === 1 ? "un sottodominio" : `${count} sottodomini`}: toglili prima dai progetti.`,
+          error: `${domain.name} serve ancora ${count === 1 ? "un nome" : `${count} nomi`}: toglili prima dai progetti.`,
         },
         { status: 409 }
       );

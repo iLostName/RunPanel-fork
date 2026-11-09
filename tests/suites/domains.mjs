@@ -143,6 +143,15 @@ export async function run({ base }) {
   res = await owner.call(`/api/projects/${otherId}/hosts`, json("POST", { domainId, subdomain: "panel" }));
   r.check("a project cannot take the panel's address", res.status === 409, show(res));
 
+  // --- the domain itself ---------------------------------------------------------------------
+  res = await owner.call(`/api/projects/${otherId}/hosts`, json("POST", { domainId, subdomain: "" }));
+  r.check("an empty subdomain assigns the domain itself", res.status === 201 && res.body.host?.hostname === "esempio.it", show(res));
+  const apexId = res.body.host?.id;
+  res = await owner.call(`/api/projects/${projectId}/hosts`, json("POST", { domainId, subdomain: " " }));
+  r.check("the domain itself is assigned once", res.status === 409, show(res));
+  res = await owner.call(`/api/projects/${otherId}/hosts/${apexId}`, { method: "DELETE" });
+  r.check("and is removed like any name", res.status === 200, show(res));
+
   // --- the Let's Encrypt email ------------------------------------------------------------------
   res = await owner.call("/api/domains/settings", json("PUT", { acmeEmail: "op@esempio.it" }));
   r.check("the email is saved", res.status === 200, show(res));

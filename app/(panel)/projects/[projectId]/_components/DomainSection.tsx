@@ -94,7 +94,7 @@ export function DomainSection({ projectId }: { projectId: string }) {
     });
     setBusy(null);
     if (!body) return;
-    toast.success(`${parsed.data}.${chosen.name} assegnato`);
+    toast.success(`${parsed.data ? `${parsed.data}.` : ""}${chosen.name} assegnato`);
     setSubdomain("");
     setError(null);
     await refresh();
@@ -182,7 +182,7 @@ export function DomainSection({ projectId }: { projectId: string }) {
   return (
     <Section
       title="Dominio"
-      summary={hosts.length > 0 ? hosts.map((h) => h.hostname).join(", ") : "Nessun sottodominio"}
+      summary={hosts.length > 0 ? hosts.map((h) => h.hostname).join(", ") : "Nessun nome"}
     >
       {data && !proxyServes && (
         <Hint tone="warn" title="nginx su questo server non è pronto">
@@ -305,16 +305,19 @@ export function DomainSection({ projectId }: { projectId: string }) {
               className="sm:mt-7"
               onPress={assign}
               isPending={busy === "add"}
-              isDisabled={!subdomain.trim() || !chosen}
+              isDisabled={!chosen}
             >
               <Icon icon="solar:link-round-linear" width={16} aria-hidden />
               Assegna
             </Button>
           </div>
-          {subdomain.trim() && chosen && (
+          {chosen && (
             <FieldHint>
-              Il progetto risponderà su <Code>https://{subdomain.trim().toLowerCase()}.{chosen.name}</Code>. Il
-              certificato arriva da solo in qualche secondo, se il record DNS punta a questo server.
+              Il progetto risponderà su{" "}
+              <Code>https://{subdomain.trim() ? `${subdomain.trim().toLowerCase()}.` : ""}{chosen.name}</Code>.{" "}
+              {subdomain.trim()
+                ? "Il certificato arriva da solo in qualche secondo, se il record DNS punta a questo server."
+                : <>Il dominio intero non è coperto da <Code>*.{chosen.name}</Code>: serve un record <Code>A</Code> anche per <Code>{chosen.name}</Code>, poi il certificato arriva da solo.</>}
             </FieldHint>
           )}
         </>
