@@ -3,7 +3,8 @@
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { LoadError } from "@/components/ui/LoadError";
+import { ErrorDetail, LoadError } from "@/components/ui/LoadError";
+import { refusalNote } from "@/lib/error-text";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { CheckList, type Check } from "@/components/ui/CheckList";
 import { Hint } from "@/components/ui/Hint";
@@ -178,8 +179,9 @@ export default function DiagnosticsPage() {
             ) : (
               <Hint tone={server.reachable ? "info" : "warn"}>
                 {server.reachable
-                  ? `La diagnostica di ${server.memberName} non è disponibile per il tuo account (${server.error ?? "accesso negato"}).`
-                  : `${server.memberName} non raggiungibile. ${server.error ?? ""}`}
+                  ? `La diagnostica di ${server.memberName} non è disponibile per il tuo account${refusalNote(server.error)}.`
+                  : `${server.memberName} non raggiungibile.`}
+                {!server.reachable && <ErrorDetail detail={server.error} />}
               </Hint>
             )}
           </section>

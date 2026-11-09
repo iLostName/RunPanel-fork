@@ -6,7 +6,8 @@ import { Icon } from "@iconify/react";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { LoadError } from "@/components/ui/LoadError";
+import { ErrorDetail, LoadError } from "@/components/ui/LoadError";
+import { refusalNote } from "@/lib/error-text";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
@@ -93,11 +94,6 @@ const Row = memo(function Row({
   const content = (
     <>
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        {onToggle && (
-          <span className="text-muted shrink-0" aria-hidden>
-            <Icon icon={collapsed ? "solar:alt-arrow-right-linear" : "solar:alt-arrow-down-linear"} width={14} />
-          </span>
-        )}
         <span
           className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[meta.tone], meta.active && "animate-pulse")}
           aria-hidden
@@ -128,11 +124,24 @@ const Row = memo(function Row({
     (href || onToggle) && "hover:bg-surface-hover"
   );
 
-  if (onToggle) {
+  // The arrow opens the services, the row opens the project: a project with
+  // services used to be the one row of this page that led nowhere.
+  if (onToggle && href) {
     return (
-      <button type="button" onClick={onToggle} className={className} aria-expanded={!collapsed}>
-        {content}
-      </button>
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? "Mostra" : "Nascondi"} i servizi di ${label}`}
+          className="text-muted hover:bg-surface-hover hover:text-foreground shrink-0 pr-1 pl-3 transition-colors"
+        >
+          <Icon icon={collapsed ? "solar:alt-arrow-right-linear" : "solar:alt-arrow-down-linear"} width={14} aria-hidden />
+        </button>
+        <Link href={href} className={cn(className, "min-w-0 flex-1 pl-1")}>
+          {content}
+        </Link>
+      </div>
     );
   }
 
@@ -218,7 +227,7 @@ function HostMonitor({
                   cpu={project.process?.cpu}
                   memory={project.process?.memory}
                   uptime={project.process?.uptime}
-                  href={hasChildren ? undefined : link(`/projects/${project.id}`)}
+                  href={link(`/projects/${project.id}`)}
                   onToggle={hasChildren ? () => toggle(key) : undefined}
                   collapsed={isCollapsed}
                 />
@@ -342,8 +351,9 @@ export default function MonitorPage() {
               ) : (
                 <Hint tone={server.reachable ? "info" : "warn"}>
                   {server.reachable
-                    ? `Il monitor di ${server.memberName} non è disponibile per il tuo account (${server.error ?? "accesso negato"}).`
-                    : `${server.memberName} non raggiungibile. ${server.error ?? ""}`}
+                    ? `Il monitor di ${server.memberName} non è disponibile per il tuo account${refusalNote(server.error)}.`
+                    : `${server.memberName} non raggiungibile.`}
+                  {!server.reachable && <ErrorDetail detail={server.error} />}
                 </Hint>
               )}
             </section>

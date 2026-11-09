@@ -5,6 +5,7 @@ import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useNode } from "@/lib/hooks/useNode";
 import { formatBytes } from "@/lib/format";
+import { readableError } from "@/lib/error-text";
 import { cn } from "@/lib/utils";
 import type { ServerCard } from "@/app/api/cluster/servers/route";
 
@@ -79,7 +80,9 @@ export function ServerCardView({ server: s, active, onSelect }: { server: Server
           Ha una versione più vecchia di questo pannello: aggiornalo da Sistema › Aggiornamenti per vederne CPU, disco e progetti.
         </p>
       ) : (
-        <p className="text-danger mt-2 text-xs">{s.error ?? "Non raggiungibile"}</p>
+        <p className="text-danger mt-2 text-xs" title={s.error ?? undefined}>
+          {s.error ? readableError(s.error).text : "Server non raggiungibile"}
+        </p>
       )}
 
       {s.warnings.filter((w) => w.kind !== "unreachable").length > 0 && (

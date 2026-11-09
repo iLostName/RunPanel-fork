@@ -287,3 +287,6 @@ export function isActiveNav(pathname: string, item: NavPage): boolean {
   if (pathname === item.href || pathname.startsWith(`${item.href}/`)) return true;
   return (item.owns ?? []).some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
+
+/** The destination a path belongs to, detail pages included. */
+export const pageAt = (pathname: string): NavPage | undefined => NAV_PAGES.find((page) => isActiveNav(pathname, page));
