@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { hasPermission, type Principal } from "@/lib/authz";
 import { normalizeExcludeList } from "@/lib/backup-settings";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { config } from "@/lib/config";
@@ -9,10 +10,23 @@ import type { ProjectsTable, ServicesTable } from "@/lib/db/schema";
 import { getEnv } from "@/lib/env";
 import { generateId } from "@/lib/utils";
 import { formatBytes } from "@/lib/format";
+import { requireHostIfReaching } from "@/lib/host-guard";
+import { configRestoreProblem } from "@/lib/restore-gate";
+import { stripRemoteCredentials } from "@/lib/git-remote";
+import { mongoToolCall, postgresRestoreCommand } from "@/lib/service-exec";
 import { docker, dockerFromFile, dockerTry } from "../docker/cli";
 import { opsEvents } from "../events";
 import { processManager } from "../process-manager";
-import { databaseAdmin, execArgs, serviceTarget } from "../service-databases";
+import { appIsUp } from "../project-restart";
+import { sealContract } from "../build-env";
+import {
+  busyMessage,
+  isPanelClosing,
+  PANEL_CLOSING_MESSAGE,
+  tryLock,
+  type ReleaseLock,
+} from "../project-lock";
+import { canSignIn, databaseAdmin, execArgs, serviceTarget, type ServiceTarget } from "../service-databases";
 import { containerMounts } from "../docker/volumes";
 import { extractArchiveEntry, isSafeEntryPath, listArchiveEntries } from "./archive-read";
 import { buildDestination } from "./destinations";
@@ -26,6 +40,73 @@ import { holdVolumeForRestore, startContainers, writeVolume } from "./volume-ops
 interface Stopped {
   projects: { slug: string; runtime: string }[];
   containers: string[];
+  /** Project locks, held until those projects are back up. */
+  locks: ReleaseLock[];
+  /** Whose locks those are: a project can be touched by several artifacts. */
+  held: Set<string>;
+}
+
+/** Keep a project to this restore until it ends. */
+function holdProject(projectId: string, stopped: Stopped): void {
+  if (stopped.held.has(projectId)) return;
+  const release = tryLock(projectId, "restore");
+  if (!release) throw new Error(busyMessage(projectId));
+  stopped.held.add(projectId);
+  stopped.locks.push(release);
+}
+
+/**
+ * Take a project down for the rest of this restore.
+ *
+ * Only what was up comes back in the caller's `finally`: a project somebody
+ * stopped has to stay that way.
+ */
+async function takeDown(
+  project: ProjectsTable,
+  stopped: Stopped,
+  emit: (line: string) => void
+): Promise<void> {
+  holdProject(project.id, stopped);
+  if (stopped.projects.some((entry) => entry.slug === project.slug)) return;
+
+  const wasUp = await appIsUp(project);
+  emit(`  fermo ${project.slug}…`);
+  await processManager.stop(project.slug, project.runtime_type).catch(() => {});
+  if (wasUp) stopped.projects.push({ slug: project.slug, runtime: project.runtime_type });
+}
+
+/**
+ * Take every project this restore will touch, before it touches anything.
+ *
+ * One at a time, a project busy with a deploy would fail the run after the items
+ * before it were already overwritten. Before the safety copy too: a migration
+ * landing after that copy would be in neither the copy nor the archive.
+ */
+async function holdTargets(
+  planned: RestoreMapping[],
+  artifacts: Map<string, RestorableArtifact>,
+  stopped: Stopped
+): Promise<void> {
+  const db = await getDb();
+
+  for (const mapping of planned) {
+    const artifact = artifacts.get(mapping.artifactId);
+    if (!artifact) continue;
+
+    const target = mapping.targetId ?? artifact.refId;
+    if (!target) continue;
+
+    if (artifact.kind === "service-db") {
+      const service = await db
+        .selectFrom("services")
+        .select("project_id")
+        .where("id", "=", target)
+        .executeTakeFirst();
+      if (service?.project_id) holdProject(service.project_id, stopped);
+    } else if (artifact.kind.startsWith("project-")) {
+      holdProject(target, stopped);
+    }
+  }
 }
 
 /**
@@ -52,6 +133,8 @@ export interface RestoreMapping {
 }
 
 export interface RestoreRequest {
+  /** Who asked: what an artifact would change is only known once it is open. */
+  principal: Principal;
   runId?: string;
   uploadId?: string;
   mappings: RestoreMapping[];
@@ -59,8 +142,8 @@ export interface RestoreRequest {
 }
 
 export class RestoreBusyError extends Error {
-  constructor() {
-    super("Un ripristino è già in corso");
+  constructor(message = "Un ripristino è già in corso") {
+    super(message);
     this.name = "RestoreBusyError";
   }
 }
@@ -73,6 +156,10 @@ export function activeRestoreId(): string | null {
 }
 
 
+/** How many times open Postgres sessions are looked for, and how far apart. */
+const SESSION_CHECKS = 6;
+const SESSION_CHECK_DELAY_MS = 1_000;
+
 /** Where an artifact is unpacked before it is fed to an engine. */
 function restoreStaging(restoreId: string): string {
   return path.join(config.backupStagingDir, `restore-${assertBackupId(restoreId)}`);
@@ -82,6 +169,7 @@ export async function startRestore(
   request: RestoreRequest
 ): Promise<{ restoreId: string; done: Promise<void> }> {
   if (globalRef.__runpanelRestoreActive) throw new RestoreBusyError();
+  if (isPanelClosing()) throw new RestoreBusyError(PANEL_CLOSING_MESSAGE);
 
   // Claimed before the first await, so two starts cannot both pass the check;
   // released only by its owner.
@@ -141,7 +229,7 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
    * projects through their drivers, and by id the containers that still had a
    * volume open after that.
    */
-  const stopped: Stopped = { projects: [], containers: [] };
+  const stopped: Stopped = { projects: [], containers: [], locks: [], held: new Set() };
   let failure: string | null = null;
 
   try {
@@ -153,6 +241,11 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
     if (planned.length === 0) throw new Error("Nessun elemento selezionato");
 
     emit(`${planned.length} element${planned.length === 1 ? "o" : "i"} da ripristinare`);
+
+    // Before the safety copy and before anything is stopped: a restore that is
+    // not theirs must leave every service exactly as it found it.
+    await refuseBeyondPermissions(request.principal, planned, artifacts, archive, staging);
+    await holdTargets(planned, artifacts, stopped);
 
     // The single most valuable step: a copy of exactly what is about to be
     // overwritten, taken before anything is touched and exempt from retention.
@@ -198,6 +291,7 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
       }
     }
     await startContainers(backupDocker, stopped.containers, emit);
+    for (const release of stopped.locks) release();
 
     fs.rmSync(staging, { recursive: true, force: true });
     log.flush();
@@ -312,6 +406,56 @@ async function loadArtifacts(request: RestoreRequest): Promise<Map<string, Resto
 }
 
 
+// --- Who may apply what -------------------------------------------------------
+
+/**
+ * The line `PATCH /api/projects/:id` draws, applied to what the archive holds.
+ *
+ * It cannot be drawn in the route with the other restore checks: the runtime,
+ * the mounts and the source are inside the encrypted artifact, and the archive
+ * may first have to come down from S3, well after the 202. Restoring a
+ * project's repository needs no reading, so `restoreProblem` refuses that one.
+ */
+async function refuseBeyondPermissions(
+  principal: Principal,
+  planned: RestoreMapping[],
+  artifacts: Map<string, RestorableArtifact>,
+  archive: string,
+  staging: string
+): Promise<void> {
+  if (principal.isOwner) return;
+  const db = await getDb();
+
+  for (const mapping of planned) {
+    const artifact = artifacts.get(mapping.artifactId);
+    if (artifact?.kind !== "project-config") continue;
+
+    const { project } = await readProjectConfig(artifact, archive, staging);
+    const targetId = mapping.targetId ?? project.id;
+    const current = await db
+      .selectFrom("projects")
+      .select(["source_type", "source_url", "source_branch"])
+      .where("id", "=", targetId)
+      .executeTakeFirst();
+    if (!current) throw new Error("Il progetto di destinazione non esiste più");
+
+    const problem = configRestoreProblem(
+      { host: hasPermission(principal, "host"), github: hasPermission(principal, "github") },
+      current,
+      project
+    );
+    if (problem) throw new Error(problem);
+
+    const refused = await requireHostIfReaching(
+      principal,
+      targetId,
+      "ripristinare la configurazione di un progetto che raggiunge l'host",
+      { runtimeType: project.runtime_type, builderConfig: project.builder_config }
+    );
+    if (refused) throw new Error(((await refused.json()) as { error: string }).error);
+  }
+}
+
 // --- The safety copy ---------------------------------------------------------
 
 async function takeSafetyBackup(
@@ -389,15 +533,15 @@ async function restoreArtifact(
 
   switch (artifact.kind) {
     case "service-db":
-      return restoreDatabase(artifact, mapping, archive, staging, emit);
+      return restoreDatabase(artifact, mapping, archive, staging, emit, stopped);
     case "panel-store":
       return restorePanelStore(artifact, archive, emit);
     case "project-config":
-      return restoreProjectConfig(artifact, mapping, archive, staging, emit);
+      return restoreProjectConfig(artifact, mapping, archive, staging, emit, stopped);
     case "project-volume":
       return restoreVolume(artifact, mapping, archive, staging, emit, stopped);
     case "project-repo":
-      return restoreRepo(artifact, mapping, archive, emit);
+      return restoreRepo(artifact, mapping, archive, emit, stopped);
     default:
       throw new Error(`Non so ripristinare un elemento di tipo "${artifact.kind}"`);
   }
@@ -431,68 +575,115 @@ async function requireService(id: string, expectedType: string): Promise<Service
   return service;
 }
 
+/**
+ * Refuse while anything but this restore is connected to a Postgres server.
+ *
+ * The script starts with `DROP DATABASE`, in order. Postgres refuses to drop a
+ * database in use and `ON_ERROR_STOP` ends the script right there: the databases
+ * before it are gone and nothing has been restored. Asked a few times, because an
+ * app just stopped takes a moment to let go. Not terminated: as in the database
+ * page, ending other people's sessions is not what was confirmed.
+ */
+async function refuseOpenSessions(target: ServiceTarget, env: Record<string, string>): Promise<void> {
+  const sql =
+    "SELECT string_agg(DISTINCT datname, ', ') FROM pg_stat_activity " +
+    "WHERE datname IS NOT NULL AND pid <> pg_backend_pid() AND backend_type = 'client backend'";
+
+  let busy = "";
+  for (let attempt = 0; attempt < SESSION_CHECKS; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, SESSION_CHECK_DELAY_MS));
+    const result = await dockerTry(
+      [...execArgs(target, env), "psql", "-U", target.credentials.user, "-d", "postgres", "-tAc", sql],
+      { env, timeout: 15_000 }
+    );
+    if (!result) throw new Error("Il servizio non risponde: niente è stato toccato.");
+    busy = result.stdout.trim();
+    if (!busy) return;
+  }
+
+  throw new Error(
+    `Ci sono ancora connessioni aperte su ${busy}: chiudile e ripeti il ripristino. Niente è stato toccato.`
+  );
+}
+
 async function restoreDatabase(
   artifact: RestorableArtifact,
   mapping: RestoreMapping,
   archive: string,
   staging: string,
-  emit: (line: string) => void
+  emit: (line: string) => void,
+  stopped: Stopped
 ): Promise<void> {
   const engine = String(artifact.meta.engine ?? "");
   const service = await requireService(mapping.targetId ?? artifact.refId ?? "", engine);
   const target = serviceTarget(service);
   const file = await extract(archive, artifact.entryPath, staging);
 
+  // An app holding its connections would stop the Postgres script halfway, and on
+  // any engine a deploy's migration would run into the data being replaced.
+  if (service.project_id) {
+    const db = await getDb();
+    const owner = await db
+      .selectFrom("projects")
+      .selectAll()
+      .where("id", "=", service.project_id)
+      .executeTakeFirst();
+    if (owner) await takeDown(owner, stopped, emit);
+  }
+
   if (engine === "postgresql") {
     // pg_dumpall and pg_dump --create both carry their own DROP/CREATE, so the
     // restore connects to `postgres` and lets the script do the rest.
+    //
+    // `-i` on all three engines below: without it `docker exec` does not attach
+    // stdin, the client reads an empty script and exits 0, and a restore that
+    // wrote nothing reports success.
+    const env = { PGPASSWORD: target.credentials.password };
+    await refuseOpenSessions(target, env);
     await dockerFromFile(
       [
-        ...execArgs(target, { PGPASSWORD: target.credentials.password }),
-        "psql",
-        "-v", "ON_ERROR_STOP=1",
-        "-U", target.credentials.user,
-        "-d", "postgres",
+        ...execArgs(target, env, { interactive: true }),
+        ...postgresRestoreCommand(target.credentials.user, artifact.meta.tool),
       ],
       file,
-      { decompress: true, onStderr: (line) => emit(`  ${line}`) }
+      { env, decompress: true, onStderr: (line) => emit(`  ${line}`) }
     );
   } else if (engine === "mysql") {
+    const env = { MYSQL_PWD: target.credentials.password };
     await dockerFromFile(
-      [...execArgs(target, { MYSQL_PWD: target.credentials.password }), "mysql", "-u", "root"],
+      [...execArgs(target, env, { interactive: true }), "mysql", "-u", "root"],
       file,
-      { decompress: true, onStderr: (line) => emit(`  ${line}`) }
+      { env, decompress: true, onStderr: (line) => emit(`  ${line}`) }
     );
     // Some versions' --all-databases includes the `mysql` schema itself, and
     // the grants it just rewrote are not live until this runs.
     await dockerTry(
-      [
-        ...execArgs(target, { MYSQL_PWD: target.credentials.password }),
-        "mysql", "-u", "root", "-e", "FLUSH PRIVILEGES",
-      ],
-      { timeout: 30_000 }
+      [...execArgs(target, env), "mysql", "-u", "root", "-e", "FLUSH PRIVILEGES"],
+      { env, timeout: 30_000 }
     );
   } else if (engine === "mongodb") {
+    const { env, argv } = mongoToolCall(target, ["mongorestore", "--archive", "--gzip", "--drop"]);
     await dockerFromFile(
-      [
-        ...execArgs(target, {}),
-        "mongorestore",
-        "--archive",
-        "--gzip",
-        "--drop",
-        "-u", target.credentials.user,
-        "-p", target.credentials.password,
-        "--authenticationDatabase", "admin",
-      ],
+      [...execArgs(target, env, { interactive: true }), ...argv],
       file,
       // mongodump already gzipped it, and mongorestore is being told to expect
       // that — decompressing on our side would hand it the wrong thing.
-      { decompress: false, onStderr: (line) => emit(`  ${line}`) }
+      { env, decompress: false, onStderr: (line) => emit(`  ${line}`) }
     );
   } else if (engine === "redis") {
     await restoreRedis(service, file, emit);
   } else {
     throw new Error(`Motore "${engine}" non supportato per il ripristino`);
+  }
+
+  // A full MySQL or Mongo dump carries its server's users. On another service
+  // they replace the ones the panel and the linked apps know: said here, because
+  // a run ending in success would leave them all locked out with no explanation.
+  if (!(await canSignIn(target, engine))) {
+    throw new Error(
+      "I dati sono stati ripristinati, ma il dump ha sostituito gli utenti del servizio: " +
+        "le credenziali salvate nel pannello non funzionano più. Servono quelle del servizio di origine."
+    );
   }
 
   const admin = databaseAdmin(service.type);
@@ -583,18 +774,29 @@ async function restorePanelStore(
   );
 }
 
+interface ProjectConfigPayload {
+  project: ProjectsTable;
+  envVars: { key: string; value: string }[];
+}
+
+async function readProjectConfig(
+  artifact: RestorableArtifact,
+  archive: string,
+  staging: string
+): Promise<ProjectConfigPayload> {
+  const file = await extract(archive, artifact.entryPath, staging);
+  return JSON.parse(decrypt(fs.readFileSync(file, "utf8"))) as ProjectConfigPayload;
+}
+
 async function restoreProjectConfig(
   artifact: RestorableArtifact,
   mapping: RestoreMapping,
   archive: string,
   staging: string,
-  emit: (line: string) => void
+  emit: (line: string) => void,
+  stopped: Stopped
 ): Promise<void> {
-  const file = await extract(archive, artifact.entryPath, staging);
-  const payload = JSON.parse(decrypt(fs.readFileSync(file, "utf8"))) as {
-    project: ProjectsTable;
-    envVars: { key: string; value: string }[];
-  };
+  const payload = await readProjectConfig(artifact, archive, staging);
 
   const db = await getDb();
   const targetId = mapping.targetId ?? payload.project.id;
@@ -607,17 +809,20 @@ async function restoreProjectConfig(
 
   if (!existing) throw new Error("Il progetto di destinazione non esiste più");
 
+  // A deploy under way has read the row this replaces.
+  holdProject(existing.id, stopped);
+
   // One transaction: a configuration applied halfway is worse than one not
   // applied at all, because nothing says which half.
   await db.transaction().execute(async (trx) => {
     await trx
       .updateTable("projects")
       .set({
-        builder_config: payload.project.builder_config,
+        builder_config: sealContract(payload.project.builder_config, targetId),
         port: payload.project.port,
         runtime_type: payload.project.runtime_type,
         source_type: payload.project.source_type,
-        source_url: payload.project.source_url,
+        source_url: payload.project.source_url && stripRemoteCredentials(payload.project.source_url),
         source_branch: payload.project.source_branch,
         app_name: payload.project.app_name,
         // The archive describes a configuration, and a pin is not part of one —
@@ -694,11 +899,9 @@ async function restoreVolume(
   // Writing into a volume a running container has mounted is how you get a
   // half-updated dataset, so the project goes down first and comes back in the
   // caller's `finally`.
-  if (!stopped.projects.some((entry) => entry.slug === project.slug)) {
-    emit(`  fermo ${project.slug}…`);
-    await processManager.stop(project.slug, project.runtime_type).catch(() => {});
-    stopped.projects.push({ slug: project.slug, runtime: project.runtime_type });
-  }
+  // A deploy in the middle would bring the app back onto a half-written volume,
+  // which is what the lock in there is for.
+  await takeDown(project, stopped, emit);
 
   // The driver's stop is best-effort — a Compose one needs the compose file in
   // the checkout and swallows its own failure — so what it left running is
@@ -722,7 +925,8 @@ async function restoreRepo(
   artifact: RestorableArtifact,
   mapping: RestoreMapping,
   archive: string,
-  emit: (line: string) => void
+  emit: (line: string) => void,
+  stopped: Stopped
 ): Promise<void> {
   const db = await getDb();
   const project = await db
@@ -732,6 +936,9 @@ async function restoreRepo(
     .executeTakeFirst();
 
   if (!project) throw new Error("Il progetto di destinazione non esiste più");
+
+  // A build running in this checkout would read files as they are replaced.
+  holdProject(project.id, stopped);
 
   const prefix = String(artifact.meta.prefix ?? artifact.entryPath);
   const entries = (await listArchiveEntries(archive)).filter((entry) =>

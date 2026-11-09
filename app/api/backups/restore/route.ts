@@ -94,6 +94,7 @@ export async function POST(request: NextRequest) {
 
     try {
       const { restoreId, done } = await startRestore({
+        principal: denied.principal,
         runId: data.runId,
         uploadId: data.uploadId,
         mappings: data.targets,

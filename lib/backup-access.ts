@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { projectAccess, serviceAccess, type Principal } from "./authz";
+import { hasPermission, projectAccess, serviceAccess, type Principal } from "./authz";
 import { projectRefs, serviceRefs } from "./principal";
 
 /**
@@ -85,7 +85,10 @@ export async function runVisible(principal: Principal, runId: string): Promise<b
 /**
  * Why this restore is not theirs, or null. A non-owner restores only from a
  * run they can see, never from an uploaded archive, never the panel's store,
- * and only onto projects and services they manage.
+ * and only onto projects and services they manage. A repository is the code a
+ * project runs, so it also takes `host` (see lib/host-guard.ts). What a
+ * configuration would change is inside the artifact: `startRestore` checks that
+ * once the archive is open, before it touches anything.
  */
 export async function restoreProblem(
   principal: Principal,
@@ -111,6 +114,9 @@ export async function restoreProblem(
     const ok =
       artifact.kind === "service-db" ? can.service(target) : artifact.kind.startsWith("project-") ? can.project(target) : false;
     if (!ok) return "Puoi ripristinare solo su progetti e servizi che gestisci";
+    if (artifact.kind === "project-repo" && !hasPermission(principal, "host")) {
+      return 'Serve il permesso "Accesso all\'host": cambiare il codice che il progetto esegue';
+    }
   }
   return null;
 }
