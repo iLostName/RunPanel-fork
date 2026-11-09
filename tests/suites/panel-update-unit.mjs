@@ -65,7 +65,7 @@ export async function run({ repoRoot }) {
   const { isPanelUpdateInterval, DEFAULT_PANEL_UPDATE_INTERVAL, PANEL_UPDATE_INTERVALS } =
     await load("lib", "polling.ts");
   const { releaseLabel } = await load("lib", "version.ts");
-  const { hasUpdate, isUpdateActive } = await load("lib", "panel-update.ts");
+  const { hasUpdate, isUpdateActive, pendingCommits } = await load("lib", "panel-update.ts");
 
   // --- The commit log -------------------------------------------------------
   //
@@ -332,6 +332,20 @@ export async function run({ repoRoot }) {
   r.check(
     "a check taken against a different HEAD is ignored",
     hasUpdate(status({ checkout: { ...status().checkout, head: "f".repeat(40) } })) === false
+  );
+
+  const stored = { error: null, behind: 15, localSha: "a".repeat(40) };
+  r.check("a server card counts a check taken on this HEAD", pendingCommits(stored, "a".repeat(40)) === 15);
+  r.check("but not one taken before the update that installed them", pendingCommits(stored, "b".repeat(40)) === 0);
+  r.check("nor one whose HEAD cannot be read", pendingCommits(stored, null) === 0);
+  r.check("nor a failed one", pendingCommits({ ...stored, error: "boom" }, "a".repeat(40)) === 0);
+  r.check(
+    "the server summary uses the same rule",
+    readFileSync(join(repoRoot, "app", "api", "server-summary", "route.ts"), "utf8").includes("pendingCommits(check, head)")
+  );
+  r.check(
+    "a moved HEAD is checked again at the next tick",
+    readFileSync(join(repoRoot, "services", "panel-update", "check.ts"), "utf8").includes("!(await headMoved(previous))")
   );
 
   r.check("a live run is active", isUpdateActive(status({ busy: "run1" })) === true);

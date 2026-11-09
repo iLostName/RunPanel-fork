@@ -7,7 +7,9 @@ import { json } from "@/services/cluster/aggregate";
 import { diagnosticsCache } from "@/services/diagnostics";
 import { isDockerAvailable } from "@/services/docker/cli";
 import { hostMetrics } from "@/services/host-metrics";
+import { pendingCommits } from "@/lib/panel-update";
 import { lastCheck } from "@/services/panel-update/check";
+import { readCheckout } from "@/services/panel-update/git";
 import { panelRelease } from "@/services/panel-update/release";
 
 /**
@@ -50,7 +52,11 @@ export async function GET() {
   let update: ServerSummary["update"] = null;
   if (can("updates")) {
     const check = await lastCheck();
-    update = { behind: check?.behind ?? 0 };
+    // Against the checkout as it is now, like the banner: a check taken before
+    // the last update still counts the commits that update installed. Git is
+    // asked only when there is a count to confirm.
+    const head = check && check.behind > 0 && !check.error ? (await readCheckout()).head : null;
+    update = { behind: pendingCommits(check, head) };
   }
 
   const summary: ServerSummary = {

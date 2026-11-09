@@ -218,7 +218,11 @@ export function startPanelUpdatePoller(): void {
 export async function updateCheckTick(now = new Date()): Promise<PanelUpdateCheck | null> {
   try {
     const previous = await lastCheck();
-    if (previous && !isDue(previous, now, (await updateCheckIntervalSeconds()) * 1000)) {
+    if (
+      previous &&
+      !isDue(previous, now, (await updateCheckIntervalSeconds()) * 1000) &&
+      !(await headMoved(previous))
+    ) {
       return null;
     }
     return await checkPanelUpdate(now);
@@ -228,6 +232,17 @@ export async function updateCheckTick(now = new Date()): Promise<PanelUpdateChec
     console.error("[panel-update] Controllo non riuscito:", err);
     return null;
   }
+}
+
+/**
+ * The checkout is on another commit than the one the stored check compared: an
+ * update was installed, by the panel or by hand. Its count is about the old
+ * HEAD, so it is asked again at the next tick instead of at the next interval,
+ * which is 45 seconds after the restart an update ends with.
+ */
+async function headMoved(previous: PanelUpdateCheck): Promise<boolean> {
+  const { head } = await readCheckout();
+  return Boolean(head && previous.localSha && head !== previous.localSha);
 }
 
 function isDue(previous: PanelUpdateCheck, now: Date, intervalMs: number): boolean {
