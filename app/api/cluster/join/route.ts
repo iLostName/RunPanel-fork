@@ -5,6 +5,7 @@ import { hashToken } from "@/lib/cluster-sign";
 import { trustedClientIp } from "@/lib/client-ip";
 import { getDb, nowIso } from "@/lib/db";
 import { consumeRateLimit } from "@/lib/rate-limit";
+import { readBodyCapped } from "@/lib/read-body";
 import { generateId } from "@/lib/utils";
 import { pingMember } from "@/services/cluster/client";
 import { localSnapshot } from "@/services/cluster/directory";
@@ -37,14 +38,11 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (Number.parseInt(request.headers.get("content-length") ?? "0", 10) > MAX_BODY_BYTES) {
-    return NextResponse.json({ error: "Richiesta troppo grande" }, { status: 413 });
-  }
   let body: unknown;
   try {
-    const raw = await request.text();
-    if (raw.length > MAX_BODY_BYTES) return NextResponse.json({ error: "Richiesta troppo grande" }, { status: 413 });
-    body = JSON.parse(raw);
+    const raw = await readBodyCapped(request, MAX_BODY_BYTES);
+    if (!raw) return NextResponse.json({ error: "Richiesta troppo grande" }, { status: 413 });
+    body = JSON.parse(raw.toString("utf8"));
   } catch {
     return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
   }

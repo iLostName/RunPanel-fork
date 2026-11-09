@@ -178,9 +178,16 @@ export async function run({ base }) {
     json("PATCH", { access: { permissions: [], grants: [{ scope: "project", scopeId: projectId, level: "manage", terminal: false }] } })
   );
   res = await dev.call(`/api/projects/${projectId}/hosts`, json("POST", { domainId, subdomain: "dev" }));
-  r.check("managing the project is enough to assign a name", res.status === 201, show(res));
+  r.check("managing the project is not enough to assign a name", res.status === 403, show(res));
+
+  await owner.call(
+    `/api/users/${devId}`,
+    json("PATCH", { access: { permissions: ["host"], grants: [{ scope: "project", scopeId: projectId, level: "manage", terminal: false }] } })
+  );
+  res = await dev.call(`/api/projects/${projectId}/hosts`, json("POST", { domainId, subdomain: "dev" }));
+  r.check("with the host permission too it can", res.status === 201, show(res));
   res = await dev.call(`/api/projects/${projectId}/hosts/${res.body.host?.id}`, { method: "DELETE" });
-  r.check("and to remove it", res.status === 200, show(res));
+  r.check("and remove it", res.status === 200, show(res));
 
   // --- removal ---------------------------------------------------------------------------------------
   res = await owner.call(`/api/projects/${projectId}/hosts/${hostId}`, { method: "DELETE" });

@@ -7,6 +7,7 @@ import { getEnv } from "../env";
 import { ensureDataDirs } from "../config";
 import type { Database } from "./schema";
 import { StaticMigrationProvider } from "./migrations";
+import { restrictStoreFiles } from "./store-permissions";
 import { nowIso, rowCount } from "./compat";
 
 export type { Database } from "./schema";
@@ -79,6 +80,7 @@ async function createDialect(): Promise<Dialect> {
 
     const sqlite = new SQLite(dbConfig.file);
     sqlite.pragma("journal_mode = WAL");
+    restrictStoreFiles(dbConfig.file);
     sqlite.pragma("foreign_keys = ON");
     sqlite.pragma("busy_timeout = 5000");
     // The pairing WAL is meant to have. The default `FULL` fsyncs on every

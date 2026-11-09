@@ -16,6 +16,7 @@ import { getDb, nowIso } from "@/lib/db";
 import type { Database } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { authzEvents } from "@/services/events";
+import { revokeSessionsOnNewPassword } from "./revoke-sessions";
 import { clearCluster, clusterState, setClusterRole } from "./state";
 
 /**
@@ -113,6 +114,7 @@ export async function applySnapshot(remote: DirectorySnapshot): Promise<ApplyRes
   const local = await localSnapshot();
   const plan = mergeDirectory(local, remote);
   const db = await getDb();
+  const revokedSessions: Array<{ userId: string; sessionId: string }> = [];
 
   await db.transaction().execute(async (trx) => {
     for (const id of plan.users.remove) {
@@ -124,6 +126,8 @@ export async function applySnapshot(remote: DirectorySnapshot): Promise<ApplyRes
       if (u.is_owner === 0) await trx.updateTable("users").set({ is_owner: 0 }).where("id", "=", u.id).execute();
     }
     for (const u of plan.users.upsert) {
+      const sessionIds = await revokeSessionsOnNewPassword(trx, u.id, u.password_hash);
+      revokedSessions.push(...sessionIds.map((sessionId) => ({ userId: u.id, sessionId })));
       await upsertUser(trx, u);
     }
 
@@ -162,6 +166,9 @@ export async function applySnapshot(remote: DirectorySnapshot): Promise<ApplyRes
     await writeSharedSetting(s.key, s.value, s.updated_at);
   }
 
+  for (const { userId, sessionId } of revokedSessions) {
+    authzEvents.emit(userId, { type: "session-revoked", sessionId });
+  }
   for (const id of plan.changedUserIds) authzEvents.emit(id, { type: "user-changed" });
 
   // Revoked by another member: back to solo, like /api/cluster/leave. A panel

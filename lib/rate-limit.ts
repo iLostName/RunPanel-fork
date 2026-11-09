@@ -72,6 +72,22 @@ export async function clearRateLimit(key: string): Promise<void> {
 }
 
 /**
+ * Give back one attempt, without touching what anybody else used.
+ *
+ * For a shared limit, where clearing would let one success wipe everyone's
+ * failures: what stays counted is the failures, and those only ever expire.
+ */
+export async function refundRateLimit(key: string): Promise<void> {
+  const db = await getDb();
+  await db
+    .updateTable("rate_limits")
+    .set((eb) => ({ count: eb("count", "-", 1) }))
+    .where("key", "=", key)
+    .where("count", ">", 0)
+    .execute();
+}
+
+/**
  * Drop windows that have already elapsed.
  *
  * Not housekeeping for its own sake: the key of the login limiter contains a

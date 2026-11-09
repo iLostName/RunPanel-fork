@@ -24,6 +24,18 @@ const PUBLIC = new Set([
   "cluster/join/route.ts",
 ]);
 
+/**
+ * Outside the matcher of `proxy.ts`, so nothing checks the origin for them, and
+ * written to from a browser with the session cookie.
+ */
+const OWN_ORIGIN_CHECK = [
+  "auth/login/route.ts",
+  "auth/logout/route.ts",
+  "auth/invite/route.ts",
+  "upload/route.ts",
+  "nodes/[nodeId]/[...path]/route.ts",
+];
+
 const GUARD = /await\s+require(User|Owner|Permission|Project|Service|Folder|Member)\s*\(/;
 const HANDLER = /export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(/g;
 
@@ -58,6 +70,9 @@ export async function run({ repoRoot }) {
   }
 
   r.check("every handler calls a guard", unguarded.length === 0, unguarded.join(", "));
+
+  const unchecked = OWN_ORIGIN_CHECK.filter((rel) => !readFileSync(join(apiDir, rel), "utf8").includes("refuseCrossOrigin(request)"));
+  r.check("the browser routes the proxy skips check the origin themselves", unchecked.length === 0, unchecked.join(", "));
   r.check("nothing uses the old requireAuth", legacy.length === 0, legacy.join(", "));
   return r.result();
 }

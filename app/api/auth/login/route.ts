@@ -6,12 +6,13 @@ import { claimOwner, findLoginUser, normalizeEmail, recordLogin } from "@/lib/us
 import { trustedClientIp } from "@/lib/client-ip";
 import { linkSetupSchema } from "@/lib/cluster-schema";
 import { isValidSetupToken } from "@/lib/setup-token";
-import { clearRateLimit, consumeRateLimit } from "@/lib/rate-limit";
+import { LOGIN_GLOBAL_KEY, bucketsResetByLogin } from "@/lib/login-buckets";
+import { clearRateLimit, consumeRateLimit, refundRateLimit } from "@/lib/rate-limit";
+import { readBodyCapped } from "@/lib/read-body";
+import { refuseCrossOrigin } from "@/lib/request-origin";
 import { joinCluster } from "@/services/cluster/join";
 import { isNodeOnly } from "@/services/cluster/state";
 import { panelRelease } from "@/services/panel-update/release";
-
-const clearBucketsFor = (buckets: { key: string }[]) => Promise.all(buckets.map((bucket) => clearRateLimit(bucket.key)));
 
 /** Per client address, once there is a client address worth counting. */
 const MAX_ATTEMPTS_PER_IP = 5;
@@ -28,6 +29,7 @@ const MAX_ATTEMPTS_PER_IP = 5;
  * against a password of at least eight characters, and far enough above a
  * mistyped password that an operator will not meet it. Configure
  * `RUNPANEL_TRUSTED_PROXY_HOPS` and the tighter per-address limit applies too.
+ * A successful login does not reset it: see `lib/login-buckets.ts`.
  */
 const MAX_ATTEMPTS_GLOBAL = 20;
 
@@ -38,23 +40,33 @@ const MAX_ATTEMPTS_GLOBAL = 20;
  * `request.json()` buffers whatever arrives before anything can look at it. The
  * rate limiter caps how MANY of these an unauthenticated caller gets, not how
  * big each one is — twenty concurrent multi-gigabyte POSTs are inside the
- * budget. Refused on the declared length, the same cheap first line the upload
- * route takes, then again on what was actually read.
+ * budget. `readBodyCapped` refuses on the declared length, then on the bytes as
+ * they arrive.
  */
 const MAX_BODY_BYTES = 8 * 1024;
-const GLOBAL_KEY = "login:global";
 /** Per account named in the form, so one account cannot be guessed at full speed. */
 const MAX_ATTEMPTS_PER_EMAIL = 10;
 const WINDOW_MS = 15 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
+  // Before the limiter, so a page elsewhere cannot spend the attempts either.
+  const refused = refuseCrossOrigin(request);
+  if (refused) return refused;
+
   const ip = trustedClientIp(request);
 
   // Both are consumed on every attempt. The per-address bucket only exists when
   // `RUNPANEL_TRUSTED_PROXY_HOPS` says an address can be believed — counting by
   // a header the caller chooses is not a limit, it is a formality.
-  const buckets = [{ key: GLOBAL_KEY, limit: MAX_ATTEMPTS_GLOBAL }];
+  const buckets = [{ key: LOGIN_GLOBAL_KEY, limit: MAX_ATTEMPTS_GLOBAL }];
   if (ip) buckets.unshift({ key: `login:${ip}`, limit: MAX_ATTEMPTS_PER_IP });
+  // The global ceiling is for guesses: a success gives back its own attempt, or
+  // twenty good logins in a window would lock everybody out.
+  const clearBuckets = () =>
+    Promise.all([
+      ...bucketsResetByLogin(buckets).map((bucket) => clearRateLimit(bucket.key)),
+      refundRateLimit(LOGIN_GLOBAL_KEY),
+    ]);
 
   for (const bucket of buckets) {
     const limit = await consumeRateLimit(bucket.key, bucket.limit, WINDOW_MS);
@@ -66,21 +78,14 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const declaredLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
-  if (declaredLength > MAX_BODY_BYTES) {
-    return NextResponse.json({ error: "Richiesta troppo grande" }, { status: 413 });
-  }
-
-  // A malformed body is a bad request, not a crash. Read as text first: a
-  // chunked request declares no length, so the header check above sees nothing
-  // and this is where the size is actually known.
+  // A malformed body is a bad request, not a crash.
   let body: unknown;
   try {
-    const raw = await request.text();
-    if (raw.length > MAX_BODY_BYTES) {
+    const raw = await readBodyCapped(request, MAX_BODY_BYTES);
+    if (!raw) {
       return NextResponse.json({ error: "Richiesta troppo grande" }, { status: 413 });
     }
-    body = JSON.parse(raw);
+    body = JSON.parse(raw.toString("utf8"));
   } catch {
     return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
   }
@@ -116,7 +121,7 @@ export async function POST(request: NextRequest) {
     }
     const outcome = await joinCluster(parsed.data, (await panelRelease()).label);
     if (!outcome.ok) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
-    await clearBucketsFor(buckets);
+    await clearBuckets();
     return NextResponse.json({ success: true, linked: true, role: outcome.role });
   }
 
@@ -147,8 +152,6 @@ export async function POST(request: NextRequest) {
     }
     buckets.push({ key, limit: MAX_ATTEMPTS_PER_EMAIL });
   }
-
-  const clearBuckets = () => Promise.all(buckets.map((bucket) => clearRateLimit(bucket.key)));
 
   // First-run setup: the owner account, with an email from the start.
   if (setup && (await isFirstRun())) {

@@ -69,7 +69,18 @@ export async function startServer({ driver = "sqlite", databaseUrl, env = {} } =
     },
     stdio: ["ignore", "pipe", "pipe"],
     shell: process.platform === "win32",
+    // `npx` starts next as a child. Its own group lets `stop` reach both: killing
+    // only npx left the server on its port, and the next run's server, unable to
+    // bind, was answered for by the old one.
+    detached: process.platform !== "win32",
   });
+
+  const end = () => {
+    try {
+      if (process.platform === "win32") child.kill();
+      else process.kill(-child.pid, "SIGTERM");
+    } catch { /* already gone */ }
+  };
 
   let log = "";
   child.stdout?.on("data", (d) => { log += d.toString(); });
@@ -88,7 +99,7 @@ export async function startServer({ driver = "sqlite", databaseUrl, env = {} } =
           port,
           getLog: () => log,
           async stop() {
-            child.kill();
+            end();
             // Next spawns a child of its own on Windows; make sure the port frees.
             if (process.platform === "win32") {
               try {
@@ -107,7 +118,7 @@ export async function startServer({ driver = "sqlite", databaseUrl, env = {} } =
     await sleep(400);
   }
 
-  child.kill();
+  end();
   throw new Error(`Server did not start on ${port}.\n${log.slice(-2000)}`);
 }
 
