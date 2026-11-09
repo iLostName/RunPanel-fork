@@ -10,7 +10,7 @@ import { Segmented } from "@/components/ui/Segmented";
 import { SettingToggle } from "@/components/ui/SettingToggle";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { formatWhen } from "@/lib/format";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * A restart on a schedule, for a project or a service.
@@ -78,6 +78,7 @@ export function ScheduledRestart({
   onSaved: (row: Record<string, unknown>) => void;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const [enabled, setEnabled] = useState(cron !== "");
   const [draft, setDraft] = useState(cron || PRESETS[0].cron);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -182,7 +183,7 @@ export function ScheduledRestart({
           <FieldHint>
             Cinque campi: minuto, ora, giorno del mese, mese, giorno della settimana. L&apos;ora è quella
             del fuso scelto in{" "}
-            <Link href="/settings" className="text-accent hover:underline">
+            <Link href={href("/settings")} className="text-accent hover:underline">
               Impostazioni › Pannello
             </Link>
             .

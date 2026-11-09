@@ -31,6 +31,7 @@ import { DataSection } from "./_components/DataSection";
 import { AccessPanel } from "@/components/users/AccessPanel";
 import type { Credentials, From, Service, ServiceTabId } from "./_components/types";
 import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
+import { serviceControlText } from "@/lib/status";
 import { locateMember } from "@/lib/locate-member";
 
 /**
@@ -227,13 +228,13 @@ export default function ServiceDetailPage() {
       });
       if (!res.ok) {
         const body = await res.json();
-        toast.error(body.error ?? `Azione "${action}" fallita`);
+        toast.error(body.error ?? serviceControlText(action).failed);
         return;
       }
-      toast.success(`Azione "${action}" eseguita`);
+      toast.success(serviceControlText(action).done);
       refresh();
     } catch {
-      toast.error(`Azione "${action}" fallita`);
+      toast.error(serviceControlText(action).failed);
     }
   }
 

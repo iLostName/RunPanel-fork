@@ -88,7 +88,7 @@ export function CheckList({
             <Icon icon={tone.icon} width={16} className={cn("mt-0.5 shrink-0", tone.className)} aria-hidden />
             <div className="min-w-0 flex-1">
               <p className="text-foreground text-sm">{check.title}</p>
-              <p className="text-muted mt-0.5 text-xs">{check.detail}</p>
+              <p className="text-muted mt-0.5 text-xs break-words">{check.detail}</p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {check.fix && (

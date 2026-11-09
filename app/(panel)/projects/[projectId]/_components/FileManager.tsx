@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import { Button, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
@@ -24,7 +24,7 @@ interface FileEntry {
  * file tree and a textarea holding an entire file — for users who were not even
  * looking at it.
  */
-export function FileManager({ projectId, runtimeType }: { projectId: string; runtimeType: string }) {
+export const FileManager = memo(function FileManager({ projectId, runtimeType }: { projectId: string; runtimeType: string }) {
   const api = useNodeApi();
   const [currentPath, setCurrentPath] = useState("/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -277,4 +277,4 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
       </div>
     </div>
   );
-}
+});

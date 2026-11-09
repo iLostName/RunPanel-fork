@@ -15,7 +15,7 @@ import { isCommitSha } from "@/lib/git-ref";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { CommitsResponse, Project } from "./types";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 const PAGE_SIZE = 20;
 const MAX_SIZE = 100;
@@ -45,6 +45,7 @@ export function VersionDialog({
   onDeployCommit: (commitSha: string, branch: string) => Promise<void>;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const [branch, setBranch] = useState(project.source_branch);
   const [selected, setSelected] = useState<string | null>(null);
   const [size, setSize] = useState(PAGE_SIZE);
@@ -161,7 +162,7 @@ export function VersionDialog({
             description={unavailableMessage}
             action={
               data?.reason === "no-token" ? (
-                <LinkButton href="/github" variant="secondary">
+                <LinkButton href={href("/github")} variant="secondary">
                   Collega GitHub
                 </LinkButton>
               ) : error ? (

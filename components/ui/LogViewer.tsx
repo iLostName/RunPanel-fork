@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export interface LogLine {
@@ -18,8 +18,12 @@ export interface LogLine {
  *    yanked you to the bottom on the next line;
  *  - it keyed rows by array index, which makes React rewrite every row whenever
  *    the buffer is trimmed.
+ *
+ * memo()'d because the page holds several buffers and re-renders on every flush
+ * of any of them: a build line must not reconcile the 2000 rows of the process
+ * output beside it. `lines` only changes identity when its buffer does.
  */
-export function LogViewer({
+export const LogViewer = memo(function LogViewer({
   lines,
   emptyMessage = "Nessun output.",
   className,
@@ -98,4 +102,4 @@ export function LogViewer({
       )}
     </div>
   );
-}
+});

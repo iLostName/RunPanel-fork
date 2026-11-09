@@ -326,7 +326,7 @@ export function AppForm({
                 <p className="text-foreground text-sm">Nessun account GitHub collegato</p>
                 <p className="text-muted mt-1 text-xs">
                   Collega un token per scegliere da un elenco e per clonare i repository privati.{" "}
-                  <Link href="/github" className="text-accent hover:underline">
+                  <Link href={href("/github")} className="text-accent hover:underline">
                     Collega ora
                   </Link>
                 </p>

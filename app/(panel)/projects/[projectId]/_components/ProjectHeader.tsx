@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import Link from "next/link";
 import { Button, Dropdown } from "@heroui/react";
 import { Icon } from "@iconify/react";
@@ -19,7 +20,7 @@ import type { Project } from "./types";
  * buttons used to sit here, and on a phone they took two rows above a stats
  * strip that pushed the log below the fold.
  */
-export function ProjectHeader({
+export const ProjectHeader = memo(function ProjectHeader({
   project,
   busy,
   onDeploy,
@@ -210,4 +211,4 @@ export function ProjectHeader({
       )}
     </header>
   );
-}
+});

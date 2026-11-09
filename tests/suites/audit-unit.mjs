@@ -1,6 +1,7 @@
 import { createReporter } from "../harness.mjs";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 
 /**
  * What the activity log records, and who gets to read which entry.
@@ -12,10 +13,63 @@ import { join } from "node:path";
  */
 export const meta = { name: "audit-unit", needsDocker: false, drivers: [], standalone: true };
 
+/** The `${...}` actions, and what each can become. A new one has to be listed here. */
+const TEMPLATE_ACTIONS = {
+  "`service.console.${mode}`": ["service.console.engine", "service.console.shell"],
+  "`user.${kind}`": ["user.invite", "user.reset"],
+};
+
+function sourceFiles(dir) {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return sourceFiles(path);
+    return /\.tsx?$/.test(name) ? [path] : [];
+  });
+}
+
+/**
+ * Every action the code records, read from the calls themselves. Each call
+ * writes `category` and then `action`; the count against the calls is what keeps
+ * this honest, so a call written another way fails here instead of going unread.
+ */
+function recordedActions(repoRoot) {
+  const actions = new Set();
+  const unreadable = [];
+  let calls = 0;
+  let read = 0;
+  for (const file of ["app", "services", "lib"].flatMap((dir) => sourceFiles(join(repoRoot, dir)))) {
+    if (file.endsWith(join("lib", "audit.ts"))) continue;
+    const source = readFileSync(file, "utf8");
+    calls += [...source.matchAll(/\baudit\(\{|\bwithAudit\(\w+,\s*\{/g)].length;
+    for (const [, expression] of source.matchAll(/category:\s*"[a-z]+",\s*action:\s*([^,\n]+)/g)) {
+      read += 1;
+      const known = TEMPLATE_ACTIONS[expression.trim()];
+      const literals = [...expression.matchAll(/"([a-z-]+(?:\.[a-z-]+)+)"/g)].map((m) => m[1]);
+      if (known) known.forEach((action) => actions.add(action));
+      else if (literals.length > 0 && !expression.includes("`")) literals.forEach((action) => actions.add(action));
+      else unreadable.push(`${file}: ${expression.trim()}`);
+    }
+  }
+  return { actions, unreadable, calls, read };
+}
+
 export async function run({ repoRoot }) {
   const r = createReporter("audit-unit");
   const { AUDIT_CATEGORIES, parseEnabledCategories, shouldRecord, canSeeEntry, retentionCutoff, parseRetentionDays } =
     await import(pathToFileURL(join(repoRoot, "lib", "audit-filter.ts")).href);
+
+  // --- labels ----------------------------------------------------------------
+  {
+    const { actions, unreadable, calls, read } = recordedActions(repoRoot);
+    const page = readFileSync(join(repoRoot, "app", "(panel)", "(access)", "audit", "page.tsx"), "utf8");
+    const block = page.slice(page.indexOf("const ACTION_LABEL"), page.indexOf("/** Who did what"));
+    const labels = new Set([...block.matchAll(/^\s*"([^"]+)":/gm)].map((m) => m[1]));
+
+    r.check("the scan reads every audit call", calls > 50 && read === calls, `${read} of ${calls}`);
+    r.check("every action is a literal or a listed template", unreadable.length === 0, unreadable.join("; "));
+    const missing = [...actions].filter((action) => !labels.has(action));
+    r.check("every recorded action has a label in the log", missing.length === 0, missing.join(", "));
+  }
 
   // --- categories ------------------------------------------------------------
   {
