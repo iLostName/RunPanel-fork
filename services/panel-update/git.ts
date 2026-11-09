@@ -128,7 +128,7 @@ export function parseRemoteUrl(stdout: string): string | null {
   const value = stdout.trim();
   if (!value) return null;
   return value.replace(
-    /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/@]*)@/,
+    /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#]*)@/,
     (_all, scheme: string, userinfo: string) => {
       if (/^https?:\/\/$/i.test(scheme)) return scheme;
       const user = userinfo.split(":")[0];

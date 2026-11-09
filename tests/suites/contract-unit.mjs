@@ -1,6 +1,8 @@
 import { createReporter } from "../harness.mjs";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 /**
  * Pure checks on the contract parser — no server involved.
@@ -12,13 +14,42 @@ import { join } from "node:path";
  */
 export const meta = { name: "contract-unit", needsDocker: false, drivers: [], standalone: true };
 
+/**
+ * The real presets, from a temporary copy with the one `@/` import pointed at
+ * the file on disk: the strip-only loader cannot follow the alias, and a table
+ * retyped here would go on passing after the presets changed.
+ */
+async function loadPresets(repoRoot) {
+  const contractUrl = pathToFileURL(join(repoRoot, "lib", "deploy-contract.ts")).href;
+  const source = readFileSync(join(repoRoot, "services", "deploy-presets", "index.ts"), "utf8");
+  const dir = mkdtempSync(join(tmpdir(), "runpanel-presets-"));
+  try {
+    const file = join(dir, "index.ts");
+    writeFileSync(file, source.replace('"@/lib/deploy-contract"', JSON.stringify(contractUrl)));
+    return await import(pathToFileURL(file).href);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 export async function run({ repoRoot }) {
   const r = createReporter("contract-unit");
 
   const module = await import(
     pathToFileURL(join(repoRoot, "lib", "deploy-contract.ts")).href
   );
-  const { parseContract, parseContractJson, resolveContract, selectBuildEnv, preflight } = module;
+  const {
+    parseContract,
+    parseContractJson,
+    resolveContract,
+    resolveContractJson,
+    selectBuildEnv,
+    preflight,
+    stripPanelOnlyFields,
+    normalizeContractInput,
+    isContractInput,
+    deployContractSchema,
+  } = module;
 
   // --- legacy shape --------------------------------------------------------
   const legacy = parseContract({
@@ -34,6 +65,91 @@ export async function run({ repoRoot }) {
   r.check("legacy package manager kept", legacy.packageManager === "npm", legacy.packageManager);
   r.check("legacy docker image kept", legacy.docker.image === "nginx:1.27", legacy.docker.image);
   r.check("legacy config still receives defaults", legacy.healthcheck.enabled === true);
+
+  const templated = parseContract({ dockerTemplate: "nginx", dockerFields: { rootDir: "/srv" }, dockerImage: "nginx:1.27" });
+  r.check("a legacy template row keeps its image", templated.docker.image === "nginx:1.27", templated.docker.image);
+  r.check(
+    "a legacy key decides the shape, so current keys beside it stay ignored as they always were",
+    parseContract({ startCmd: "npm start", commands: { start: "other" } }).commands.start === "npm start"
+  );
+  r.check("legacy input with a bad value is read as empty", parseContract({ installCmd: 5 }).commands.install === undefined);
+  r.check("packageManager alone survives in either reading", parseContract({ packageManager: "bun" }).packageManager === "bun");
+
+  // --- no `version` is the current shape ------------------------------------
+  // `version` is optional, and neither the presets nor most repositories set it.
+  const versionless = parseContract({
+    commands: { start: "node server.js" },
+    build: { timeoutSec: 1800 },
+    healthcheck: { path: "/health" },
+  });
+  r.check("a contract without version keeps its commands", versionless.commands.start === "node server.js");
+  r.check("a contract without version keeps its build settings", versionless.build.timeoutSec === 1800);
+  r.check("a contract without version keeps its healthcheck", versionless.healthcheck.path === "/health");
+  r.check(
+    "a version-less contract equals the same contract with version 1",
+    JSON.stringify(versionless) ===
+      JSON.stringify(parseContract({ version: 1, commands: { start: "node server.js" }, build: { timeoutSec: 1800 }, healthcheck: { path: "/health" } }))
+  );
+  r.check("an empty contract still yields defaults", JSON.stringify(parseContract({})) === JSON.stringify(parseContract(null)));
+  r.check("a version-less contract that fails the schema yields defaults", parseContract({ build: "npm run build" }).build.timeoutSec === 900);
+
+  // What the deploy does: preset, then runpanel.json, then the panel's column.
+  const deployLayers = (presetContract, repoRaw, panelJson) => {
+    const repo = repoRaw === null ? null : stripPanelOnlyFields(repoRaw).contract;
+    let base = {};
+    for (const layer of [presetContract, repo].filter(Boolean)) base = resolveContract(layer, base);
+    return resolveContractJson(panelJson, base);
+  };
+
+  const { getPreset, DEPLOY_PRESETS } = await loadPresets(repoRoot);
+  const python = deployLayers(getPreset("python").contract, null, "{}");
+  r.check("the python preset reaches the deploy with its start command", python.commands.start?.includes("uvicorn"), python.commands.start);
+  r.check("the python preset reaches the deploy with its install command", python.commands.install?.includes("pip install"), python.commands.install);
+  r.check("the python preset reaches the deploy with its healthcheck", python.healthcheck.timeoutSec === 45, String(python.healthcheck.timeoutSec));
+
+  const next = deployLayers(getPreset("next-server").contract, null, "{}");
+  r.check("the next preset keeps its build timeout", next.build.timeoutSec === 1800, String(next.build.timeoutSec));
+  r.check("the next preset keeps its heap", next.build.nodeOptions === "--max-old-space-size=4096", next.build.nodeOptions);
+  r.check("the next preset keeps its build env prefixes", next.buildEnvPrefixes.join() === "NEXT_PUBLIC_");
+
+  for (const preset of DEPLOY_PRESETS) {
+    r.check(`preset ${preset.id} passes the schema`, deployContractSchema.safeParse(normalizeContractInput(preset.contract)).success);
+  }
+
+  const layered = deployLayers(
+    getPreset("python").contract,
+    { commands: { start: "venv/bin/gunicorn app:app" }, healthcheck: { timeoutSec: 60 } },
+    JSON.stringify({ version: 1, healthcheck: { timeoutSec: 120 } })
+  );
+  r.check("a version-less runpanel.json wins over the preset", layered.commands.start === "venv/bin/gunicorn app:app", layered.commands.start);
+  r.check("the preset fills what runpanel.json left out", layered.commands.install?.includes("pip install"), layered.commands.install);
+  r.check("the panel still wins over runpanel.json", layered.healthcheck.timeoutSec === 120, String(layered.healthcheck.timeoutSec));
+
+  const untrusted = deployLayers(null, { commands: { start: "x" }, docker: { network: "host", capAdd: ["SYS_ADMIN"] } }, "{}");
+  r.check("a version-less runpanel.json is applied", untrusted.commands.start === "x");
+  r.check("a version-less runpanel.json still cannot set panel-only fields", untrusted.docker.network === "project" && untrusted.docker.capAdd.length === 0);
+
+  // --- what PATCH refuses ---------------------------------------------------
+  const refusedByParse = (raw) => !deployContractSchema.safeParse(normalizeContractInput(raw)).success;
+  r.check("version 2 is not legacy: the schema refuses it", refusedByParse({ version: 2, commands: { start: "x" } }));
+  r.check("a string version is not legacy: the schema refuses it", refusedByParse({ version: "1", commands: { start: "x" } }));
+  r.check("an unknown version with a legacy key is not translated", refusedByParse({ version: 2, startCmd: "x" }));
+  for (const [what, raw, expected] of [
+    ["null", null, false],
+    ["an array", [], false],
+    ["a string", "x", false],
+    ["only unknown keys", { comands: { start: "x" } }, false],
+    ["legacy keys with bad values", { installCmd: 5 }, false],
+    ["an empty object", {}, true],
+    ["the current shape", { version: 1, commands: {} }, true],
+    ["the current shape without version", { commands: { start: "x" } }, true],
+    ["the legacy shape", { installCmd: "npm ci" }, true],
+    ["a stored template row", { version: 1, dockerTemplate: "nginx", dockerFields: {} }, true],
+    ["legacy keys that say nothing", { installCmd: "" }, false],
+    ["a template with nothing else", { dockerTemplate: "nginx" }, false],
+  ]) {
+    r.check(`isContractInput: ${what}`, isContractInput(raw) === expected);
+  }
 
   // --- resilience ----------------------------------------------------------
   r.check("empty config yields defaults", parseContractJson("").healthcheck.path === "/");
@@ -73,7 +189,7 @@ export async function run({ repoRoot }) {
   // JSON.parse keeps "__proto__" as an own key. The pipeline passes the repo
   // layer as the override side, where an unguarded merge would assign it and
   // let the schema read panel-only docker fields from the prototype.
-  const { stripPanelOnlyFields, safeJsonReviver } = module;
+  const { safeJsonReviver } = module;
   const protoPayload = '{"version":1,"__proto__":{"docker":{"image":"alpine","network":"host","capAdd":["ALL"],"mounts":["/srv/data:/d"]}}}';
   const stripped = stripPanelOnlyFields(JSON.parse(protoPayload));
   r.check("__proto__ is rejected by the strip", stripped.rejected.includes("__proto__"), stripped.rejected.join(","));
@@ -99,6 +215,81 @@ export async function run({ repoRoot }) {
   );
   r.check("a container-only option is flagged on a native runtime",
     nativeIssues.some((i) => i.field === "docker.network"), JSON.stringify(nativeIssues));
+
+  // --- what a detected preset may contribute --------------------------------------------
+  {
+    const { detectedPresetLayer } = await import(
+      pathToFileURL(join(repoRoot, "lib", "deploy-contract.ts")).href
+    );
+    const preset = {
+      commands: { install: "pip install -r requirements.txt", start: "uvicorn main:app" },
+      healthcheck: { timeoutSec: 45 },
+    };
+    const none = { panel: {}, repo: null };
+
+    r.check("an empty custom project takes the preset's commands", detectedPresetLayer(preset, "custom", none).commands?.start === "uvicorn main:app");
+    r.check(
+      "a runtime that detects its own commands keeps them",
+      detectedPresetLayer(preset, "node", none).commands === undefined &&
+        detectedPresetLayer(preset, "static", none).commands === undefined
+    );
+    r.check("and still takes the preset's settings", detectedPresetLayer(preset, "node", none).healthcheck?.timeoutSec === 45);
+    r.check(
+      "a command the operator set keeps the preset's out of the pairing",
+      detectedPresetLayer(preset, "custom", { panel: { version: 1, commands: { start: "./run" } }, repo: null }).commands === undefined
+    );
+    r.check(
+      "so does one from the repository",
+      detectedPresetLayer(preset, "custom", { panel: {}, repo: { commands: { build: "make" } } }).commands === undefined
+    );
+    r.check(
+      "a legacy column counts as configured too",
+      detectedPresetLayer(preset, "custom", { panel: { startCmd: "./run" }, repo: null }).commands === undefined
+    );
+    r.check(
+      "empty command fields are not a decision",
+      detectedPresetLayer(preset, "custom", { panel: { version: 1, commands: { start: "" } }, repo: null }).commands?.start === "uvicorn main:app"
+    );
+    r.check(
+      "and do not cover the command below them",
+      resolveContract({ version: 1, commands: { start: "" } }, preset).commands.start === "uvicorn main:app"
+    );
+    r.check(
+      "a release command alone leaves the preset's other commands",
+      detectedPresetLayer(preset, "custom", { panel: { version: 1, commands: { release: "migrate" } }, repo: null }).commands?.start === "uvicorn main:app"
+    );
+    r.check(
+      "but an emptied release still turns off the repository's",
+      resolveContract({ version: 1, commands: { release: "" } }, { commands: { release: "migrate" } }).commands.release === ""
+    );
+  }
+
+  // --- a repository cannot hand the panel something to decrypt ---------------------------
+  {
+    const { stripPanelOnlyFields } = await import(pathToFileURL(join(repoRoot, "lib", "deploy-contract.ts")).href);
+    const out = stripPanelOnlyFields({ buildEnv: { A: "plain", B: "enc:v1:abc" } });
+    r.check("a sealed value from a repository is dropped", out.contract.buildEnv.A === "plain" && !("B" in out.contract.buildEnv));
+    r.check("and said so", out.rejected.includes("buildEnv.B"), out.rejected.join());
+  }
+
+  // --- replacing the mounts of a stored contract ---------------------------------------
+  {
+    const { withContractMounts } = await import(
+      pathToFileURL(join(repoRoot, "lib", "deploy-contract.ts")).href
+    );
+    const sparse = JSON.stringify({ version: 1, commands: { start: "node a.js" }, docker: { network: "host" } });
+    const written = JSON.parse(withContractMounts(sparse, ["/a:/b"]));
+
+    r.check("the mounts are replaced", written.docker.mounts.join() === "/a:/b");
+    r.check("the rest of the contract stays", written.commands.start === "node a.js" && written.docker.network === "host");
+    r.check(
+      "no default is written back as if the operator had set it",
+      written.healthcheck === undefined && written.runtime === undefined,
+      JSON.stringify(written)
+    );
+    r.check("an empty column gets a valid contract", JSON.parse(withContractMounts(null, [])).version === 1);
+    r.check("an unreadable column does not throw", JSON.parse(withContractMounts("{nope", [])).version === 1);
+  }
 
   return r.result();
 }

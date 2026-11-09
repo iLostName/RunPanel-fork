@@ -28,13 +28,6 @@ export const DATABASE_OPTIONS: DatabaseOption[] = [
   { type: "mongodb", label: "MongoDB", icon: "solar:database-linear", defaultPort: 27017, versions: SERVICE_VERSIONS.mongodb.available, credentialled: true },
 ];
 
-export interface TemplateField {
-  key: string;
-  label: string;
-  placeholder: string;
-  default: string;
-}
-
 export interface DockerTemplate {
   id: string;
   label: string;
@@ -43,7 +36,6 @@ export interface DockerTemplate {
   image: string;
   versions: string[];
   defaultPort: string;
-  fields: TemplateField[];
 }
 
 export const DOCKER_TEMPLATES: DockerTemplate[] = [
@@ -55,11 +47,6 @@ export const DOCKER_TEMPLATES: DockerTemplate[] = [
     image: "nginx",
     versions: ["1.27", "1.26", "1.25"],
     defaultPort: "80",
-    fields: [
-      { key: "serverName", label: "Server name", placeholder: "localhost", default: "localhost" },
-      { key: "rootDir", label: "Root directory", placeholder: "/usr/share/nginx/html", default: "/usr/share/nginx/html" },
-      { key: "configFile", label: "Config (opzionale)", placeholder: "nginx.conf", default: "" },
-    ],
   },
   {
     id: "apache",
@@ -69,10 +56,6 @@ export const DOCKER_TEMPLATES: DockerTemplate[] = [
     image: "httpd",
     versions: ["2.4"],
     defaultPort: "80",
-    fields: [
-      { key: "documentRoot", label: "Document root", placeholder: "/var/www/html", default: "/var/www/html" },
-      { key: "serverAdmin", label: "Email amministratore", placeholder: "admin@example.com", default: "" },
-    ],
   },
   {
     id: "caddy",
@@ -82,11 +65,6 @@ export const DOCKER_TEMPLATES: DockerTemplate[] = [
     image: "caddy",
     versions: ["2.9", "2.8", "2.7"],
     defaultPort: "80",
-    fields: [
-      { key: "domain", label: "Dominio", placeholder: "example.com", default: "" },
-      { key: "rootDir", label: "Root directory", placeholder: "/srv", default: "/srv" },
-      { key: "caddyfile", label: "Caddyfile (opzionale)", placeholder: "Caddyfile", default: "" },
-    ],
   },
 ];
 

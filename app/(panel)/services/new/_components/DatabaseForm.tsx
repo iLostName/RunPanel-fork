@@ -12,6 +12,7 @@ import { SelectField } from "@/components/ui/SelectField";
 import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { Field } from "@/components/ui/Field";
 import { connectionEnvKey } from "@/lib/service-env";
+import { serviceCredentialsSchema } from "@/lib/validation";
 import { DATABASE_OPTIONS, databaseOption, type ServiceType } from "../_data/catalog";
 import { ServerPicker } from "@/components/cluster/ServerBits";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
@@ -81,6 +82,18 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
       toast.error("Il nome può contenere solo minuscole, numeri, trattini e underscore");
       return;
     }
+    const credentials = {
+      user: user.trim() || undefined,
+      password: password || undefined,
+      database: database.trim() || undefined,
+    };
+    // The server would answer only "Dati non validi": the rule's own sentence
+    // says which field to fix.
+    const checked = serviceCredentialsSchema.safeParse(credentials);
+    if (!checked.success) {
+      toast.error(checked.error.issues[0].message);
+      return;
+    }
 
     setSaving(true);
     try {
@@ -93,11 +106,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
           version,
           port: Number.parseInt(port, 10),
           projectId: project || undefined,
-          credentials: {
-            user: user.trim() || undefined,
-            password: password || undefined,
-            database: database.trim() || undefined,
-          },
+          credentials,
           access: restrict ? { mode: "restricted", allow: lanNetworks } : undefined,
         }),
       });
