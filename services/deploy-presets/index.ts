@@ -130,10 +130,18 @@ export const DEPLOY_PRESETS: DeployPreset[] = [
   },
 ];
 
-/** The first preset whose detector matches the checked-out repository. */
-export function detectPreset(repoDir: string): DeployPreset | null {
+/**
+ * The first preset for this runtime whose detector matches the repository.
+ *
+ * The runtime is the operator's decision and the preset only a guess, so a guess
+ * for another runtime has nothing to say: a Node project with a `requirements.txt`
+ * for its scripts is not a Python app.
+ */
+export function detectPreset(repoDir: string, runtimeType: string): DeployPreset | null {
   if (!fs.existsSync(repoDir)) return null;
-  return DEPLOY_PRESETS.find((preset) => preset.detect?.(repoDir)) ?? null;
+  return (
+    DEPLOY_PRESETS.find((preset) => preset.runtime === runtimeType && preset.detect?.(repoDir)) ?? null
+  );
 }
 
 export function getPreset(id: string): DeployPreset | null {

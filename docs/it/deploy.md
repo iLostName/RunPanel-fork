@@ -38,7 +38,7 @@ Quello che a RunPanel serve sapere per distribuire un progetto. I campi sono neu
 
 | Campo | Docker | PM2 / nativo |
 |---|---|---|
-| `buildEnv`, `buildEnvPrefixes` | un `--build-arg` per voce | ambiente di install e build |
+| `buildEnv`, `buildEnvPrefixes` | un `--build-arg` per voce | ambiente di install e build (i valori di `buildEnv` scritti nel pannello sono cifrati nello store; tornando a una versione del pannello precedente vanno riscritti) |
 | `envFile` | scritto 0600 e montato in sola lettura | scritto 0600 nel repository (percorso relativo alla sua radice) |
 | `commands.release` | container usa-e-getta prima dell'avvio | comando nella cartella del repository |
 | `healthcheck` | sondato da RunPanel dopo l'avvio | identico |
@@ -85,7 +85,9 @@ Le variabili con prefisso `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` o `REACT_APP_` arri
 6. **Avvio**: la versione vecchia si ferma solo adesso (sui runtime nativi Windows, prima del build), poi PM2 o Docker avviano la nuova con policy e limiti del contratto.
 7. **Health check**: RunPanel sonda l'app ogni 2 secondi, dopo 3 secondi di attesa e per al massimo 30 (`startPeriodSec`, `timeoutSec`). Passa qualsiasi risposta HTTP, a meno che il contratto indichi `expectStatus`; un container senza porta deve solo restare acceso.
 
-Se l'health check fallisce, il deploy è segnato come fallito con le ultime 40 righe del processo nel log, e il progetto va in errore. **Non c'è un ritorno automatico alla versione precedente**, che è già stata fermata: per tornare indietro vedi [Tornare a un commit](automation.md#tornare-a-un-commit).
+Se l'health check fallisce, il deploy è segnato come fallito con le ultime 40 righe del processo nel log, e il progetto va in errore. **Non c'è un ritorno automatico alla versione precedente**, che è già stata fermata: per tornare indietro vedi [Tornare a un commit](automation.md#tornare-a-un-commit). Un release command fallito lascia il progetto Docker sull'ultima immagine riuscita, che è quella da cui riparte Riavvia. Compose e i runtime nativi non hanno un'immagine da conservare: Riavvia parte da quello che il deploy fallito ha già costruito, e per tornare indietro serve un nuovo deploy del commit buono.
+
+Fermare un progetto durante un deploy annulla il deploy: il comando in corso viene interrotto, il deploy finisce come fallito, l'app resta ferma e anche un deploy in coda viene scartato. Restart, spostamento del checkout, applicazione dei bind e ripristino di un volume non si sovrappongono: una richiesta di deploy che arriva in quel momento parte appena finiscono.
 
 **Re-build da zero** (menu **Altro**) ferma l'app, cancella i file di build del runtime e rifà tutto dal codice già presente, senza `git pull`:
 

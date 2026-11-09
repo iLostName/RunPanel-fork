@@ -12,9 +12,12 @@ import { composeContext } from "./docker/compose";
 import { composeNetworkMode, planComposeNetwork } from "./compose-network";
 import { projectEvents } from "./events";
 import { checkLoopbackLeak, forgetLeak, syncGate } from "./access";
+import { getRepoPath } from "./git-manager";
+import { writeEnvFileInto } from "./env-file";
+import { busyMessage, DEPLOYING_MESSAGE, tryLock } from "./project-lock";
+import type { ProjectsTable } from "@/lib/db/schema";
 
-/** What a restart, stop or app delete answers while a deploy owns the project. */
-export const DEPLOYING_MESSAGE = "Un deploy è in corso su questo progetto: aspetta che finisca.";
+export { DEPLOYING_MESSAGE };
 
 /**
  * Start a project again from its last successful build.
@@ -28,10 +31,43 @@ export const DEPLOYING_MESSAGE = "Un deploy è in corso su questo progetto: aspe
  *
  * Restricting a port needs exactly this operation — the listener has to move —
  * so rather than add a second lossy copy, both go through here.
+ *
+ * Takes the project's lock, so a deploy cannot start in the middle of this and
+ * have its claim overwritten by the status written at the end. A caller that
+ * already holds the lock says so with `underLock`.
  */
+/**
+ * Whether the app is up, for an operation about to take it down and bring it back.
+ *
+ * `error` is what a failed deploy leaves, usually with the previous version still
+ * serving, so the row alone cannot say. Taken for stopped, that app would go down
+ * and stay down.
+ */
+export async function appIsUp(project: Pick<ProjectsTable, "slug" | "status" | "runtime_type">): Promise<boolean> {
+  if (project.status === "running") return true;
+  if (project.status !== "error") return false;
+  return processManager.status(project.slug, project.runtime_type).then(
+    (info) => info.running || info.partlyUp === true,
+    () => false
+  );
+}
+
 export async function restartFromLastDeployment(
-  projectId: string
+  projectId: string,
+  opts: { underLock?: boolean } = {}
 ): Promise<{ success: true } | { error: string }> {
+  if (opts.underLock) return restart(projectId);
+
+  const release = tryLock(projectId, "restart");
+  if (!release) return { error: busyMessage(projectId) };
+  try {
+    return await restart(projectId);
+  } finally {
+    release();
+  }
+}
+
+async function restart(projectId: string): Promise<{ success: true } | { error: string }> {
   const db = await getDb();
 
   const project = await db
@@ -135,23 +171,27 @@ export async function restartFromLastDeployment(
   const { closeGate } = await import("./access-gate");
   await closeGate("project", projectId);
 
+  const startOpts = buildStartOpts({
+    project,
+    contract,
+    envVars,
+    cwd: lastDeploy.artifact_dir,
+    port,
+    loopbackPort: access.mode === "restricted" ? listenPort(project, port) : undefined,
+  });
+
+  // Rewritten on every start, as the container side already is: left to the
+  // deploy alone, the file keeps a variable the operator has since deleted, and
+  // a dotenv loader in the app brings it back. Same content a deploy writes.
+  if (contract.envFile.enabled && project.runtime_type !== "docker") {
+    writeEnvFileInto(getRepoPath(project.slug), contract.envFile.path, startOpts.env ?? {});
+  }
+
   // The driver empties the process output before launching, so tell any open
   // viewer to do the same rather than leave it showing the previous run.
   projectEvents.emit(projectId, { type: "process:reset" });
 
-  await processManager.start(
-    project.slug,
-    lastDeploy.start_cmd,
-    project.runtime_type,
-    buildStartOpts({
-      project,
-      contract,
-      envVars,
-      cwd: lastDeploy.artifact_dir,
-      port,
-      loopbackPort: access.mode === "restricted" ? listenPort(project, port) : undefined,
-    })
-  );
+  await processManager.start(project.slug, lastDeploy.start_cmd, project.runtime_type, startOpts);
 
   await db
     .updateTable("projects")

@@ -81,7 +81,7 @@ export function buildStartOpts(ctx: {
   }
 
   // Only the container runtime gets the file as a mount. A native process reads
-  // one written into its own directory at deploy time, which is still there.
+  // one written into its own directory, by the deploy and by every restart.
   if (contract.envFile.enabled && project.runtime_type === "docker") {
     const hostPath = writeEnvFile(project.slug, env);
     mounts.push(`${hostPath}:${contract.envFile.path}:ro`);

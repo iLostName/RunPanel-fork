@@ -18,6 +18,7 @@ import { getGitHubToken, gitAuth, gitAuthWithConfig } from "../git-auth";
 import { probeAutostart } from "../autostart/probe";
 import { activeBackupRunId } from "../backup/runner";
 import { activeRestoreId } from "../backup/restore";
+import { heldOperations, setPanelClosing } from "../project-lock";
 import { verifySqlite } from "../backup/panel-store";
 import {
   cleanUntracked,
@@ -467,8 +468,14 @@ async function execute(base: Runner, opts: StartOptions): Promise<void> {
 
     // Checked again here: the build takes minutes, and a deploy, backup or
     // restore that started meanwhile would be killed by the restart below.
+    //
+    // New work is refused first, or the same thing could start right after this
+    // check, during the swap and the delay before the exit. Nothing here ever
+    // reopens on success: the process is on its way out.
+    setPanelClosing(true);
     const lateBlocker = await updateBlockers();
     if (lateBlocker) {
+      setPanelClosing(false);
       fs.rmSync(staging, { recursive: true, force: true });
       await rollbackSource(runner, "operazione partita durante la build");
       finish("failed", `Aggiornamento annullato prima del riavvio. ${lateBlocker.reason}`);
@@ -494,6 +501,7 @@ async function execute(base: Runner, opts: StartOptions): Promise<void> {
     } catch (err) {
       // Put the old one back before anything else.
       fs.renameSync(previous, live);
+      setPanelClosing(false);
       state.distBackup = null;
       await rollbackSource(runner, "scambio della build non riuscito");
       finish("failed", `Sostituzione della build non riuscita: ${errorText(err)}`);
@@ -513,6 +521,7 @@ async function execute(base: Runner, opts: StartOptions): Promise<void> {
 
     restart(runner, verdict.restart);
   } catch (err) {
+    setPanelClosing(false);
     finish("failed", errorText(err));
   }
 }
@@ -828,6 +837,12 @@ export async function updateBlockers(): Promise<UpdateBlocker | null> {
         `C'è un deploy in corso (${names}). Il riavvio del pannello lo interromperebbe a metà: ` +
         "aspetta che finisca.",
     };
+  }
+
+  // A restart, a checkout move or a mount apply dies with the panel just the
+  // same, and a deploy holds its lock a moment before its row says so.
+  if (heldOperations().length > 0) {
+    return { reason: "C'è un'operazione in corso su un progetto: aspetta che finisca." };
   }
 
   return null;

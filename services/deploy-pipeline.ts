@@ -2,7 +2,10 @@ import { getDb, nowIso } from "@/lib/db";
 import type { DeploymentsTable, ProjectsTable } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
 import { redactGitSecrets } from "@/lib/redact";
+import { stripRemoteCredentials } from "@/lib/git-remote";
+import { openBuildEnv } from "./build-env";
 import {
+  cleanKeepingTracked,
   gitPull,
   gitClone,
   gitCheckoutCommit,
@@ -26,10 +29,12 @@ import { writeEnvFileInto } from "./env-file";
 import { buildStartOpts } from "./start-opts";
 import { detectPreset, readRepoContract, RUNPANEL_CONFIG_FILE } from "./deploy-presets";
 import {
+  detectedPresetLayer,
   parseContractJson,
   preflight,
   resolveContract,
   resolveContractJson,
+  safeJsonReviver,
   selectBuildEnv,
   stripPanelOnlyFields,
 } from "@/lib/deploy-contract";
@@ -39,7 +44,8 @@ import { injectLinkedServiceEnv } from "./service-injection";
 import { alignServiceNames } from "./service-rename";
 import { maskUrlPassword } from "@/lib/service-env";
 import { composeContext } from "./docker/compose";
-import { networkName } from "./docker/labels";
+import { markCurrentImage } from "./docker/images";
+import { imageRepo, networkName } from "./docker/labels";
 import {
   applyComposeNetwork,
   composeNetworkMode,
@@ -57,6 +63,19 @@ type Project = ProjectsTable;
 interface DeployOptions {
   onLog?: (line: string) => void;
   mode?: "deploy" | "rebuild";
+  /** Aborted when the operator stops the deploy. */
+  signal?: AbortSignal;
+}
+
+const CANCELLED_MESSAGE = "Deploy interrotto dall'operatore";
+
+/** The panel's own column as written, before any default fills it in. */
+function parsePanelConfig(json: string | null): unknown {
+  try {
+    return JSON.parse(json ?? "{}", safeJsonReviver);
+  } catch {
+    return {};
+  }
 }
 
 /** Directories wiped by a rebuild, by runtime. */
@@ -217,6 +236,17 @@ async function runDeploy(
 
   const label = mode === "rebuild" ? "Re-Build" : "Deploy";
 
+  // Between steps. The long ones listen to the signal themselves; this is what
+  // keeps a stop from being followed by the next step of a deploy that is over.
+  const { signal } = opts;
+  const checkpoint = () => {
+    if (signal?.aborted) throw new Error(CANCELLED_MESSAGE);
+  };
+
+  // The environment of whatever runs on the host while the app itself runs in
+  // containers: see the compose branch below. Null when that is the same one.
+  let commandEnv: Record<string, string> | null = null;
+
   try {
     await updateDeployment({ status: "building" });
     appendLog(`=== ${label} started ===`);
@@ -282,12 +312,15 @@ async function runDeploy(
       projectDir: getRepoPath(project.slug),
       image,
       env: envVars,
+      hostEnv: commandEnv ?? undefined,
       contract,
       commitSha,
       onLog: appendLog,
+      signal,
     });
 
     await runPhase("pre-deploy", oneTime, phaseCtx(null));
+    checkpoint();
 
     // REBUILD only: stop + clean first
     if (mode === "rebuild") {
@@ -314,6 +347,10 @@ async function runDeploy(
         const fullPath = path.join(cleanDir, dir);
         if (fs.existsSync(fullPath)) {
           try {
+            if (await cleanKeepingTracked(cleanDir, dir)) {
+              appendLog(`Cleaned ${dir}/ (files tracked by git kept)`);
+              continue;
+            }
             fs.rmSync(fullPath, { recursive: true, force: true });
           } catch (err: unknown) {
             // Windows only: there EPERM/EBUSY on a directory means something
@@ -369,7 +406,7 @@ async function runDeploy(
         await updateDeployment({ commit_sha: commit.sha, commit_message: commit.message });
         appendLog(`Commit: ${commit.sha.slice(0, 7)} - ${commit.message}`);
       } else {
-        appendLog(`Cloning ${project.source_url}...`);
+        appendLog(`Cloning ${stripRemoteCredentials(project.source_url)}...`);
         await gitClone(project.source_url, project.source_branch, project.slug);
         const commit = await getLatestCommit(project.slug);
         commitSha = commit.sha;
@@ -377,6 +414,8 @@ async function runDeploy(
         appendLog(`Cloned at: ${commit.sha.slice(0, 7)} - ${commit.message}`);
       }
     }
+
+    checkpoint();
 
     // A project whose source was never fetched has no directory on disk, and
     // every step from here on would run against a path that is not there. On
@@ -402,14 +441,20 @@ async function runDeploy(
     const rawRepoContract = readRepoContract(projectDir);
     const stripped = rawRepoContract === null ? null : stripPanelOnlyFields(rawRepoContract);
     const repoContract = stripped?.contract ?? null;
-    const preset = detectPreset(projectDir);
+    const preset = detectPreset(projectDir, project.runtime_type);
 
     if (preset) {
       appendLog(`Detected project shape: ${preset.label}`);
     }
 
     if (preset || repoContract) {
-      const layers = [preset?.contract, repoContract].filter(Boolean);
+      const presetLayer =
+        preset &&
+        detectedPresetLayer(preset.contract, project.runtime_type, {
+          panel: parsePanelConfig(project.builder_config),
+          repo: repoContract,
+        });
+      const layers = [presetLayer, repoContract].filter(Boolean);
       let base: unknown = {};
       for (const layer of layers) base = resolveContract(layer as object, base);
       contract = resolveContractJson(project.builder_config, base);
@@ -417,10 +462,18 @@ async function runDeploy(
       if (repoContract) {
         appendLog(`Found ${RUNPANEL_CONFIG_FILE} in the repository — merged under the panel settings.`);
       }
-      if (stripped && stripped.rejected.length > 0) {
+      const sealed = stripped?.rejected.filter((field) => field.startsWith("buildEnv.")) ?? [];
+      const hostly = stripped?.rejected.filter((field) => !field.startsWith("buildEnv.")) ?? [];
+      if (hostly.length > 0) {
         appendLog(
-          `Ignored ${stripped.rejected.join(", ")} from ${RUNPANEL_CONFIG_FILE}: ` +
+          `Ignored ${hostly.join(", ")} from ${RUNPANEL_CONFIG_FILE}: ` +
             `these grant access to the host and can only be set from the panel.`
+        );
+      }
+      if (sealed.length > 0) {
+        appendLog(
+          `Ignored ${sealed.join(", ")} from ${RUNPANEL_CONFIG_FILE}: ` +
+            `an encrypted value is only ever opened when the panel wrote it.`
         );
       }
     }
@@ -451,6 +504,14 @@ async function runDeploy(
     // deploy, and the old name keeps resolving as an alias.
     await alignServiceNames(project, appendLog);
 
+    // A compose project has no container to run its release and one-time
+    // commands in, and a docker project has none yet at `post-source`, so those
+    // run on the host, where the service names of the project network do not
+    // resolve. They get the addresses a native process would, from the same
+    // variables as they stood before the injection below.
+    const runsOnHost = composeCtx || project.runtime_type === "docker";
+    const hostCommandEnv = runsOnHost && injectionNetwork !== "host" ? { ...envVars } : null;
+
     const { applied, skipped, conflicts } = await injectLinkedServiceEnv(
       project,
       injectionNetwork,
@@ -470,6 +531,13 @@ async function runDeploy(
     }
     for (const name of skipped) {
       appendLog(`Servizio "${name}": iniezione disattivata, il progetto usa le proprie variabili.`);
+    }
+    if (hostCommandEnv) {
+      await injectLinkedServiceEnv(project, "host", hostCommandEnv);
+      commandEnv = hostCommandEnv;
+      if (composeCtx && applied.length > 0) {
+        appendLog("I comandi di release e una tantum girano sull'host: raggiungono i servizi su localhost.");
+      }
     }
     for (const conflict of conflicts) {
       // Reported rather than resolved by row order, which is how the second
@@ -512,7 +580,10 @@ async function runDeploy(
     }
 
     // Fail fast on anything knowable before a build that may run for minutes.
-    const issues = preflight(contract, { runtimeType: project.runtime_type, envVars });
+    // Opened here and only here: `contract` is what the deployment records, and
+    // it keeps the build arguments sealed.
+    const readable = { ...contract, buildEnv: openBuildEnv(contract.buildEnv, project.id) };
+    const issues = preflight(readable, { runtimeType: project.runtime_type, envVars });
     if (issues.length > 0) {
       appendLog("\n--- Preflight ---");
       for (const issue of issues) appendLog(`[warn] ${issue.field}: ${issue.message}`);
@@ -521,7 +592,7 @@ async function runDeploy(
     // Values a frontend build inlines into its client bundle have to exist at
     // BUILD time. Supplying them only at runtime either ships the wrong value
     // or fails a Dockerfile that asserts on them.
-    const buildEnv = selectBuildEnv(contract, envVars);
+    const buildEnv = selectBuildEnv(readable, envVars);
     if (Object.keys(buildEnv).length > 0) {
       appendLog(`Build-time variables: ${Object.keys(buildEnv).sort().join(", ")}`);
     }
@@ -547,6 +618,7 @@ async function runDeploy(
       very deploy running it: that was resolved a few lines above.
     */
     await runPhase("post-source", oneTime, phaseCtx(null));
+    checkpoint();
 
     // Windows cannot replace a file that a running process has mapped, and a
     // native addon is always mapped — Prisma's query engine, better-sqlite3,
@@ -598,14 +670,19 @@ async function runDeploy(
       buildTimeout: contract.build.timeoutSec * 1000,
       // Only the native builders call this back — see `BuildContext.onPhase`.
       onPhase: (phase) => runPhase(phase, oneTime, phaseCtx(null)),
+      signal,
       // Build-time env for native runtimes, plus any Node heap override.
       envVars: {
+        // The project's own value wins: it was typed for this app, while
+        // `build.nodeOptions` usually comes from a preset's general guess.
+        ...(contract.build.nodeOptions ? { NODE_OPTIONS: contract.build.nodeOptions } : {}),
         ...envVars,
         ...buildEnv,
-        ...(contract.build.nodeOptions ? { NODE_OPTIONS: contract.build.nodeOptions } : {}),
       },
       onLog: appendLog,
     });
+
+    checkpoint();
 
     if (!buildResult.success) {
       throw new Error(buildResult.error || "Build failed");
@@ -626,6 +703,7 @@ async function runDeploy(
     // contract's migration slot and should be the last thing before the app
     // starts, so a chore that prepares for it has to come first.
     await runPhase("post-build", oneTime, phaseCtx(builtImage));
+    checkpoint();
 
     // Release command: one-shot work that must happen after the build and
     // before the app serves traffic — migrations, schema push, cache warm.
@@ -639,12 +717,15 @@ async function runDeploy(
         // the written .env are not.
         projectDir: getRepoPath(project.slug),
         image: buildResult.startCmd.replace(/^docker:/, ""),
-        env: envVars,
+        // In the image for docker, on the project network: the names resolve there.
+        env: composeCtx ? (commandEnv ?? envVars) : envVars,
         contract,
         onLog: appendLog,
+        signal,
       });
       appendLog("Release command completed.");
     }
+    checkpoint();
 
     await updateDeployment({
       start_cmd: buildResult.startCmd,
@@ -678,6 +759,7 @@ async function runDeploy(
     // mean: in this instant nothing is serving, and that is the window a
     // chore like swapping a database file needs.
     await runPhase("pre-start", oneTime, phaseCtx(builtImage));
+    checkpoint();
 
     // Start new process
     appendLog("\n--- Starting application ---");
@@ -740,7 +822,9 @@ async function runDeploy(
       port: listenOn,
       contract,
       onLog: appendLog,
+      signal,
     });
+    checkpoint();
 
     if (!health.healthy) {
       const driverName = project.runtime_type === "docker" ? "Docker" : "PM2";
@@ -768,6 +852,7 @@ async function runDeploy(
       already recorded", which is the smaller of the two lies.
     */
     await runPhase("post-deploy", oneTime, phaseCtx(builtImage));
+    checkpoint();
 
     // Finalize
     appendLog(`\n=== ${label} successful ===`);
@@ -793,6 +878,16 @@ async function runDeploy(
       .where("id", "=", project.id)
       .execute();
 
+    // Only now: an image is `:current` once it has been proved good. Only ours,
+    // too: a template project runs somebody else's image, and that has no alias.
+    if (builtImage?.startsWith(`${imageRepo(project.slug)}:`)) {
+      try {
+        await markCurrentImage(project.slug, builtImage);
+      } catch (err) {
+        console.error(`[deploy] Could not tag ${builtImage} as current:`, err);
+      }
+    }
+
     // Retire images this project no longer needs. Scoped to the project and run
     // after success, so a failed deploy never destroys the image that is still
     // serving traffic. Orphans are left alone — those need a human decision.
@@ -817,8 +912,13 @@ async function runDeploy(
     // travels in the environment instead of the argv, which closes that at the
     // root; this is the belt to that pair of braces, and it also covers a
     // remote URL somebody typed with the credentials still in it.
-    const message = redactGitSecrets(err instanceof Error ? err.message : "Deploy failed");
-    const stack = err instanceof Error && err.stack ? redactGitSecrets(err.stack) : undefined;
+    // Whatever a stopped step happened to throw, the operator stopped it.
+    const cancelled = signal?.aborted === true;
+    const message = cancelled
+      ? CANCELLED_MESSAGE
+      : redactGitSecrets(err instanceof Error ? err.message : "Deploy failed");
+    const stack =
+      !cancelled && err instanceof Error && err.stack ? redactGitSecrets(err.stack) : undefined;
     appendLog(`\n=== ${label} FAILED: ${message} ===`);
     if (stack) appendLog(`Stack: ${stack}`);
     logFile.flush();
@@ -828,6 +928,17 @@ async function runDeploy(
       error_message: message,
       finished_at: nowIso(),
     });
+
+    // A stop asked for the app to be down, and the old instance may well have
+    // stayed up through the build. Done here and not left to the route, which
+    // stops waiting after a while and may be long gone.
+    if (cancelled) {
+      try {
+        await processManager.stop(project.slug, project.runtime_type);
+      } catch {
+        /* nothing to stop is the state that was asked for */
+      }
+    }
 
     // Record what is actually up, not what was up when the deploy began: a
     // health check failure arrives with the new process already started, and
@@ -845,7 +956,12 @@ async function runDeploy(
     // what this deploy intended. Not running is simply stopped.
     await db
       .updateTable("projects")
-      .set({ status: stillRunning ? "error" : "stopped", updated_at: nowIso() })
+      .set({
+        status: stillRunning ? "error" : "stopped",
+        // Not a crash, so the scheduled restart leaves the project alone.
+        ...(cancelled ? { crashed_at: null } : {}),
+        updated_at: nowIso(),
+      })
       .where("id", "=", project.id)
       .execute();
   } finally {

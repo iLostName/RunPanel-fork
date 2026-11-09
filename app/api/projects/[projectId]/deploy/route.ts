@@ -4,6 +4,7 @@ import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import { deployRequestSchema } from "@/lib/validation";
 import { enqueueDeploy } from "@/services/deploy-queue";
+import { PANEL_CLOSING_MESSAGE } from "@/services/project-lock";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -89,6 +90,10 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     if (result.status === "not-found") {
       return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+    }
+
+    if (result.status === "unavailable") {
+      return NextResponse.json({ error: PANEL_CLOSING_MESSAGE }, { status: 503 });
     }
 
     // A request that lands during a deploy is remembered rather than refused, so
