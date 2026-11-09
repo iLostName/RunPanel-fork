@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadError } from "@/components/ui/LoadError";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { PageSkeleton } from "@/components/ui/Skeletons";
+import MonitorLoading from "./loading";
 import { statusMeta, TONE_DOT } from "@/lib/status";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -297,7 +297,7 @@ export default function MonitorPage() {
 
   const description = isSolo ? "Processi e servizi in esecuzione su questo host" : "Processi e servizi in esecuzione su ogni server";
   const loading = isSolo ? solo.loading && !solo.data : cluster.loading && !cluster.data;
-  if (loading) return <PageSkeleton title="Monitor" description={description} tiles={0} />;
+  if (loading) return <MonitorLoading />;
 
   if (isSolo) {
     if (!solo.data) {

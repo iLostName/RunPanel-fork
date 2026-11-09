@@ -10,7 +10,7 @@ import { LinkButton } from "@/components/ui/LinkButton";
 import { LoadError } from "@/components/ui/LoadError";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SelectField } from "@/components/ui/SelectField";
-import { PageSkeleton } from "@/components/ui/Skeletons";
+import UpdatesLoading from "../loading";
 import { ServerFilter } from "@/components/cluster/ServerBits";
 import { useResource } from "@/lib/hooks/useResource";
 import { useMe } from "@/lib/hooks/useMe";
@@ -172,7 +172,7 @@ export function UpdatesOverview() {
     />
   );
 
-  if (loading && !data) return <PageSkeleton title="Aggiornamenti" tiles={0} />;
+  if (loading && !data) return <UpdatesLoading />;
   if (!data && error) {
     return (
       <>

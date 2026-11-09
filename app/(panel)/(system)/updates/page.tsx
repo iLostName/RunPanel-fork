@@ -11,7 +11,7 @@ import { Section } from "@/components/ui/Section";
 import { Hint, FieldHint } from "@/components/ui/Hint";
 import { Segmented } from "@/components/ui/Segmented";
 import { CommandBlock } from "@/components/ui/CommandBlock";
-import { PageSkeleton } from "@/components/ui/Skeletons";
+import UpdatesLoading from "./loading";
 import { useResource } from "@/lib/hooks/useResource";
 import { formatRelative, formatWhen } from "@/lib/format";
 import { MSG } from "@/lib/copy";
@@ -178,7 +178,7 @@ function ServerUpdatesPage() {
       </>
     );
   }
-  if (!data) return <PageSkeleton title="Aggiornamenti" description="La versione di RunPanel installata su questa macchina" tiles={0} />;
+  if (!data) return <UpdatesLoading />;
 
   const { check, checkout, run, canUpdate, blocker } = data;
   const available = hasUpdate(data);
