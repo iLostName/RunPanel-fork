@@ -591,12 +591,23 @@ export interface ClusterLinkTokensTable {
   created_at: string;
 }
 
-/** A user or member deleted here, kept so a stale copy elsewhere cannot resurrect it. */
+/** A user, member or folder deleted here, kept so a stale copy elsewhere cannot resurrect it. */
 export interface ClusterTombstonesTable {
-  /** `'user'` | `'member'` */
+  /** `'user'` | `'member'` | `'folder'` */
   kind: string;
   id: string;
   deleted_at: string;
+}
+
+/** What this panel last saw of a server, per account: see migration 028. */
+export interface ClusterLastSeenTable {
+  user_id: string;
+  member_id: string;
+  /** `'projects'` | `'services'` */
+  kind: string;
+  /** JSON array of `lastSeenRows`. */
+  rows: string;
+  updated_at: string;
 }
 
 /**
@@ -668,6 +679,7 @@ export interface Database {
   cluster_members: ClusterMembersTable;
   cluster_link_tokens: ClusterLinkTokensTable;
   cluster_tombstones: ClusterTombstonesTable;
+  cluster_last_seen: ClusterLastSeenTable;
   projects: ProjectsTable;
   folders: FoldersTable;
   deployments: DeploymentsTable;
