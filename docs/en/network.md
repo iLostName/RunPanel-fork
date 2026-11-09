@@ -18,7 +18,7 @@ When **Limita** is turned on, the machine's networks come pre-ticked. An empty l
 
 Rules are single addresses or CIDR ranges, IPv4 or IPv6. The panel offers the networks of the machine's interfaces as labelled tick boxes: LAN, VPN (Tailscale is recognised, both `100.64.0.0/10` and `fd7a:115c:a1e0::/48`) and virtual switches. With a [reverse proxy configured](configuration.md#putting-it-on-the-internet) it also offers **Il tuo indirizzo ora** (your address now).
 
-A `/0` range is refused, host bits are masked (`192.168.1.14/24` becomes `192.168.1.0/24`) and an IPv4 address with leading zeros is rejected. Editing the rules applies to new connections; open ones stay.
+A `/0` range is refused, host bits are masked (`192.168.1.14/24` becomes `192.168.1.0/24`) and an IPv4 address with leading zeros is rejected. Editing the rules applies at once: an open connection from an address taken off the list is closed.
 
 Refused connections appear under **Rifiutati di recente** (the last five) with a **Consenti** button. The panel keeps them in memory, at most twenty per port, and forgets them on every restart.
 
