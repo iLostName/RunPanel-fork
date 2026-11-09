@@ -19,6 +19,14 @@ export type RestartDecision =
   | { action: "restart"; reason: "scheduled" | "after-crash" }
   | { action: "skip"; reason: "stopped" | "deploying" | "error" };
 
+/**
+ * Down because somebody decided so. A crash leaves its marker, and a reboot leaves
+ * the row saying `running`: neither reads like this.
+ */
+export function stoppedOnPurpose(target: { status: string; crashedAt: string | null }): boolean {
+  return target.status === "stopped" && !target.crashedAt;
+}
+
 export function decideRestart(target: { status: string; crashedAt: string | null }): RestartDecision {
   switch (target.status) {
     case "running":

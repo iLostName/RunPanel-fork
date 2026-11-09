@@ -30,6 +30,7 @@ import { FileManager } from "./_components/FileManager";
 import type { Deployment, EnvVar, ProcessInfo, Project, TabId } from "./_components/types";
 import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { locateMember } from "@/lib/locate-member";
+import { projectControlText } from "@/lib/status";
 
 /**
  * Orchestrates the project view: it owns the single event stream and the shared
@@ -74,6 +75,7 @@ export default function ProjectDetailPage() {
   const processLog = useLineBuffer<LogLine>(MAX_LOG_LINES);
   const deployLog = useLineBuffer<LogLine>(MAX_LOG_LINES);
   const termLines = useLineBuffer<LogLine>(MAX_LOG_LINES);
+  const operationLog = useLineBuffer<LogLine>(MAX_LOG_LINES);
   const [shellActive, setShellActive] = useState(false);
 
   // Opened by the gear, and only by it. It used to default to open whenever the
@@ -154,6 +156,13 @@ export default function ProjectDetailPage() {
       case "terminal:closed":
         setShellActive(false);
         break;
+      case "ready":
+        // The stream replays what an operation in flight has said so far.
+        operationLog.reset();
+        break;
+      case "mount:log":
+        operationLog.push(toLine(event.line));
+        break;
       case "mount:phase":
         // A move of the files or a mount apply changed the row on the server.
         void refreshProject();
@@ -232,13 +241,14 @@ export default function ProjectDetailPage() {
    * a deploy from a branch the header does not name would be a lie in four
    * places at once.
    */
-  async function startDeploy(
+  const sourceBranch = project?.source_branch;
+  const startDeploy = useCallback(async (
     mode: "deploy" | "rebuild",
     options: { commitSha?: string; branch?: string } = {}
-  ) {
+  ) => {
     setDeploying(true);
     try {
-      if (options.branch && options.branch !== project?.source_branch) {
+      if (options.branch && options.branch !== sourceBranch) {
         const patch = await fetch(api(`/api/projects/${projectId}`), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -281,11 +291,16 @@ export default function ProjectDetailPage() {
     } finally {
       setDeploying(false);
     }
-  }
+  }, [projectId, refreshProject, api, sourceBranch]);
 
-  function handleDeploy(mode: "deploy" | "rebuild") {
-    void startDeploy(mode);
-  }
+  // Stable, like everything else `ProjectHeader` receives: it is memo()'d so a
+  // log flush does not re-render it, and one inline arrow would undo that.
+  const handleDeploy = useCallback(
+    (mode: "deploy" | "rebuild") => {
+      void startDeploy(mode);
+    },
+    [startDeploy]
+  );
 
   // Not closed here: the dialog closes itself once this settles, which is what
   // keeps its submit button pending while the request is in flight. Closing it
@@ -328,8 +343,9 @@ export default function ProjectDetailPage() {
   }, [projectId, refreshProject, api]);
 
   const openVersions = useCallback(() => setVersionsOpen(true), []);
+  const openRename = useCallback(() => setRenameOpen(true), []);
 
-  async function handleControl(action: "start" | "stop" | "restart") {
+  const handleControl = useCallback(async (action: "start" | "stop" | "restart") => {
     try {
       const res = await fetch(api(`/api/projects/${projectId}/control`), {
         method: "POST",
@@ -338,15 +354,15 @@ export default function ProjectDetailPage() {
       });
       if (!res.ok) {
         const data = await res.json();
-        toast.error(data.error ?? `Azione "${action}" fallita`);
+        toast.error(data.error ?? projectControlText(action).failed);
         return;
       }
-      toast.success(`Azione "${action}" eseguita`);
+      toast.success(projectControlText(action).done);
       void refreshProject();
     } catch {
-      toast.error(`Azione "${action}" fallita`);
+      toast.error(projectControlText(action).failed);
     }
-  }
+  }, [projectId, refreshProject, api]);
 
   const tabs = useMemo(() => {
     if (!project) return [];
@@ -390,7 +406,7 @@ export default function ProjectDetailPage() {
         busy={deploying}
         onDeploy={handleDeploy}
         onControl={handleControl}
-        onOpenSettings={() => setRenameOpen(true)}
+        onOpenSettings={openRename}
         onOpenVersions={openVersions}
         onReleasePin={handleReleasePin}
       />
@@ -483,6 +499,7 @@ export default function ProjectDetailPage() {
             setProject((prev) => (typeof update === "function" ? (prev ? update(prev) : prev) : update))
           }
           onRefresh={() => void refreshProject()}
+          operationLines={operationLog.lines}
         />
       )}
 

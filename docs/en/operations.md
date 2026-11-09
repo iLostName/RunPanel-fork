@@ -17,6 +17,8 @@ The panel never runs `systemctl start`, which would put a second panel on the sa
 
 The page also checks what a reboot really needs: Docker enabled at boot (**Abilita** button) and PM2's process list saved (**pm2 save** button) when PM2 runs at least one app. Without them, after a reboot the panel comes back and the apps do not.
 
+After a reboot, what was on and what stopped by itself comes back. A project or service stopped by hand stays stopped.
+
 Every project and service has a switch, an order, a delay and whether to wait for it to be ready before moving on, at most one minute: a service when its engine answers, a project when it passes the health check of its last deploy (or, with the health check off, when the process is up). By default services come back and are waited for, projects do not; services always start before projects. At boot the panel waits 20 seconds for Docker to restart what it knows about, then starts only what is still down, 2 seconds apart, never triggering a build. **Simula** (simulate) shows what it would do, **Esegui ora** (run now) does it.
 
 Status in the lists is rechecked every half minute and after the reconcile: a project can turn **Fermo** (stopped) without anyone stopping it just then, meaning it was already down. The check never starts or stops anything, and needs two agreeing readings before marking stopped something that was up.

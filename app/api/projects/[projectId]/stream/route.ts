@@ -5,6 +5,8 @@ import { getDb } from "@/lib/db";
 import { projectEvents, type ProjectEvent } from "@/services/events";
 import { processLogHub } from "@/services/process-logs";
 import { readBuildLog } from "@/services/build-logs";
+import { applyLog, isApplyInFlight, parseApplyJournal } from "@/services/project-mounts";
+import { isMoveInFlight, moveLog, parseRepoMove } from "@/services/project-repo";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -28,7 +30,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const project = await db
     .selectFrom("projects")
-    .select(["id", "slug", "runtime_type", "status"])
+    .select(["id", "slug", "runtime_type", "status", "repo_move", "mount_apply"])
     .where("id", "=", projectId)
     .executeTakeFirst();
 
@@ -87,6 +89,16 @@ export async function GET(request: NextRequest, { params }: Params) {
         for (const line of backlog.split("\n")) {
           if (line) send({ type: "deploy:log", deploymentId: active.id, line });
         }
+      }
+
+      // Same for a checkout move or a mount apply, as the service stream does.
+      const backlog = isMoveInFlight(parseRepoMove(project.repo_move))
+        ? moveLog(projectId)
+        : isApplyInFlight(parseApplyJournal(project.mount_apply))
+          ? applyLog(projectId)
+          : "";
+      for (const line of backlog.split("\n")) {
+        if (line) send({ type: "mount:log", line });
       }
 
       // A shell's output belongs to the person who opened it.

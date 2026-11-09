@@ -47,6 +47,17 @@ export async function register() {
   const { getDb } = await import("./lib/db");
   await getDb();
 
+  // Build arguments stored before they were sealed. Needs the panel's key, which
+  // a migration does not have; idempotent, so every boot is fine.
+  // And env files a crash left behind: they hold a project's variables in the clear.
+  const { removeStaleEnvFiles } = await import("./services/docker/env-file");
+  removeStaleEnvFiles();
+
+  const { sealStoredBuildEnv } = await import("./services/build-env");
+  await sealStoredBuildEnv().catch((err) => {
+    console.error("[build-env] Sealing failed:", err instanceof Error ? err.message : err);
+  });
+
   // A bind list that was being applied when this process stopped. Before the
   // schedulers and not behind their flag: it is correctness, not a chore. It
   // never resumes an application — see the function for why — but it does
@@ -55,6 +66,14 @@ export async function register() {
   const { reconcileMountApplies } = await import("./services/service-mounts");
   await reconcileMountApplies().catch((err) => {
     console.error("[mounts] Recovery failed:", err instanceof Error ? err.message : err);
+  });
+
+  // The same two journals on projects, which have no container to rebuild here:
+  // left open they would refuse every new apply or move for ever.
+  const { reconcileProjectApplies } = await import("./services/project-mounts");
+  const { reconcileRepoMoves } = await import("./services/project-repo");
+  await Promise.all([reconcileProjectApplies(), reconcileRepoMoves()]).catch((err) => {
+    console.error("[projects] Recovery failed:", err instanceof Error ? err.message : err);
   });
 
   // Containers a backup paused while copying their volume, when this process

@@ -13,6 +13,8 @@ export type StreamEvent =
   | { type: "process:status"; status: string; running: boolean; pid?: number; uptime?: number }
   | { type: "terminal:output"; text: string }
   | { type: "terminal:closed"; code: number | null }
+  /** A line of what a files move or a mount apply is doing. */
+  | { type: "mount:log"; line: string }
   /** A files move or a mount apply moved on: the project row changed. */
   | { type: "mount:phase"; phase: string; error?: string };
 

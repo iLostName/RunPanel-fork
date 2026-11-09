@@ -7,6 +7,8 @@ import { withAudit } from "@/lib/audit";
 import { config } from "@/lib/config";
 import { getDb } from "@/lib/db";
 import { isValidSlug } from "@/lib/utils";
+import { flattenSingleRoot } from "@/services/flatten-root";
+import { busyMessage, tryLock } from "@/services/project-lock";
 import { extractProjectArchive } from "@/services/project-archive";
 import crypto from "crypto";
 import fs from "fs";
@@ -29,7 +31,7 @@ export async function POST(request: NextRequest) {
     // refusal instead of a 2 GB allocation.
     const declaredLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
     if (declaredLength > MAX_UPLOAD_BYTES * 1.1) {
-      return NextResponse.json({ error: "File too large (max 100MB)" }, { status: 413 });
+      return NextResponse.json({ error: "File troppo grande (massimo 100 MB)" }, { status: 413 });
     }
 
     // Forwarded by another member of the cluster: the signature covers the
@@ -49,7 +51,7 @@ export async function POST(request: NextRequest) {
 
     if (!file || !projectSlug) {
       return NextResponse.json(
-        { error: "File and projectSlug are required" },
+        { error: "Servono il file e lo slug del progetto" },
         { status: 400 }
       );
     }
@@ -94,7 +96,7 @@ export async function POST(request: NextRequest) {
 
     if (file.size > MAX_UPLOAD_BYTES) {
       return NextResponse.json(
-        { error: "File too large (max 100MB)" },
+        { error: "File troppo grande (massimo 100 MB)" },
         { status: 400 }
       );
     }
@@ -103,11 +105,27 @@ export async function POST(request: NextRequest) {
     const header = Buffer.from(await file.slice(0, 4).arrayBuffer());
     if (header[0] !== 0x50 || header[1] !== 0x4b || header[2] !== 0x03 || header[3] !== 0x04) {
       return NextResponse.json(
-        { error: "File is not a valid ZIP archive" },
+        { error: "Il file non è un archivio ZIP valido" },
         { status: 400 }
       );
     }
 
+    // Held across the extraction, which can take a while: a deploy or a move
+    // starting meanwhile would have the checkout renamed from under it.
+    const release = tryLock(project.id, "upload");
+    if (!release) {
+      return NextResponse.json({ error: busyMessage(project.id) }, { status: 409 });
+    }
+
+    try {
+      return await replaceCheckout(file, projectSlug);
+    } finally {
+      release();
+    }
+  });
+}
+
+async function replaceCheckout(file: File, projectSlug: string): Promise<NextResponse> {
     const zipPath = path.join(config.uploadsDir, `${projectSlug}.zip`);
     const destDir = path.join(config.reposDir, projectSlug);
 
@@ -158,21 +176,4 @@ export async function POST(request: NextRequest) {
     } finally {
       await fs.promises.rm(zipPath, { force: true }).catch(() => {});
     }
-  });
-}
-
-/**
- * A zip made from a folder unpacks as `project-main/…`. Lift that one level so
- * the repo root is where every builder expects it.
- */
-async function flattenSingleRoot(destDir: string): Promise<void> {
-  const entries = await fs.promises.readdir(destDir, { withFileTypes: true });
-  const only = entries.length === 1 ? entries[0] : null;
-  if (!only?.isDirectory()) return;
-
-  const nested = path.join(destDir, only.name);
-  for (const entry of await fs.promises.readdir(nested)) {
-    await fs.promises.rename(path.join(nested, entry), path.join(destDir, entry));
-  }
-  await fs.promises.rmdir(nested);
 }

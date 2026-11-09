@@ -7,6 +7,7 @@ import {
 } from "@/lib/autostart";
 import { listenPort, readAccess } from "@/lib/access-columns";
 import { parseContractJson } from "@/lib/deploy-contract";
+import { stoppedOnPurpose } from "@/lib/scheduled-restart";
 import { waitForHealthy } from "../deploy-steps";
 import { getDb } from "@/lib/db";
 import { getEnv } from "@/lib/env";
@@ -15,6 +16,7 @@ import { docker, dockerTry } from "../docker/cli";
 import { HOST_CHANNEL, opsEvents } from "../events";
 import { AppendLogFile } from "../log-file";
 import { processManager } from "../process-manager";
+import { busyMessage, tryLock } from "../project-lock";
 import { execArgs, serviceTarget } from "../service-databases";
 import { reconcileStatuses } from "../status-reconcile";
 import path from "path";
@@ -95,6 +97,7 @@ interface Candidate {
   createdAt: string;
   delaySeconds: number;
   waitHealthy: boolean;
+  stoppedOnPurpose: boolean;
   /** Services only. */
   containerName?: string;
   engine?: string;
@@ -123,6 +126,7 @@ async function candidates(): Promise<Candidate[]> {
       createdAt: service.created_at,
       delaySeconds: settings.delaySeconds,
       waitHealthy: settings.waitHealthy,
+      stoppedOnPurpose: stoppedOnPurpose({ status: service.status, crashedAt: service.crashed_at }),
       containerName: service.container_name,
       engine: service.type,
     });
@@ -139,6 +143,7 @@ async function candidates(): Promise<Candidate[]> {
       createdAt: project.created_at,
       delaySeconds: settings.delaySeconds,
       waitHealthy: settings.waitHealthy,
+      stoppedOnPurpose: stoppedOnPurpose({ status: project.status, crashedAt: project.crashed_at }),
       slug: project.slug,
       runtime: project.runtime_type,
     });
@@ -238,6 +243,12 @@ async function handle(
       return { ...base, action: "already-running", detail: "Era già in esecuzione" };
     }
 
+    // Autostart undoes what a reboot did, not what an operator did: the same line
+    // the scheduled restart draws, and Docker's own `unless-stopped`.
+    if (candidate.stoppedOnPurpose) {
+      return { ...base, action: "skipped", detail: "Fermato a mano: resta fermo" };
+    }
+
     if (dryRun) {
       return {
         ...base,
@@ -266,7 +277,19 @@ async function handle(
     // Projects: restart, never a fresh start. The container or the PM2 entry
     // already exists — recreating it is the deploy pipeline's job, and doing it
     // here would duplicate ports and rebuild images at boot.
-    await processManager.restart(candidate.slug ?? "", candidate.runtime ?? "node");
+    //
+    // Under the project's lock: every other path that starts a project checks
+    // for a deploy first, and this one could bring back an instance a running
+    // deploy had just stopped, which on Windows then fails the build with EPERM.
+    const release = tryLock(candidate.id, "autostart");
+    if (!release) {
+      return { ...base, action: "skipped", detail: busyMessage(candidate.id) };
+    }
+    try {
+      await processManager.restart(candidate.slug ?? "", candidate.runtime ?? "node");
+    } finally {
+      release();
+    }
     if (candidate.waitHealthy) {
       const ready = await waitProjectReady(candidate, emit);
       if (!ready) {
@@ -358,10 +381,11 @@ async function waitReady(candidate: Candidate, emit: (line: string) => void): Pr
   if (!service) return false;
 
   const target = serviceTarget(service);
+  const mysqlEnv = { MYSQL_PWD: target.credentials.password };
   const probe: Record<string, string[]> = {
     postgresql: [...execArgs(target, {}), "pg_isready", "-U", target.credentials.user],
     mysql: [
-      ...execArgs(target, { MYSQL_PWD: target.credentials.password }),
+      ...execArgs(target, mysqlEnv),
       "mysqladmin", "ping", "-u", "root",
     ],
     redis: [...execArgs(target, {}), "redis-cli", "--no-auth-warning", "ping"],
@@ -376,7 +400,10 @@ async function waitReady(candidate: Candidate, emit: (line: string) => void): Pr
 
   const deadline = Date.now() + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const result = await dockerTry(args, { timeout: 10_000 });
+    const result = await dockerTry(args, {
+      timeout: 10_000,
+      env: service.type === "mysql" ? mysqlEnv : {},
+    });
     if (result) {
       emit(`  ${candidate.name} è pronto`);
       return true;

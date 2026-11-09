@@ -153,8 +153,18 @@ export async function run({ base }) {
     await api.call(`/api/services/${id}/control`, { method: "POST", body: JSON.stringify({ action: "stop" }) });
     r.check("stopped by hand", (await row()).status === "stopped" && !isUp());
 
+    // Twenty seconds after boot the autostart pass runs, and it used to start
+    // everything that was down, this included.
+    const pass = await api.call("/api/autostart/reconcile", { method: "POST", body: JSON.stringify({ dryRun: true }) });
+    const entry = pass.body?.entries?.find((candidate) => candidate.id === id);
+    r.check("autostart leaves it down too", entry?.action === "skipped", JSON.stringify(entry));
+
     current = await waitForRun(current.restart_last_at);
-    r.check("the schedule skips it", current.restart_last_result === "Saltato: fermato a mano", String(current.restart_last_result));
+    r.check(
+      "the schedule skips it",
+      current.restart_last_result === "Saltato: fermato a mano",
+      `${current.restart_last_result}, status=${current.status}, crashed_at=${current.crashed_at}, last_at=${current.restart_last_at}, updated_at=${current.updated_at}`
+    );
     r.check("and it stays down", !isUp() && current.status === "stopped", current.status);
 
     // --- crashed gets one attempt ---------------------------------------------
