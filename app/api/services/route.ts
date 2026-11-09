@@ -36,9 +36,11 @@ export async function GET() {
       return { service, access };
     })
     .filter(({ access }) => access.level !== null)
-    .map(({ service, access }) =>
-      satisfies(access, SERVICE_ACTIONS.credentials) ? service : { ...service, credentials: null }
-    );
+    .map(({ service, access }) => ({
+      ...(satisfies(access, SERVICE_ACTIONS.credentials) ? service : { ...service, credentials: null }),
+      // As on the single service, so a list can hide what its rows cannot do.
+      permission: access,
+    }));
 
   // What each link hands its project — host, port, network — resolved here
   // from the project's runtime, so the project page can print the line the

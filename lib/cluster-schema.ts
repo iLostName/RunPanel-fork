@@ -128,6 +128,23 @@ export const directorySchema = z
   })
   .strict();
 
+/** The folders of the Overview, exchanged apart from the directory (see lib/cluster-directory.ts). */
+export const folderSetSchema = z
+  .object({
+    folders: z
+      .array(
+        z.object({
+          id: idSchema,
+          name: z.string().min(1).max(60),
+          created_at: isoSchema,
+          updated_at: isoSchema,
+        })
+      )
+      .max(5000),
+    tombstones: z.array(z.object({ id: idSchema, deleted_at: isoSchema })).max(50000),
+  })
+  .strict();
+
 /** What a fresh install gets back from `POST /api/cluster/join`. */
 export const joinResponseSchema = z.object({
   clusterId: idSchema,
@@ -144,5 +161,7 @@ export const pingResponseSchema = z.object({
   version: z.string().max(80).nullable(),
   time: isoSchema,
   directoryHash: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Absent on a release older than shared folders: such a member is left out of the folder exchange. */
+  foldersHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 export type PingResponse = z.infer<typeof pingResponseSchema>;

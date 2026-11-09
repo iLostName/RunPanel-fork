@@ -18,9 +18,19 @@ export const meta = { name: "status-unit", needsDocker: false, drivers: [], stan
 export async function run({ repoRoot }) {
   const r = createReporter("status-unit");
 
-  const { isReconcilable, reconciledStatus } = await import(
+  const { isReconcilable, reconciledStatus, projectControlText, serviceControlText, statusMeta } = await import(
     pathToFileURL(join(repoRoot, "lib", "status.ts")).href
   );
+
+  // --- how it reads -----------------------------------------------------------
+  r.check("a server that does not answer has its own label, not a stopped one", statusMeta("unreachable").label === "Non raggiungibile" && statusMeta("unreachable").tone === "danger");
+  r.check("an unreachable row is never reconciled", isReconcilable("unreachable") === false);
+  for (const action of ["start", "stop", "restart"]) {
+    const text = serviceControlText(action);
+    r.check(`the outcome of "${action}" does not show the API token`, !text.done.includes(action) && !text.failed.includes(action), JSON.stringify(text));
+    const project = projectControlText(action);
+    r.check(`a project's "${action}" reads as a project and hides the token too`, project.done.startsWith("Progetto") && !project.done.includes(action) && !project.failed.includes(action), JSON.stringify(project));
+  }
 
   // --- which rows may be touched at all ------------------------------------
   r.check("a running row is reconcilable", isReconcilable("running") === true);

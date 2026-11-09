@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { SelectField } from "@/components/ui/SelectField";
 import { useNode } from "@/lib/hooks/useNode";
-import { isAggregatePath } from "@/lib/server-url";
+import { isAggregatePath, serverOptionLabel } from "@/lib/server-url";
 import { cn } from "@/lib/utils";
 
 const ALL = "__all__";
@@ -30,10 +30,7 @@ export function ServerSelector({ className }: { className?: string }) {
       onChange={(v) => select(v === ALL || (!aggregate && v === selfId) ? null : v)}
       options={[
         ...(aggregate ? [{ value: ALL, label: "Tutti i server" }] : []),
-        ...nodes.map((n) => ({
-          value: n.id,
-          label: n.id === selfId ? `${n.name} (questo)` : n.status === "unreachable" ? `${n.name} · non raggiungibile` : n.name,
-        })),
+        ...nodes.map((n) => ({ value: n.id, label: serverOptionLabel(n, selfId) })),
       ]}
     />
   );

@@ -1,12 +1,13 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { GLOBAL_PERMISSIONS, hasPermission } from "@/lib/authz";
+import { GLOBAL_PERMISSIONS, hasPermission, seesEverything } from "@/lib/authz";
 import { loadPrincipal } from "@/lib/principal";
 import { MeProvider } from "@/lib/hooks/useMe";
 import { NodeProvider, type NodeInfo } from "@/lib/hooks/useNode";
 import { clusterState, listMembers } from "@/services/cluster/state";
 import { AppSidebar } from "@/components/AppSidebar";
 import { MobileNav } from "@/components/MobileNav";
+import { PageAccess } from "@/components/PageAccess";
 import { CommandPalette } from "@/components/CommandPalette";
 import { TopBar } from "@/components/TopBar";
 import { PollingProvider } from "@/lib/hooks/usePollingInterval";
@@ -34,6 +35,7 @@ export default async function PanelLayout({
     email: session.user.email,
     isOwner: session.user.isOwner,
     permissions: GLOBAL_PERMISSIONS.filter((p) => hasPermission(principal, p)),
+    seesEverything: seesEverything(principal),
   };
 
   // The other servers of the cluster, for the selector. Empty in solo mode.
@@ -70,7 +72,7 @@ export default async function PanelLayout({
             the last row of every list sits underneath it, and on a long page
             that is the row you scrolled down to reach. */}
         <main className="mx-auto w-full max-w-[1400px] px-4 pt-6 pb-24 sm:px-6 md:pb-6 lg:px-8">
-          {children}
+          <PageAccess>{children}</PageAccess>
         </main>
       </div>
       {/* Mounted once for the whole panel: it listens for Ctrl/Cmd+K and

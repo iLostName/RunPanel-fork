@@ -160,9 +160,23 @@ export function serviceAccess(principal: Principal, ref: ServiceRef): Access {
   return ref.project ? combine(own, projectAccess(principal, ref.project)) : own;
 }
 
+/** Whether a grant covers everything, so every folder and project is visible. */
+export function seesEverything(principal: Principal): boolean {
+  return principal.isOwner || principal.grants.some((grant) => grant.scope === "all");
+}
+
 export function satisfies(access: Access, requirement: Requirement): boolean {
   if (levelRank(access.level) < levelRank(requirement.level)) return false;
   return !requirement.terminal || access.terminal;
+}
+
+/**
+ * Whether a list row lets this account do something, for hiding what it could
+ * not use: `permission` is what the server holding the row decided. A server on
+ * an older release does not send it, so the action stays and that server answers.
+ */
+export function rowAllows(row: { permission?: Access }, requirement: Requirement): boolean {
+  return !row.permission || satisfies(row.permission, requirement);
 }
 
 export function hasPermission(principal: Principal, permission: GlobalPermission): boolean {

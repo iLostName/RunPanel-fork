@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireFolder } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
+import { bumpedUpdatedAt } from "@/lib/cluster-directory";
 import { deleteGrantsFor } from "@/lib/users";
 import { getDb, nowIso } from "@/lib/db";
 import { updateFolderSchema } from "@/lib/validation";
+import { folderTombstone } from "@/services/cluster/folders";
+import { broadcastDirectory } from "@/services/cluster/sync";
 import { findFolderByName } from "@/services/folders";
 
 type Params = { params: Promise<{ folderId: string }> };
@@ -40,8 +43,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: `Esiste già una cartella "${name}".` }, { status: 409 });
     }
 
-    const updated_at = nowIso();
+    // Replicated, so the merge compares this stamp with what other servers hold.
+    const updated_at = bumpedUpdatedAt(folder.updated_at, nowIso());
     await db.updateTable("folders").set({ name, updated_at }).where("id", "=", folderId).execute();
+    void broadcastDirectory();
 
     return NextResponse.json({ ...folder, name, updated_at });
   });
@@ -51,7 +56,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
  * Deleting a folder empties it onto the root; it never takes a project or a
  * service with it. The columns are cleared here in the same transaction as
  * the delete rather than left to `on delete set null`, so the outcome does not
- * depend on which dialect — or which SQLite pragma — is underneath.
+ * depend on which dialect — or which SQLite pragma — is underneath. The other
+ * servers do the same for their own projects when the tombstone reaches them.
  */
 export async function DELETE(_request: NextRequest, { params }: Params) {
   return withAudit(_request, { category: "delete", action: "folder.delete", scope: "folder", scopeId: async () => (await params).folderId }, async () => {
@@ -79,7 +85,9 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
         .execute();
       await trx.deleteFrom("folders").where("id", "=", folderId).execute();
     });
+    await folderTombstone(folderId);
     await deleteGrantsFor("folder", folderId);
+    void broadcastDirectory();
 
     return NextResponse.json({ success: true });
   });

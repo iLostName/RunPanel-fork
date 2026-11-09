@@ -22,7 +22,8 @@ export type KnownStatus =
   | "success"
   | "partial"
   | "canceled"
-  | "skipped";
+  | "skipped"
+  | "unreachable";
 
 interface StatusMeta {
   tone: StatusTone;
@@ -51,7 +52,28 @@ const STATUS_META: Record<KnownStatus, StatusMeta> = {
   partial: { tone: "warning", label: "Parziale" },
   canceled: { tone: "neutral", label: "Annullato" },
   skipped: { tone: "neutral", label: "Saltato" },
+  // Not a state of the project: the server holding it did not answer, so this
+  // is the last thing known about it.
+  unreachable: { tone: "danger", label: "Non raggiungibile" },
 };
+
+/** What a start, stop or restart of a service reads as: the tokens are the API's, not the operator's. */
+const SERVICE_CONTROL = {
+  start: { done: "Servizio avviato", failed: "Avvio non riuscito" },
+  stop: { done: "Servizio fermato", failed: "Arresto non riuscito" },
+  restart: { done: "Servizio riavviato", failed: "Riavvio non riuscito" },
+} as const;
+
+export function serviceControlText(action: keyof typeof SERVICE_CONTROL): { done: string; failed: string } {
+  return SERVICE_CONTROL[action];
+}
+
+/** The same for a project: only the subject of the outcome changes. */
+const PROJECT_CONTROL_DONE = { start: "Progetto avviato", stop: "Progetto fermato", restart: "Progetto riavviato" } as const;
+
+export function projectControlText(action: keyof typeof SERVICE_CONTROL): { done: string; failed: string } {
+  return { done: PROJECT_CONTROL_DONE[action], failed: SERVICE_CONTROL[action].failed };
+}
 
 export function statusMeta(status: string): StatusMeta {
   return STATUS_META[status as KnownStatus] ?? STATUS_META.stopped;

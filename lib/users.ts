@@ -21,7 +21,6 @@ export type UserRow = UsersTable;
 /** Invitation links: the operator picks the lifetime, within these bounds. */
 export const INVITE_MIN_HOURS = 1;
 export const INVITE_MAX_HOURS = 24 * 30;
-export const INVITE_DEFAULT_HOURS = 48;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -336,7 +335,7 @@ export async function setUserAccess(userId: string, access: UserAccess): Promise
  * reach it that way. Without this, a user allowed to create projects would
  * create one and then not be able to open it.
  */
-export async function grantCreator(userId: string, scope: "project" | "service", targetId: string): Promise<void> {
+export async function grantCreator(userId: string, scope: "folder" | "project" | "service", targetId: string): Promise<void> {
   const db = await getDb();
   const user = await getUser(userId);
   if (!user || user.is_owner === 1) return;

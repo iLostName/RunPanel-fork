@@ -30,6 +30,8 @@ export type Located<T> = T & OnServer;
 export interface Aggregated<T> {
   items: Located<T>[];
   members: MemberStatus[];
+  /** Last known rows of the servers that did not answer, where the route keeps them. Never part of `items`. */
+  offline?: Located<T>[];
 }
 
 /**
@@ -123,4 +125,28 @@ export interface PerServer<T> {
   data: T | null;
   error: string | null;
   reachable: boolean;
+}
+
+/**
+ * What the Overview may say when no check came back bad.
+ *
+ * "No problems" is a claim about servers that answered. One that did not has
+ * not been checked, so the all-clear is only for when every server answered:
+ * the banner used to be green with the dead server in brackets. `missing` names
+ * what went unchecked, for the panel that lists real problems above it.
+ */
+export function healthVerdict(
+  servers: ReadonlyArray<Pick<PerServer<unknown>, "memberName" | "data" | "reachable">>
+): { clean: boolean; text: string; missing: string | null } {
+  const silent = servers.filter((s) => !s.data);
+  if (silent.length === 0) return { clean: true, text: "Nessun problema rilevato.", missing: null };
+
+  const down = silent.filter((s) => !s.reachable).map((s) => s.memberName);
+  const refused = silent.filter((s) => s.reachable).map((s) => s.memberName);
+  const parts: string[] = [];
+  if (down.length > 0) parts.push(`${down.join(", ")} non raggiungibil${down.length === 1 ? "e" : "i"}`);
+  if (refused.length > 0) parts.push(`${refused.join(", ")} senza risposta ai controlli`);
+  const missing = parts.join(", ");
+  const rest = silent.length < servers.length ? "Sugli altri server nessun problema rilevato." : "Stato non verificato.";
+  return { clean: false, text: `${missing}. ${rest}`, missing };
 }

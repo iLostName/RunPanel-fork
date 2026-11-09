@@ -1,4 +1,5 @@
 import { createReporter } from "../harness.mjs";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 
@@ -15,7 +16,7 @@ export const meta = { name: "cluster-directory-unit", needsDocker: false, driver
 
 export async function run({ repoRoot }) {
   const r = createReporter("cluster-directory-unit");
-  const { exportDirectory, mergeDirectory, canonicalDirectory, bumpedUpdatedAt, isSharedSettingKey } = await import(
+  const { exportDirectory, mergeDirectory, canonicalDirectory, bumpedUpdatedAt, isSharedSettingKey, mergeFolders, canonicalFolders } = await import(
     pathToFileURL(join(repoRoot, "lib", "cluster-directory.ts")).href
   );
 
@@ -134,6 +135,76 @@ export async function run({ repoRoot }) {
   }
 
   r.check("shared setting keys are the three agreed ones", isSharedSettingKey("github_token") && isSharedSettingKey("telegram_chat_id") && !isSharedSettingKey("panel_public_url"));
+
+  // --- folders ------------------------------------------------------------------
+  // A folder's row is the same on every server; what sits in it stays on the
+  // server that holds the project. If the merge diverges, a project is filed in
+  // a folder another server does not list; if a tombstone loses, a deleted
+  // folder comes back.
+  {
+    const folder = (id, patch = {}) => ({ id, name: id, created_at: t0, updated_at: t0, ...patch });
+    const set = (patch = {}) => ({ folders: [], tombstones: [], ...patch });
+
+    const a = set({ folders: [folder("f1"), folder("shared", { name: "Vecchio" })] });
+    const b = set({ folders: [folder("f2"), folder("shared", { name: "Nuovo", updated_at: t1 })] });
+    const ab = mergeFolders(a, b);
+    const ba = mergeFolders(b, a);
+    r.check("both servers end up with the same folders", canonicalFolders(ab.result) === canonicalFolders(ba.result), canonicalFolders(ab.result));
+    r.check("a folder from another server is taken in", ab.upsert.some((f) => f.id === "f2") && ab.result.folders.length === 3);
+    r.check("the newer rename wins, whichever side it is on", ab.result.folders.find((f) => f.id === "shared")?.name === "Nuovo");
+    r.check("what is already here and newer is not rewritten", !ba.upsert.some((f) => f.id === "shared"), JSON.stringify(ba.upsert));
+
+    const tomb = { id: "f1", deleted_at: t1 };
+    const gone = mergeFolders(set({ folders: [folder("f1")] }), set({ tombstones: [tomb] }));
+    r.check("a tombstone removes a folder changed before it", gone.remove.join() === "f1" && gone.result.folders.length === 0, JSON.stringify(gone));
+    const stale = mergeFolders(set({ tombstones: [tomb] }), set({ folders: [folder("f1")] }));
+    r.check("a stale copy does not bring it back", stale.upsert.length === 0 && stale.remove.length === 0 && stale.result.folders.length === 0, JSON.stringify(stale));
+    const later = mergeFolders(set({ tombstones: [tomb] }), set({ folders: [folder("f1", { updated_at: t2 })] }));
+    r.check("a folder renamed after the delete does not come back: its content and grants are already gone", later.upsert.length === 0 && later.result.folders.length === 0, JSON.stringify(later));
+    const renamedHere = mergeFolders(set({ folders: [folder("f1", { updated_at: t2 })] }), set({ tombstones: [tomb] }));
+    r.check("the side holding the later rename gives it up too", renamedHere.remove.join() === "f1" && renamedHere.result.folders.length === 0, JSON.stringify(renamedHere));
+    r.check("the delete and the rename settle on the same hash from either side", canonicalFolders(later.result) === canonicalFolders(renamedHere.result), `${canonicalFolders(later.result)} / ${canonicalFolders(renamedHere.result)}`);
+    r.check("a tombstone leaves another folder alone", mergeFolders(set({ folders: [folder("f2", { updated_at: t2 })] }), set({ tombstones: [tomb] })).result.folders.length === 1);
+    r.check("tombstones are the union of both sides, newest kept", mergeFolders(set({ tombstones: [tomb] }), set({ tombstones: [{ id: "f1", deleted_at: t2 }, { id: "f9", deleted_at: t0 }] })).tombstones.map((t) => `${t.id}@${t.deleted_at}`).join() === `f1@${t2},f9@${t0}`);
+
+    const once = mergeFolders(a, b).result;
+    const twice = mergeFolders(once, b);
+    r.check("merging again changes nothing", twice.upsert.length === 0 && twice.remove.length === 0);
+    r.check("the hash ignores row order", canonicalFolders(set({ folders: [folder("a"), folder("b")] })) === canonicalFolders(set({ folders: [folder("b"), folder("a")] })));
+
+    // The same plan against a real store: what a deleted folder leaves behind.
+    const require = createRequire(join(repoRoot, "package.json"));
+    const { Kysely, SqliteDialect } = require("kysely");
+    const SQLite = require("better-sqlite3");
+    const { applyFolderPlan } = await import(pathToFileURL(join(repoRoot, "services", "folders.ts")).href);
+    const sqlite = new SQLite(":memory:");
+    sqlite.pragma("foreign_keys = ON");
+    sqlite.exec(`
+      create table folders (id text primary key, name text not null, created_at text not null, updated_at text not null);
+      create table projects (id text primary key, folder_id text references folders(id) on delete set null, updated_at text);
+      create table services (id text primary key, folder_id text references folders(id) on delete set null, updated_at text);
+      create table cluster_tombstones (kind text not null, id text not null, deleted_at text not null, primary key (kind, id));
+      insert into folders values ('f1', 'Clienti', '${t0}', '${t0}'), ('keep', 'Resta', '${t0}', '${t0}');
+      insert into projects values ('p1', 'f1', '${t0}'), ('p2', 'keep', '${t0}');
+      insert into services values ('s1', 'f1', '${t0}');
+    `);
+    const db = new Kysely({ dialect: new SqliteDialect({ database: sqlite }) });
+    try {
+      const plan = mergeFolders(
+        set({ folders: [folder("f1"), folder("keep")] }),
+        set({ folders: [folder("new", { name: "Nuova" }), folder("keep", { name: "Rinominata", updated_at: t1 })], tombstones: [tomb] })
+      );
+      await applyFolderPlan(db, plan, t2);
+      await applyFolderPlan(db, plan, t2);
+      const rows = sqlite.prepare("select id, name from folders order by id").all();
+      r.check("the store takes the plan: new, renamed and deleted folders, twice over", rows.map((x) => `${x.id}:${x.name}`).join() === "keep:Rinominata,new:Nuova", JSON.stringify(rows));
+      r.check("what sat in a deleted folder goes back to the root, not away", sqlite.prepare("select folder_id from projects where id = 'p1'").get()?.folder_id === null && sqlite.prepare("select folder_id from services where id = 's1'").get()?.folder_id === null);
+      r.check("what sat in a folder that stayed does not move", sqlite.prepare("select folder_id from projects where id = 'p2'").get()?.folder_id === "keep");
+      r.check("the tombstone is stored", sqlite.prepare("select deleted_at from cluster_tombstones where kind = 'folder' and id = 'f1'").get()?.deleted_at === t1);
+    } finally {
+      await db.destroy();
+    }
+  }
 
   return r.result();
 }

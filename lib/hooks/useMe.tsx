@@ -17,6 +17,8 @@ export interface Me {
   email: string | null;
   isOwner: boolean;
   permissions: readonly GlobalPermission[];
+  /** A grant on everything: every folder is visible, so folders can be created. */
+  seesEverything: boolean;
 }
 
 const MeContext = createContext<Me | null>(null);
@@ -28,7 +30,7 @@ export function MeProvider({ me, children }: { me: Me; children: React.ReactNode
 export function useMe(): Me {
   const me = useContext(MeContext);
   // Outside the panel layout nothing is granted, which is the safe reading.
-  return me ?? { id: "", email: null, isOwner: false, permissions: [] };
+  return me ?? { id: "", email: null, isOwner: false, permissions: [], seesEverything: false };
 }
 
 /** Whether the signed-in user holds a panel-wide permission (the owner holds all). */

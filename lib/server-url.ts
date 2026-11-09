@@ -27,6 +27,12 @@ export function serverFromSearch(search: string | URLSearchParams | null | undef
   return value && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : null;
 }
 
+/** How a server reads in every selector: the three of them used to disagree about a server that is down. */
+export function serverOptionLabel(node: { id: string; name: string; status?: string }, selfId: string | null): string {
+  if (node.id === selfId) return `${node.name} (questo)`;
+  return node.status === "unreachable" ? `${node.name} · non raggiungibile` : node.name;
+}
+
 /**
  * `href` with the server parameter set (or removed when `serverId` is null).
  * Keeps the path, the other parameters and the hash; leaves absolute URLs and
