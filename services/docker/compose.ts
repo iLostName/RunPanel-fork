@@ -116,7 +116,13 @@ export async function composeValidate(ctx: ComposeContext, env: Record<string, s
 
 export async function composeBuild(
   ctx: ComposeContext,
-  opts: { buildArgs?: Record<string, string>; env: Record<string, string>; timeout?: number; onLog: (line: string) => void }
+  opts: {
+    buildArgs?: Record<string, string>;
+    env: Record<string, string>;
+    timeout?: number;
+    onLog: (line: string) => void;
+    signal?: AbortSignal;
+  }
 ): Promise<void> {
   const args = [...baseArgs(ctx), "build"];
 
@@ -132,6 +138,7 @@ export async function composeBuild(
     cwd: ctx.projectDir,
     timeout: opts.timeout ?? 900_000,
     env: { ...opts.env, ...(opts.buildArgs ?? {}) },
+    signal: opts.signal,
   });
 
   for (const line of lines(result.stderr)) opts.onLog(line);
@@ -190,6 +197,8 @@ export async function composeDown(
 
 export interface ComposeService {
   name: string;
+  /** The real name of the container, which `container_name:` can make anything. */
+  container: string | null;
   state: string;
   health: string | null;
 }
@@ -208,6 +217,7 @@ export async function composePs(ctx: ComposeContext): Promise<ComposeService[]> 
       const parsed = JSON.parse(line) as { Service?: string; Name?: string; State?: string; Health?: string };
       services.push({
         name: parsed.Service ?? parsed.Name ?? "unknown",
+        container: parsed.Name ?? null,
         state: parsed.State ?? "unknown",
         health: parsed.Health || null,
       });

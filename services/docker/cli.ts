@@ -42,6 +42,8 @@ export interface DockerOptions {
    * `args:` entries declared without a value are filled from it too.
    */
   env?: Record<string, string>;
+  /** Kills the docker client. For a build that also ends the build. */
+  signal?: AbortSignal;
 }
 
 const DEFAULT_TIMEOUT = 30_000;
@@ -54,6 +56,7 @@ export async function docker(args: string[], opts: DockerOptions = {}) {
       cwd: opts.cwd,
       maxBuffer: opts.maxBuffer ?? DEFAULT_MAX_BUFFER,
       windowsHide: true,
+      signal: opts.signal,
       // Built on a sanitised base, so a compose file can never interpolate
       // RunPanel's own secrets into a user's stack. DOCKER_CONFIG points at the
       // panel's own auth file when a private registry is configured, so pulls

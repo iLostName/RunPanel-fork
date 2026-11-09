@@ -36,6 +36,29 @@ export function parseDockerSize(text: string): number {
  * recognised, so the build cache — usually the biggest thing a clean removes —
  * was always counted as nothing, and the page said "0 B".
  */
+/**
+ * Which immutable tags of a project go, newest-first input.
+ *
+ * The moving alias never goes, and neither does any tag of the image it points
+ * at: that tag is what the last successful deployment recorded, so it is what
+ * the next restart starts. Counted like any other, a run of failed builds would
+ * push the one good image out of the newest `keep`. So it takes its place among
+ * the `keep` first, and the newest of the rest fill what is left.
+ */
+export function imagesToRetire<T extends { id: string; repository: string; tag: string }>(
+  images: T[],
+  repository: string,
+  aliasTag: string,
+  keep: number
+): T[] {
+  const own = images.filter((image) => image.repository === repository);
+  const live = own.find((image) => image.tag === aliasTag)?.id;
+  const candidates = own.filter(
+    (image) => image.tag !== aliasTag && image.tag !== "<none>" && image.id !== live
+  );
+  return candidates.slice(Math.max(0, keep - (live === undefined ? 0 : 1)));
+}
+
 export function parseReclaimed(stdout: string): number {
   const match = stdout.match(/Total(?: reclaimed space)?:\s*([\d.]+\s*[kKMGT]?B)/);
   return match ? parseDockerSize(match[1]) : 0;

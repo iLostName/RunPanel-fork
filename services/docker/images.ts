@@ -4,6 +4,7 @@ import {
   buildCachePruneArgs,
   composeOrphanImages,
   danglingImagePruneArgs,
+  imagesToRetire,
   parseReclaimed,
   unusedImageRefs,
 } from "@/lib/docker-cleanup";
@@ -37,22 +38,6 @@ export function imageTag(slug: string, deploymentId: string): string {
 
 export function currentImageTag(slug: string): string {
   return `${imageRepo(slug)}:${CURRENT_TAG}`;
-}
-
-export interface BuildImageOptions {
-  slug: string;
-  deploymentId: string;
-  contextDir: string;
-  dockerfile?: string;
-  target?: string;
-  buildArgs?: Record<string, string>;
-  timeout?: number;
-  onLog?: (line: string) => void;
-}
-
-/** Build args for `docker build`, kept separate so they are easy to log. */
-export function buildArgsToFlags(buildArgs: Record<string, string> = {}): string[] {
-  return Object.entries(buildArgs).flatMap(([key, value]) => ["--build-arg", `${key}=${value}`]);
 }
 
 const IMAGE_FORMAT = "{{.ID}}\t{{.Repository}}\t{{.Tag}}\t{{.CreatedAt}}\t{{.Size}}";
@@ -91,22 +76,23 @@ export async function removeImages(refs: string[]): Promise<number> {
 }
 
 /**
- * Keep the newest `keep` immutable tags for a project and drop the rest.
- * `:current` is never a deletion candidate — it is an alias for one of them.
+ * Keep the newest `keep` immutable tags for a project and drop the rest. The
+ * rule, including what is never a candidate, is `imagesToRetire`.
  */
 export async function pruneProjectImages(slug: string, keep: number): Promise<string[]> {
   const images = await listProjectImages(slug);
 
-  const candidates = images.filter(
-    (image) => image.repository === imageRepo(slug) && image.tag !== CURRENT_TAG && image.tag !== "<none>"
-  );
-
-  // `docker images` already lists newest first; the slice is what survives.
-  const doomed = candidates.slice(Math.max(0, keep));
+  // `docker images` already lists newest first.
+  const doomed = imagesToRetire(images, imageRepo(slug), CURRENT_TAG, keep);
   const refs = doomed.map((image) => `${image.repository}:${image.tag}`);
 
   await removeImages(refs);
   return refs;
+}
+
+/** Point `:current` at the image a deploy just proved good. */
+export async function markCurrentImage(slug: string, image: string): Promise<void> {
+  await docker(["tag", image, currentImageTag(slug)], { timeout: 30_000 });
 }
 
 /** Remove every image belonging to a project, including `:current`. */
@@ -129,10 +115,6 @@ export async function pruneDangling(deep = false): Promise<number> {
   return parseReclaimed(result?.stdout ?? "");
 }
 
-/** Kept for the callers that only ever meant the routine pass. */
-export async function pruneDanglingOwned(): Promise<number> {
-  return pruneDangling(false);
-}
 
 /**
  * Build cache is not labelled by Docker, so this is all-or-nothing by age.

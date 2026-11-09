@@ -34,10 +34,10 @@ export const nodeBuilder: IBuilder = {
         const cmds = installCmd.split("\n").map(c => c.trim()).filter(Boolean);
         const joined = cmds.join(" && ");
         onLog(cmds.map(c => `> ${c}`).join("\n"));
-        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog });
+        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog, signal: ctx.signal });
       } else {
         onLog(`> ${pm.install}`);
-        await runCommand(pm.install, { cwd: projectDir, env: envVars, timeout, onLog });
+        await runCommand(pm.install, { cwd: projectDir, env: envVars, timeout, onLog, signal: ctx.signal });
       }
       onLog("Dependencies installed.");
 
@@ -51,12 +51,12 @@ export const nodeBuilder: IBuilder = {
         const cmds = buildCmd.split("\n").map(c => c.trim()).filter(Boolean);
         const joined = cmds.join(" && ");
         onLog(cmds.map(c => `> ${c}`).join("\n"));
-        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog });
+        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog, signal: ctx.signal });
         onLog("Build completed.");
       } else if (hasBuildScript) {
         const cmd = `${pm.cmd} run build`;
         onLog(`> ${cmd}`);
-        await runCommand(cmd, { cwd: projectDir, env: envVars, timeout, onLog });
+        await runCommand(cmd, { cwd: projectDir, env: envVars, timeout, onLog, signal: ctx.signal });
         onLog("Build completed.");
       }
 

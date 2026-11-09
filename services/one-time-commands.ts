@@ -185,8 +185,13 @@ export async function replaceQueue(
       rewrote the text of a command the deploy was already executing — so the
       old one ran and the history recorded the new one — and the DELETE removed
       the row while its command ran anyway, leaving no trace at all. The
-      predicate makes a claimed row simply invisible to this function, which
-      turns the 409 back into a courtesy instead of the only defence.
+      predicate makes a claimed row simply invisible to this function.
+
+      Invisible is not enough on its own. The SELECT takes no lock on Postgres,
+      so a claim can still land after it, and a write that then matches nothing
+      is no error: the PUT would answer 200 and the deploy would run the text
+      the operator had just replaced. Every write counts its rows, and a short
+      count throws, which rolls the whole replacement back into a 409.
     */
     const existing = await trx
       .selectFrom("one_time_commands")
@@ -208,7 +213,7 @@ export async function replaceQueue(
 
       if (previous) {
         kept.add(previous.id);
-        await trx
+        const updated = await trx
           .updateTable("one_time_commands")
           .set({
             phase: input.phase,
@@ -219,7 +224,8 @@ export async function replaceQueue(
           })
           .where("id", "=", previous.id)
           .where("status", "=", "queued")
-          .execute();
+          .executeTakeFirst();
+        if (rowCount(updated) !== 1) throw new QueueChangedError();
         continue;
       }
 
@@ -247,11 +253,12 @@ export async function replaceQueue(
 
     const dropped = existing.filter((row) => !kept.has(row.id)).map((row) => row.id);
     if (dropped.length > 0) {
-      await trx
+      const deleted = await trx
         .deleteFrom("one_time_commands")
         .where("id", "in", dropped)
         .where("status", "=", "queued")
-        .execute();
+        .executeTakeFirst();
+      if (rowCount(deleted) !== dropped.length) throw new QueueChangedError();
     }
 
     const rows = await trx
@@ -365,9 +372,12 @@ export interface PhaseContext {
   /** The built image, from the post-build phases on. Null before it exists. */
   image: string | null;
   env: Record<string, string>;
+  /** For a command on the host, where the names of the project network do not resolve. */
+  hostEnv?: Record<string, string>;
   contract: DeployContract;
   commitSha: string | null;
   onLog: (line: string) => void;
+  signal?: AbortSignal;
 }
 
 /**
@@ -406,6 +416,9 @@ export async function runPhase(
   );
 
   for (const row of rows) {
+    // Left claimed: the release at the end of the deploy puts it back.
+    if (ctx.signal?.aborted) throw new Error("Deploy interrotto");
+
     const script = joinScript(row.command);
     const name = nameOf(row);
 
@@ -436,14 +449,17 @@ export async function runPhase(
           env: ctx.env,
           contract: ctx.contract,
           onLog: ctx.onLog,
+          timeout: COMMAND_TIMEOUT_MS,
+          signal: ctx.signal,
         });
       } else {
         ctx.onLog(`> ${script}`);
         await runCommand(script, {
           cwd: ctx.projectDir,
-          env: ctx.env,
+          env: ctx.hostEnv ?? ctx.env,
           timeout: COMMAND_TIMEOUT_MS,
           onLog: ctx.onLog,
+          signal: ctx.signal,
         });
       }
     } catch (err: unknown) {
