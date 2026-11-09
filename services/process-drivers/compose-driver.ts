@@ -2,6 +2,7 @@ import { IProcessDriver, ProcessInfo, StartOpts, OutputCallback } from "./types"
 import { getRepoPath } from "../git-manager";
 import { containerStats } from "../docker/stats";
 import { markRunStart, sinceArgs } from "./run-log";
+import { sumContainerUsage } from "@/lib/docker-snapshot";
 import {
   composeContext,
   composeDown,
@@ -83,25 +84,13 @@ export const composeDriver: IProcessDriver = {
     // one is not dead: a backup freezes the writers of a volume for the length
     // of the copy, and the status sweep reading that as a crash would send a
     // "stopped by itself" notification for every nightly backup.
-    const running = services.every((s) => s.state === "running" || s.state === "paused");
+    const up = (s: { state: string }) => s.state === "running" || s.state === "paused";
+    const running = services.every(up);
 
     // Resource usage is the sum across the stack, read from the stats stream.
-    void containerStats.ensureStarted();
-    let cpu = 0;
-    let memory = 0;
-    let seen = false;
-    for (const stat of containerStats.all()) {
-      if (!stat.name.startsWith(`runpanel-${slug}`)) continue;
-      cpu += stat.cpu;
-      memory += stat.memory;
-      seen = true;
-    }
+    const names = services.flatMap((s) => (s.container ? [s.container] : []));
 
-    return {
-      running,
-      cpu: seen ? Math.round(cpu * 10) / 10 : undefined,
-      memory: seen ? memory : undefined,
-    };
+    return { running, partlyUp: services.some(up), ...sumContainerUsage(names, containerStats.peek) };
   },
 
   async logs(slug: string, count: number): Promise<string[]> {

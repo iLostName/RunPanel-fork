@@ -5,6 +5,7 @@ import { buildEnv, getShellPath, isWindows, toolchainPath, whichSync } from "../
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
+import { mergeLogTails, tailLogLines } from "../log-file";
 
 const exec = promisify(execFile);
 
@@ -539,17 +540,11 @@ child.on("error", (e) => { console.error("Process error:", e.message); process.e
   async logs(slug: string, lines: number): Promise<string[]> {
     // Read the log files directly rather than shelling out to `pm2 logs`,
     // which starts a whole pm2 client just to print a tail.
-    const collected: string[] = [];
-    for (const file of [pm2LogFile(slug, "out"), pm2LogFile(slug, "error")]) {
-      if (!fs.existsSync(file)) continue;
-      try {
-        const content = fs.readFileSync(file, "utf8");
-        collected.push(...content.split("\n").filter(Boolean));
-      } catch {
-        /* a log being written to mid-read is not worth failing over */
-      }
-    }
-    return collected.slice(Math.max(0, collected.length - lines));
+    const [out, err] = await Promise.all([
+      tailLogLines(pm2LogFile(slug, "out"), lines),
+      tailLogLines(pm2LogFile(slug, "error"), lines),
+    ]);
+    return mergeLogTails(out, err, lines);
   },
 
   onOutput(slug: string, callback: OutputCallback): () => void {

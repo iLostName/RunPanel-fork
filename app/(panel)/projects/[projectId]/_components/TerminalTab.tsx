@@ -40,8 +40,12 @@ export function TerminalTab({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "start" }),
       });
-      if (res.ok) onActiveChange(true);
-      else onLocalEcho("Impossibile avviare la shell\n");
+      if (res.ok) {
+        onActiveChange(true);
+      } else {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        onLocalEcho(`${data?.error ?? "Impossibile avviare la shell"}\n`);
+      }
     } catch {
       onLocalEcho("Impossibile avviare la shell\n");
     } finally {
@@ -62,17 +66,31 @@ export function TerminalTab({
     onActiveChange(false);
   }
 
-  function send() {
+  async function send() {
     const command = input;
     setInput("");
     // Echo locally so the prompt feels immediate; the container's own output
     // follows on the stream.
     onLocalEcho(`$ ${command}\n`);
-    void fetch(api(`/api/projects/${projectId}/terminal`), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: `${command}\n` }),
-    });
+    try {
+      const res = await fetch(api(`/api/projects/${projectId}/terminal`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: `${command}\n` }),
+      });
+      const data = (await res.json().catch(() => null)) as { status?: string; error?: string } | null;
+
+      // The stream reports a shell that exits, but not one that went while it
+      // was not listening: reaped when idle, or lost in a panel restart.
+      if (data?.status === "dead") {
+        onLocalEcho("Sessione chiusa: il comando non è stato eseguito. Avvia di nuovo la shell.\n");
+        onActiveChange(false);
+      } else if (!res.ok) {
+        onLocalEcho(`${data?.error ?? "Comando non inviato"}\n`);
+      }
+    } catch {
+      onLocalEcho("Comando non inviato: il pannello non risponde\n");
+    }
   }
 
   return (
@@ -102,7 +120,7 @@ export function TerminalTab({
         className="h-[320px] sm:h-[440px]"
       />
 
-      {active && <ShellInput value={input} onChange={setInput} onSubmit={send} />}
+      {active && <ShellInput value={input} onChange={setInput} onSubmit={() => void send()} />}
     </div>
   );
 }

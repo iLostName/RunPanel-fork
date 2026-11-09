@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireProject } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { isPathShapeSafe, resolveInside } from "@/lib/fs-safe";
+import { LIST_DIRECTORY_NOT_FOUND, LIST_DIRECTORY_SCRIPT, parseDirectoryListing } from "@/lib/container-listing";
 import { getRepoPath } from "@/services/git-manager";
+import { appContainerName } from "@/services/docker/labels";
+import { assertOwnAppContainer, ForeignContainerError } from "@/services/process-drivers/docker-driver";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
@@ -35,24 +38,14 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   try {
     if (project.runtime_type === "docker") {
-      // Docker: use docker exec to list files
-      const containerName = `runpanel-${project.slug}`;
-      const targetPath = dirPath === "/" ? "/" : dirPath;
+      await assertOwnAppContainer(project.slug);
+
+      // The path travels as an argument of the script, never inside its text.
       const { stdout } = await exec("docker", [
-        "exec", containerName, "ls", "-la", "--time-style=+%Y-%m-%d", targetPath,
-      ], { timeout: 10_000 });
+        "exec", appContainerName(project.slug), "sh", "-c", LIST_DIRECTORY_SCRIPT, "sh", dirPath,
+      ], { timeout: 10_000, maxBuffer: 16 * 1024 * 1024 });
 
-      const entries = stdout.split("\n").slice(1).filter(Boolean).map((line) => {
-        const parts = line.split(/\s+/);
-        if (parts.length < 7) return null;
-        const isDir = parts[0].startsWith("d");
-        const size = parseInt(parts[4]) || 0;
-        const name = parts.slice(6).join(" ");
-        if (name === "." || name === "..") return null;
-        return { name, type: isDir ? "dir" : "file", size };
-      }).filter(Boolean);
-
-      return NextResponse.json({ entries, path: dirPath });
+      return NextResponse.json({ entries: parseDirectoryListing(stdout), path: dirPath });
     }
 
     // Local: read from repos directory
@@ -103,7 +96,16 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     return NextResponse.json({ entries, path: dirPath });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Failed to list files";
+    if (err instanceof ForeignContainerError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
+    const { code, stderr } = err as { code?: unknown; stderr?: unknown };
+    if (code === LIST_DIRECTORY_NOT_FOUND) {
+      return NextResponse.json({ error: "Percorso inesistente" }, { status: 404 });
+    }
+    // Never the message of a failed exec: it quotes the whole command line.
+    const detail = typeof stderr === "string" ? stderr.trim() : "";
+    const message = detail || (err instanceof Error && code === undefined ? err.message : "Lettura non riuscita");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

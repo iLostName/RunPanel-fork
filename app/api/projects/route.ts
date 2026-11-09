@@ -7,6 +7,7 @@ import { projectAccess } from "@/lib/authz";
 import { redactProject } from "@/lib/project-redact";
 import { grantCreator } from "@/lib/users";
 import { generateId, slugify } from "@/lib/utils";
+import { isReservedSlug } from "@/lib/project-slug";
 import { createProjectSchema } from "@/lib/validation";
 import crypto from "crypto";
 
@@ -20,13 +21,13 @@ export async function GET() {
     // Only what this account can at least read; the services nested under a
     // project are filtered too, since a service grant can be narrower.
     const [refs, canSeeService] = await Promise.all([projectRefs(), visibleServiceIds(denied.principal)]);
-    const levelOf = (id: string) => {
+    const accessOf = (id: string) => {
       const ref = refs.get(id);
-      return ref ? projectAccess(denied.principal, ref).level : null;
+      return ref ? projectAccess(denied.principal, ref) : { level: null, terminal: false };
     };
     const projects = (await db.selectFrom("projects").selectAll().orderBy("created_at", "desc").execute())
-      .filter((p) => levelOf(p.id) !== null)
-      .map((p) => redactProject(p, levelOf(p.id) === "manage"));
+      .filter((p) => accessOf(p.id).level !== null)
+      .map((p) => redactProject(p, accessOf(p.id).level === "manage"));
 
     // Deployment stats in one grouped pass rather than two correlated
     // subqueries per project. `count` comes back as a string on Postgres and a
@@ -64,8 +65,11 @@ export async function GET() {
       else servicesByProject.set(pid, [svc]);
     }
 
+    // `permission` as on the single project, so a list can hide what its rows
+    // cannot do; each server answers for its own rows.
     const result = projects.map((p) => ({
       ...p,
+      permission: accessOf(p.id),
       deploy_count: statsByProject.get(p.id)?.deploy_count ?? 0,
       last_deploy_at: statsByProject.get(p.id)?.last_deploy_at ?? null,
       services: servicesByProject.get(p.id) ?? [],
@@ -101,6 +105,13 @@ export async function POST(request: NextRequest) {
     const { name } = parsed.data;
     const id = generateId();
     const slug = slugify(name);
+
+    if (isReservedSlug(slug)) {
+      return NextResponse.json(
+        { error: `Il nome diventa "${slug}", che il pannello riserva ai propri container: scegline un altro` },
+        { status: 400 }
+      );
+    }
 
     const db = await getDb();
 

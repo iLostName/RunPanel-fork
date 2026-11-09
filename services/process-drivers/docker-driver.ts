@@ -1,13 +1,78 @@
 import { IProcessDriver, ProcessInfo, StartOpts, OutputCallback } from "./types";
 import { docker, dockerTry, dockerStream, lines } from "../docker/cli";
-import { appContainerName, labelArgs } from "../docker/labels";
+import { withDockerEnv } from "../docker/env-file";
+import {
+  appContainerName,
+  CONTAINER_LIST_FORMAT,
+  foreignOwner,
+  labelArgs,
+  parseContainerList,
+  parseLabelsJson,
+} from "../docker/labels";
 import { containerStats } from "../docker/stats";
 import { markRunStart, sinceArgs } from "./run-log";
 import { CONTAINER_LOG_ARGS } from "@/lib/docker-cleanup";
+import { isReservedSlug } from "@/lib/project-slug";
+
+/** The container name of a project is taken by something that is not that project. */
+export class ForeignContainerError extends Error {
+  constructor(name: string, owner: string) {
+    super(
+      `Il container ${name} appartiene a ${owner}: operazione fermata per non toccarlo. ` +
+        "Il nome di questo progetto si sovrappone: crea un nuovo progetto con un altro nome."
+    );
+    this.name = "ForeignContainerError";
+  }
+}
+
+/**
+ * The labels of a container, or null when there is none by that name.
+ *
+ * A listing rather than `docker inspect`: inspect reports a missing container as
+ * an error, and telling that from a daemon that did not answer would mean reading
+ * its wording. Here absent is an empty result and a failure is a failure, which
+ * matters because absent is what lets a deploy go on. Names are stored with a
+ * leading slash, and the filter is a regex: anchored, or `runpanel-shop` would
+ * also match `runpanel-shop-api`.
+ */
+async function containerLabels(name: string): Promise<Record<string, string> | null> {
+  const { stdout } = await docker(
+    ["ps", "-a", "--filter", `name=^/?${name}$`, "--format", CONTAINER_LIST_FORMAT],
+    { timeout: 10_000 }
+  );
+  return parseContainerList(stdout).find((row) => row.names.includes(name))?.labels ?? null;
+}
+
+/**
+ * Check the container of a project before acting on it. Says whether it exists;
+ * throws `ForeignContainerError` when the name belongs to someone else, and the
+ * docker error when that cannot be established.
+ */
+export async function assertOwnAppContainer(slug: string): Promise<boolean> {
+  const name = appContainerName(slug);
+  const labels = await containerLabels(name);
+  if (!labels) return false;
+
+  const owner = foreignOwner(slug, labels, isReservedSlug(slug));
+  if (owner) throw new ForeignContainerError(name, owner);
+  return true;
+}
+
+/** For the calls with no failure to report. Unable to tell counts as not ours. */
+function mayActOnAppContainer(slug: string): Promise<boolean> {
+  return assertOwnAppContainer(slug).then(
+    () => true,
+    () => false
+  );
+}
 
 export const dockerDriver: IProcessDriver = {
   async start(slug: string, startCmd: string, opts: StartOpts): Promise<void> {
     const name = appContainerName(slug);
+
+    // Before anything else: the `rm -f` below takes whatever answers to this
+    // name, and it can be a database.
+    await assertOwnAppContainer(slug);
 
     // A fresh container starts with an empty log, but a crash-restart under
     // `--restart` does not, and neither does `restart()`. The marker is what
@@ -77,13 +142,8 @@ export const dockerDriver: IProcessDriver = {
     if (opts.cpus) args.push("--cpus", opts.cpus);
     if (opts.shmSize) args.push("--shm-size", opts.shmSize);
 
-    for (const [key, value] of Object.entries(opts.env)) {
-      args.push("-e", `${key}=${value}`);
-    }
-
-    args.push(imageName);
-
-    await docker(args, { timeout: 180_000 });
+    // Values off argv, where any local account could read them: see `lib/docker-env.ts`.
+    await withDockerEnv(opts.env, (envArgs) => docker([...args, ...envArgs, imageName], { timeout: 180_000 }));
 
     // The default bridge too, before the process starts. Not applicable in
     // host mode, where there is no bridge to join; already-connected is a
@@ -98,16 +158,19 @@ export const dockerDriver: IProcessDriver = {
   async stop(slug: string): Promise<void> {
     // `stop`, not `rm -f`. Destroying the container on stop is why "start" had
     // to replay the previous deployment's command to bring anything back.
+    if (!(await mayActOnAppContainer(slug))) return;
     await dockerTry(["stop", appContainerName(slug)], { timeout: 30_000 });
   },
 
   async remove(slug: string): Promise<void> {
     // A stopped container keeps its image referenced, so `docker rmi` on that
     // image silently fails and leaves it dangling.
+    if (!(await mayActOnAppContainer(slug))) return;
     await dockerTry(["rm", "-f", appContainerName(slug)], { timeout: 30_000 });
   },
 
   async restart(slug: string): Promise<void> {
+    await assertOwnAppContainer(slug);
     markRunStart(slug);
     await docker(["restart", appContainerName(slug)], { timeout: 60_000 });
   },
@@ -116,12 +179,14 @@ export const dockerDriver: IProcessDriver = {
     const name = appContainerName(slug);
     const result = await dockerTry([
       "inspect", name,
-      "--format", "{{.State.Running}}|{{.State.Pid}}|{{.Id}}|{{.State.StartedAt}}",
+      "--format", "{{.State.Running}}|{{.State.Pid}}|{{.Id}}|{{.State.StartedAt}}|{{json .Config.Labels}}",
     ]);
 
     if (!result) return { running: false };
 
-    const [running, pid, containerId, startedAt] = result.stdout.trim().split("|");
+    const [running, pid, containerId, startedAt, ...labels] = result.stdout.trim().split("|");
+    if (foreignOwner(slug, parseLabelsJson(labels.join("|")), isReservedSlug(slug))) return { running: false };
+
     const shortId = containerId?.slice(0, 12);
 
     if (running !== "true") return { running: false, containerId: shortId };
@@ -133,9 +198,8 @@ export const dockerDriver: IProcessDriver = {
     }
 
     // Read from the streaming cache instead of spawning `docker stats
-    // --no-stream`, which costs seconds per call.
-    void containerStats.ensureStarted();
-    const stats = containerStats.get(name);
+    // --no-stream`, which costs seconds per call. Only a look: see `peek`.
+    const stats = containerStats.peek(name);
 
     return {
       running: true,
@@ -149,6 +213,8 @@ export const dockerDriver: IProcessDriver = {
 
   async logs(slug: string, count: number): Promise<string[]> {
     const name = appContainerName(slug);
+    if (!(await mayActOnAppContainer(slug))) return [];
+
     const result = await dockerTry(["logs", name, "--tail", count.toString(), ...sinceArgs(slug)], {
       timeout: 15_000,
       maxBuffer: 10 * 1024 * 1024,
@@ -169,8 +235,19 @@ export const dockerDriver: IProcessDriver = {
   },
 
   onOutput(slug: string, callback: OutputCallback): () => void {
-    return dockerStream(["logs", appContainerName(slug), "-f", "--tail", "0"], (line) =>
-      callback(line, "stdout")
-    );
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+
+    void mayActOnAppContainer(slug).then((allowed) => {
+      if (!allowed || cancelled) return;
+      stop = dockerStream(["logs", appContainerName(slug), "-f", "--tail", "0"], (line) =>
+        callback(line, "stdout")
+      );
+    });
+
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
   },
 };

@@ -13,6 +13,9 @@ export const LABEL_PROJECT = "runpanel.project";
 export const LABEL_KIND = "runpanel.kind";
 export const LABEL_DEPLOYMENT = "runpanel.deployment";
 export const LABEL_SERVICE = "runpanel.service";
+/** Stamped by compose itself, which refuses `--label` on `up`. */
+export const LABEL_COMPOSE_PROJECT = "com.docker.compose.project";
+const LABEL_COMPOSE_ONE_OFF = "com.docker.compose.oneoff";
 
 export type ResourceKind = "app" | "service" | "network";
 
@@ -69,6 +72,69 @@ export function parseLabels(labels: string | undefined): Record<string, string> 
     out[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
   }
   return out;
+}
+
+/** The output of `{{json .Config.Labels}}`, which is `null` for no labels at all. */
+export function parseLabelsJson(text: string): Record<string, string> {
+  return (JSON.parse(text.trim() || "null") as Record<string, string> | null) ?? {};
+}
+
+/** One line of `docker ps -a --format CONTAINER_LIST_FORMAT`. */
+export const CONTAINER_LIST_FORMAT = "{{.Names}}|{{.State}}|{{.Labels}}";
+
+export interface ContainerRow {
+  names: string[];
+  state: string;
+  labels: Record<string, string>;
+  /** The compose project it belongs to. Empty for anything else. */
+  composeProject: string;
+  /** A `compose run`, which is not part of the state of the stack. */
+  oneOff: boolean;
+}
+
+export function parseContainerList(stdout: string): ContainerRow[] {
+  const rows: ContainerRow[] = [];
+
+  for (const line of stdout.split("\n")) {
+    const [names, state, ...rest] = line.trim().split("|");
+    if (!names || !state) continue;
+
+    const labels = parseLabels(rest.join("|"));
+    rows.push({
+      // One container can carry several names, comma-separated.
+      names: names.split(",").map((name) => name.trim()).filter(Boolean),
+      state,
+      labels,
+      composeProject: labels[LABEL_COMPOSE_PROJECT] ?? "",
+      oneOff: labels[LABEL_COMPOSE_ONE_OFF] === "True",
+    });
+  }
+  return rows;
+}
+
+/**
+ * Who a container answering to `runpanel-<slug>` belongs to, when that is not
+ * the project `slug`: a description for the operator, or null when it is the
+ * own container of the project.
+ *
+ * The name alone proves nothing. Slugs were never reserved, so an existing
+ * project can be called `svc-postgres`, which is the container of the postgres
+ * service, or `shop-web-1`, which is what compose names the first `web` of the
+ * stack `shop`. Those are not renamed, since other things reach them by name:
+ * the labels are what tell them apart.
+ *
+ * No labels at all is a container from before they existed (8da5d0c), and it can
+ * only be the app of the project: a service would sit in a reserved namespace,
+ * which is what `reservedName` says, and compose always stamps its containers.
+ */
+export function foreignOwner(slug: string, labels: Record<string, string>, reservedName: boolean): string | null {
+  if (labels[LABEL_KIND] === "app" && labels[LABEL_PROJECT] === slug) return null;
+
+  if (labels[LABEL_COMPOSE_PROJECT]) return `lo stack Compose ${labels[LABEL_COMPOSE_PROJECT]}`;
+  if (labels[LABEL_KIND] === "service") return `il servizio ${labels[LABEL_SERVICE] ?? "senza nome"}`;
+  if (labels[LABEL_MANAGED]) return `il progetto ${labels[LABEL_PROJECT] ?? "senza nome"}`;
+
+  return reservedName ? "una risorsa riservata del pannello" : null;
 }
 
 // --- Naming -----------------------------------------------------------------
