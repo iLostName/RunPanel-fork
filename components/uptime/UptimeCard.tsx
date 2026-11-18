@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { Panel } from "@/components/ui/Panel";
@@ -8,8 +9,10 @@ import { LoadError } from "@/components/ui/LoadError";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { Advanced, Technical } from "@/components/ui/Technical";
 import { MetricChart } from "@/components/charts/MetricChart";
+import { StatusPageLink } from "@/components/uptime/StatusPageLink";
 import { useResource } from "@/lib/hooks/useResource";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useMe } from "@/lib/hooks/useMe";
+import { useNode, useNodeApi } from "@/lib/hooks/useNode";
 import { cn } from "@/lib/utils";
 import type { SeriesPayload } from "@/lib/metrics-math";
 import {
@@ -32,6 +35,8 @@ interface Incident {
 /** What `/api/projects/{id}/uptime` answers. */
 export interface UptimeData {
   now: number;
+  /** The public status page showing this project, under the name chosen for it. Absent from older servers. */
+  publicPage?: { name: string; path: string; url: string | null } | null;
   watch: {
     active: boolean;
     skip: "disabled" | "no-port" | "not-running" | null;
@@ -151,6 +156,10 @@ export function UptimeCard({ projectId, className }: { projectId: string; classN
 /** The card itself, from an answer already in hand. */
 export function UptimeView({ data, className }: { data: UptimeData; className?: string }) {
   const [showAll, setShowAll] = useState(false);
+  const { isOwner } = useMe();
+  // The page is this panel's; a project of another server is told about it by
+  // that server, which knows nothing of this panel's page.
+  const { isRemote } = useNode();
   const head = headline(data);
   const hasHistory = data.days.some((d) => d.ratio !== null) || data.incidents.length > 0;
   // A project that is not running and never was checked has nothing to say
@@ -245,6 +254,16 @@ export function UptimeView({ data, className }: { data: UptimeData; className?: 
           </>
         )}
 
+        {data.publicPage?.url && (
+          <div className="space-y-1.5">
+            <p className="text-muted text-meta">
+              Sulla pagina di stato pubblica come <span className="text-foreground">«{data.publicPage.name}»</span>: chi ha il
+              link vede se risponde, senza accedere.
+            </p>
+            <StatusPageLink url={data.publicPage.url} />
+          </div>
+        )}
+
         {(data.watch.active || hasHistory) && (
           <Advanced summary="tempi di risposta, come funziona il controllo">
             <MetricChart
@@ -281,6 +300,15 @@ export function UptimeView({ data, className }: { data: UptimeData; className?: 
               {data.watch.upAfter} risposte, e la notifica di ritorno parte quando l&apos;app risponde da qualche minuto senza
               interruzioni. Il percorso e la porta sono quelli del controllo di salute del deploy.
             </p>
+            {isOwner && !isRemote && !data.publicPage && (
+              <p className="text-muted text-xs leading-relaxed">
+                Per far vedere lo stato a chi usa l&apos;app, senza dargli un accesso al pannello, aggiungila alla{" "}
+                <Link href="/settings?open=status-page" className="text-accent hover:underline">
+                  pagina di stato pubblica
+                </Link>
+                .
+              </p>
+            )}
             <Technical>
               <p className="text-muted text-meta">
                 {data.checks24h} controlli nelle ultime 24 ore
