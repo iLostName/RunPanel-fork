@@ -16,9 +16,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadError } from "@/components/ui/LoadError";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
-import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { LinkButton } from "@/components/ui/LinkButton";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import type { LogLine } from "@/components/ui/LogViewer";
@@ -29,6 +28,7 @@ import { ConsolePanel } from "./_components/ConsolePanel";
 import { DatabasesPanel } from "./_components/DatabasesPanel";
 import { ServiceOverview } from "./_components/ServiceOverview";
 import { ServiceSettings } from "./_components/ServiceSettings";
+import { ServiceBackups } from "@/components/backups/ServiceBackups";
 import type { Credentials, From, Service, ServiceTabId } from "./_components/types";
 import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { serviceControlText } from "@/lib/status";
@@ -384,16 +384,7 @@ export default function ServiceDetailPage() {
           />
         </div>
         <div {...shown("backup")}>
-          <Panel className="space-y-3">
-            <PanelHeader title="Backup" description="Copie dei dati, pianificate o al volo" />
-            <p className="text-muted text-sm">
-              I backup si pianificano in Backup: il preset notturno include già tutti i database, e puoi farne uno subito
-              quando vuoi.
-            </p>
-            <LinkButton href={href("/backups")} variant="secondary">
-              Apri i backup
-            </LinkButton>
-          </Panel>
+          <ServiceBackups serviceId={service.id} />
         </div>
         <div {...shown("settings")}>
           <ServiceSettings

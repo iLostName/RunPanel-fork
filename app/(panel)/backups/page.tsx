@@ -34,7 +34,7 @@ import {
   type RunView,
   type RunsResponse,
   type TargetCatalog,
-} from "./_components/types";
+} from "@/components/backups/types";
 
 /**
  * The one preset that matters: everything, every night, keep a week.

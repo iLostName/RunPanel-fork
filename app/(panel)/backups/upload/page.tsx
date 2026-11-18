@@ -18,9 +18,9 @@ import { useResource } from "@/lib/hooks/useResource";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { formatBytes, formatWhen } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { RestoreDialog } from "../_components/RestoreDialog";
+import { RestoreDialog } from "@/components/backups/RestoreDialog";
 import { triggerLabel } from "../_components/format";
-import type { ArtifactView } from "../_components/types";
+import type { ArtifactView } from "@/components/backups/types";
 
 /**
  * Restoring from an archive that is not in the catalogue: a download kept

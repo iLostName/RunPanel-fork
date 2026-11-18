@@ -20,7 +20,7 @@ import type {
   PolicyView,
   ProjectInclude,
   TargetCatalog,
-} from "./types";
+} from "@/components/backups/types";
 import { serviceDisplayName } from "@/lib/service-name";
 import { ServerPicker } from "@/components/cluster/ServerBits";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";

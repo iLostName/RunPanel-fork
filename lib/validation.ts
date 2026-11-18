@@ -988,6 +988,15 @@ export const destinationUpdateSchema = z
   })
   .strict();
 
+/** A backup now, outside any schedule: what to save, and optionally where and under what name. */
+export const manualBackupSchema = z
+  .object({
+    targets: z.array(backupTargetSchema).min(1).max(50),
+    destinationId: z.string().min(1).max(32).optional(),
+    name: z.string().trim().min(1).max(80).optional(),
+  })
+  .strict();
+
 /** Announcing an archive about to be uploaded in pieces. */
 export const backupUploadSchema = z
   .object({

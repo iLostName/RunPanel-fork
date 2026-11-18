@@ -17,10 +17,10 @@ import { useEventStream } from "@/lib/hooks/useEventStream";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatBytes, formatDuration, formatWhen } from "@/lib/format";
-import { KIND_LABELS, RestoreDialog } from "../../_components/RestoreDialog";
+import { KIND_LABELS, RestoreDialog } from "@/components/backups/RestoreDialog";
 import { IntegrityCheck } from "../../_components/IntegrityCheck";
 import { triggerLabel } from "../../_components/format";
-import { destinationPhrase, type ArtifactView, type RunDetail } from "../../_components/types";
+import { destinationPhrase, type ArtifactView, type RunDetail } from "@/components/backups/types";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 type OpsEvent =

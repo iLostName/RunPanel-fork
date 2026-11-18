@@ -23,7 +23,7 @@ import { formatBytes } from "@/lib/format";
 import type { Located } from "@/lib/cluster-merge";
 import { DestinationForm, type DestinationDetail } from "./DestinationForm";
 import { providerLabel } from "./providers";
-import type { DestinationView } from "./types";
+import type { DestinationView } from "@/components/backups/types";
 
 type Row = Located<DestinationView>;
 
