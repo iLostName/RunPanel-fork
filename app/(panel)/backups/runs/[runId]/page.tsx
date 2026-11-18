@@ -8,7 +8,7 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadError } from "@/components/ui/LoadError";
-import { Hint } from "@/components/ui/Hint";
+import { Code, Hint } from "@/components/ui/Hint";
 import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { Technical } from "@/components/ui/Technical";
@@ -179,7 +179,37 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
                 }
               />
             )}
+            {data.hasArchive && data.encryption !== undefined && (
+              <Field
+                label="Cifratura"
+                value={
+                  data.encryption ? (
+                    <span className="flex items-center gap-1.5">
+                      <Icon icon="solar:lock-password-linear" width={14} className="text-muted" aria-hidden />
+                      {data.encryption.keyCreatedAt
+                        ? `password dei backup del ${formatWhen(data.encryption.keyCreatedAt)}`
+                        : "password dei backup"}
+                    </span>
+                  ) : (
+                    "nessuna"
+                  )
+                }
+              />
+            )}
           </div>
+
+          {data.encryption && !data.encryption.usable && (
+            <Hint tone="warn" className="mt-4" title="Il pannello non ha più la password di questo archivio">
+              È cifrato con una password dei backup che su questo server non c&apos;è, per esempio perché lo store viene da
+              un altro pannello. Per ripristinarlo ti verrà chiesta; senza, l&apos;archivio non si apre.
+            </Hint>
+          )}
+          {data.encryption?.usable && (
+            <p className="text-muted mt-3 text-xs">
+              Anche scaricato resta cifrato: fuori dal pannello si apre con la password e con lo script{" "}
+              <Code>scripts/decrypt-backup.mjs</Code>.
+            </p>
+          )}
 
           {data.hasArchive && data.status !== "running" && (
             <IntegrityCheck runId={data.id} checksum={data.checksum} className="border-separator mt-4 border-t pt-4" />
@@ -249,6 +279,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
           artifacts={data.artifacts}
           isOpen={restoreOpen}
           onOpenChange={setRestoreOpen}
+          askPassword={data.encryption && !data.encryption.usable ? data.encryption : undefined}
         />
       )}
     </>

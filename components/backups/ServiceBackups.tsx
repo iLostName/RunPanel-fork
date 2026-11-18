@@ -14,7 +14,7 @@ import { ListRow } from "@/components/ui/ListRow";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RestoreDialog } from "./RestoreDialog";
-import { destinationPhrase, type ArtifactView } from "./types";
+import { destinationPhrase, type ArtifactView, type RunEncryption } from "./types";
 import { useCan, useMe } from "@/lib/hooks/useMe";
 import { useResource } from "@/lib/hooks/useResource";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
@@ -49,6 +49,8 @@ interface ServiceBackupsView {
     destinationName: string | null;
     destinationType: string | null;
     verification: { status: "ok" | "failed"; checkedAt: string } | null;
+    /** Absent from a server on an older version. */
+    encryption?: RunEncryption | null;
     artifacts: ArtifactView[];
   }[];
 }
@@ -226,13 +228,22 @@ export function ServiceBackups({ serviceId, className }: { serviceId: string; cl
                         title={formatWhen(run.startedAt)}
                         status={<StatusBadge status={run.artifacts.every((a) => a.status === "ok") ? run.status : "partial"} />}
                         badges={
-                          run.verification ? (
-                            <Badge
-                              tone={run.verification.status === "ok" ? "success" : "danger"}
-                              icon={run.verification.status === "ok" ? "solar:shield-check-linear" : "solar:danger-circle-linear"}
-                            >
-                              {run.verification.status === "ok" ? "verificato" : "danneggiato"}
-                            </Badge>
+                          run.verification || run.encryption ? (
+                            <>
+                              {run.verification && (
+                                <Badge
+                                  tone={run.verification.status === "ok" ? "success" : "danger"}
+                                  icon={run.verification.status === "ok" ? "solar:shield-check-linear" : "solar:danger-circle-linear"}
+                                >
+                                  {run.verification.status === "ok" ? "verificato" : "danneggiato"}
+                                </Badge>
+                              )}
+                              {run.encryption && (
+                                <Badge tone={run.encryption.usable ? "neutral" : "warning"} icon="solar:lock-password-linear">
+                                  cifrato
+                                </Badge>
+                              )}
+                            </>
                           ) : undefined
                         }
                         description={`${run.policyName ?? "Esecuzione manuale"} · ${destinationPhrase(run.destinationType, run.destinationName)}${size ? ` · ${formatBytes(size)}` : ""}`}
@@ -261,6 +272,7 @@ export function ServiceBackups({ serviceId, className }: { serviceId: string; cl
           isOpen
           onOpenChange={(open) => !open && setRestoring(null)}
           fixedTargets={Object.fromEntries(restoring.artifacts.map((artifact) => [artifact.id, serviceId]))}
+          askPassword={restoring.encryption && !restoring.encryption.usable ? restoring.encryption : undefined}
         />
       )}
     </Panel>
