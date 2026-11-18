@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Button, Dropdown } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
+import { useIsPhone } from "@/lib/hooks/useMediaQuery";
+import { ActionSheet } from "./ActionSheet";
 
 export interface RowAction {
   id: string;
@@ -22,16 +25,40 @@ export interface RowAction {
  * Rows used to carry their actions as loose icon buttons, a trash can here and a
  * red text link there. Whatever is destructive goes in here now, last and in
  * red, so it is never the thing under a hurried click.
+ *
+ * On a phone the same actions open as an action sheet from the bottom edge.
  */
 export function RowMenu({ label, actions, className }: { label: string; actions: RowAction[]; className?: string }) {
+  const phone = useIsPhone();
+  const [sheetOpen, setSheetOpen] = useState(false);
   const visible = [...actions.filter((a) => !a.danger), ...actions.filter((a) => a.danger)];
   if (visible.length === 0) return null;
 
+  const trigger = (onPress?: () => void) => (
+    <Button
+      variant="ghost"
+      size="sm"
+      isIconOnly
+      aria-label={label}
+      className={cn("text-muted shrink-0", className)}
+      onPress={onPress}
+    >
+      <Icon icon="solar:menu-dots-bold" width={16} aria-hidden />
+    </Button>
+  );
+
+  if (phone) {
+    return (
+      <>
+        {trigger(() => setSheetOpen(true))}
+        <ActionSheet isOpen={sheetOpen} onOpenChange={setSheetOpen} title={label} actions={visible} />
+      </>
+    );
+  }
+
   return (
     <Dropdown>
-      <Button variant="ghost" size="sm" isIconOnly aria-label={label} className={cn("text-muted shrink-0", className)}>
-        <Icon icon="solar:menu-dots-bold" width={16} aria-hidden />
-      </Button>
+      {trigger()}
       <Dropdown.Popover placement="bottom end">
         <Dropdown.Menu
           aria-label={label}
@@ -58,6 +85,11 @@ export function RowMenu({ label, actions, className }: { label: string; actions:
  * title that links to the item, its status and badges on the same line, one
  * line of plain description under it, and at the end the row's main action and
  * its menu. Lists of rows sit in a `Panel padding="flush"` with `divide-y`.
+ *
+ * On a phone a row with `href` opens from anywhere on it, as a list row in an
+ * app does: the title link stretches over the whole row (and lights it while
+ * pressed), with the action and the menu lifted above it so they stay theirs.
+ * On a desktop only the title is the link, as before.
  */
 export function ListRow({
   href,
@@ -89,7 +121,13 @@ export function ListRow({
   className?: string;
 }) {
   return (
-    <div className={cn("flex min-w-0 items-center gap-3 px-4 py-3", href && "hover:bg-surface-hover transition-colors", className)}>
+    <div
+      className={cn(
+        "flex min-w-0 items-center gap-3 px-4 py-3",
+        href && "hover:bg-surface-hover max-md:active:bg-surface-hover transition-colors max-md:relative",
+        className
+      )}
+    >
       {icon && (
         <span className="bg-surface-secondary text-muted grid size-8 shrink-0 place-items-center rounded-lg">
           <Icon icon={icon} width={17} aria-hidden />
@@ -98,7 +136,10 @@ export function ListRow({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           {href ? (
-            <Link href={href} className="text-foreground min-w-0 truncate text-sm font-medium hover:underline">
+            <Link
+              href={href}
+              className="text-foreground touch-chrome min-w-0 truncate text-sm font-medium hover:underline max-md:after:absolute max-md:after:inset-0"
+            >
               {title}
             </Link>
           ) : (
@@ -111,7 +152,7 @@ export function ListRow({
         {meta && <p className="text-muted/80 mt-0.5 truncate text-meta">{meta}</p>}
       </div>
       {(action || menu) && (
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5 max-md:relative max-md:z-10">
           {action}
           {menu}
         </div>

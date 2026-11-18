@@ -5,7 +5,9 @@ import Link from "next/link";
 import { Button, Dropdown, Input } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ActionSheet } from "@/components/ui/ActionSheet";
 import { cn } from "@/lib/utils";
+import { useIsPhone } from "@/lib/hooks/useMediaQuery";
 
 export interface ResourceMenuItem {
   id: string;
@@ -57,6 +59,9 @@ export function ResourceHeader({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   const [saving, setSaving] = useState(false);
+  // On a phone "Altro" opens an action sheet rather than a dropdown.
+  const phone = useIsPhone();
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   function startEditing() {
     setDraft(name);
@@ -148,7 +153,16 @@ export function ResourceHeader({
       {(actions || ordered.length > 0) && (
         <div className="flex flex-wrap items-center gap-2">
           {actions}
-          {ordered.length > 0 && (
+          {ordered.length > 0 && phone && (
+            <>
+              <Button variant="outline" size="sm" aria-label={menuLabel} onPress={() => setSheetOpen(true)}>
+                <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />
+                <span className="hidden sm:inline">Altro</span>
+              </Button>
+              <ActionSheet isOpen={sheetOpen} onOpenChange={setSheetOpen} title={`${menuLabel}: ${name}`} actions={ordered} />
+            </>
+          )}
+          {ordered.length > 0 && !phone && (
             <Dropdown>
               <Button variant="outline" size="sm" aria-label={menuLabel}>
                 <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />
