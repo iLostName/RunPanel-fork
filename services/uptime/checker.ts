@@ -245,7 +245,10 @@ export async function checkOnce(): Promise<number> {
       if (watch.announced) watch.upSince = event.endedAt;
     }
 
-    if (watch.announced && !watch.state.down && watch.upSince !== null && at - watch.upSince >= STABLE_MS) {
+    // Only on an answer, with no failure run starting: a recovery announced on
+    // the check that begins the next outage would be followed by that outage.
+    const steady = result.ok && !watch.state.down && watch.state.streak === 0;
+    if (watch.announced && steady && watch.upSince !== null && at - watch.upSince >= STABLE_MS) {
       void notify({
         key: "uptime.down",
         up: true,

@@ -70,7 +70,6 @@ export function causeLabel(cause: string | null | undefined, timeoutMs = UPTIME_
   if (cause === "refused") return "Nessuno risponde sulla porta: l'app è ferma o si sta riavviando";
   if (cause === "reset") return "La connessione si è interrotta prima della risposta";
   if (cause === "path") return "Il percorso del controllo non è valido: correggilo nelle impostazioni";
-  if (cause === "stopped") return "Controllo sospeso: il progetto non è più in esecuzione";
   const status = /^status:(\d{3})$/.exec(cause);
   if (status) {
     const code = Number(status[1]);

@@ -117,7 +117,9 @@ function IncidentRow({ incident, now, timeoutMs }: { incident: Incident; now: nu
       </span>
       <span className="text-muted">{shortDuration(incident.durationMs ?? now - start)}</span>
       <span className="text-muted min-w-0">· {causeLabel(incident.cause, timeoutMs)}</span>
-      {incident.resolution === "paused" && <span className="text-muted">· controllo sospeso, il progetto si è fermato</span>}
+      {incident.resolution === "paused" && (
+        <span className="text-muted">· controllo sospeso: il progetto è stato fermato o rimesso in deploy</span>
+      )}
     </li>
   );
 }
