@@ -133,16 +133,23 @@ export const deployContractSchema = z.object({
 
   /**
    * When a new version never passes the health check, put the last one that
-   * did back online. On by default.
+   * did back online.
    *
-   * Docker only for now (see the rollback in services/deploy-pipeline.ts):
-   * every deploy is its own image there, and the previous one is still on
-   * disk. Native runtimes build in place, so by the time the check fails the
-   * previous version's files are already gone.
+   * `enabled`, on by default: Docker, where every deploy is its own image and
+   * the previous one is still on disk.
+   *
+   * `native`, off by default and the operator's to turn on: a native runtime
+   * on Linux, from git, then builds every deploy in a folder of its own and
+   * keeps the previous one (lib/releases.ts). It changes where the build
+   * happens and where the app runs from, on servers with live projects, so it
+   * is asked for project by project rather than arriving with an update. Both
+   * have to be on; off again, the project builds in its folder as it always
+   * did, with nothing to move back. Compose rebuilds the stack from the
+   * checkout and has no way back yet. The cases are `rollbackPlan`'s.
    */
   rollback: z
-    .object({ enabled: z.boolean().default(true) })
-    .default({ enabled: true }),
+    .object({ enabled: z.boolean().default(true), native: z.boolean().default(false) })
+    .default({ enabled: true, native: false }),
 });
 
 export type DeployContract = z.infer<typeof deployContractSchema>;
@@ -159,6 +166,14 @@ const legacySchema = z.object({
   dockerImage: z.string().optional(),
   dockerTemplate: z.string().optional(),
   dockerFields: z.record(z.string(), z.string()).optional(),
+  /**
+   * The one current-shape key a row of the old shape keeps: whether the
+   * project goes back to its previous version, and for a native one whether it
+   * builds in folders per version, is a choice the operator made and must not
+   * fall off because the commands were saved the old way. A value that is not
+   * one is dropped rather than failing the row: the commands beside it matter more.
+   */
+  rollback: z.object({ enabled: z.boolean().optional(), native: z.boolean().optional() }).optional().catch(undefined),
 });
 
 /**
@@ -246,6 +261,7 @@ function normalizeRaw(raw: unknown): RawObject {
 
   if (legacy.packageManager) out.packageManager = legacy.packageManager;
   if (legacy.dockerImage) out.docker = { image: legacy.dockerImage };
+  if (legacy.rollback && Object.keys(legacy.rollback).length > 0) out.rollback = legacy.rollback;
 
   return out;
 }
@@ -313,6 +329,10 @@ export function parseContractJson(json: string | null | undefined): DeployContra
  * on the operator's network on the repository's instruction: left settable it
  * turns every deploy into a loopback port scan.
  *
+ * `rollback.native` because it decides where a native app is built and run
+ * from on the host, and whether the project folder's build output is removed:
+ * an opt-in a pushed commit could switch on by itself would not be one.
+ *
  * A project starts life with `builder_config` of `"{}"`, so without this every
  * one of these fields would come from the repository until an operator happened
  * to set it by hand.
@@ -328,6 +348,7 @@ const PANEL_ONLY_FIELDS: readonly (readonly [string, string])[] = [
   ["envFile", "path"],
   ["healthcheck", "port"],
   ["healthcheck", "path"],
+  ["rollback", "native"],
 ];
 
 export interface StrippedContract {
