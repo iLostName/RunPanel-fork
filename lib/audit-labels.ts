@@ -146,6 +146,9 @@ export const ACTION_LABEL: Record<string, string> = {
   "registries.update": "Registry salvato",
   "registries.delete": "Registry eliminato",
   "settings.update": "Impostazioni del pannello",
+  "status-page.enable": "Pagina di stato pubblicata",
+  "status-page.disable": "Pagina di stato spenta",
+  "status-page.update": "Pagina di stato modificata",
   "storage.clean": "Spazio disco liberato",
   "updates.apply": "Aggiornamento del pannello",
 };
