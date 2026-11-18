@@ -76,6 +76,18 @@ export async function register() {
     console.error("[projects] Recovery failed:", err instanceof Error ? err.message : err);
   });
 
+  // Runs of scheduled tasks that were in flight when this process stopped. Not
+  // behind the flag: a row left `running` would refuse every later run of its
+  // task, and "Esegui ora" works in a throwaway instance too.
+  const { recoverInterruptedRuns } = await import("./services/tasks/store");
+  const interruptedTasks = await recoverInterruptedRuns().catch((err) => {
+    console.error("[tasks] Recovery failed:", err instanceof Error ? err.message : err);
+    return 0;
+  });
+  if (interruptedTasks > 0) {
+    console.log(`[tasks] ${interruptedTasks} esecuzione/i interrotta/e dal riavvio del pannello`);
+  }
+
   // Containers a backup paused while copying their volume, when this process
   // died before it could resume them. Same reasoning as the line above: Docker
   // never unpauses anything by itself, so nothing else would ever come back
@@ -152,6 +164,12 @@ export async function register() {
   // scheduler; a schedule missed while the panel was down is not caught up.
   const { startRestartScheduler } = await import("./services/restart-scheduler");
   startRestartScheduler();
+
+  // Scheduled tasks, per project: same shape again. A run missed while the
+  // panel was down happens once, late, within its grace, and is recorded as
+  // skipped beyond it — never once per missed occurrence.
+  const { startTaskScheduler } = await import("./services/tasks/scheduler");
+  startTaskScheduler();
 
   // Auto-deploy for the projects that ask GitHub instead of waiting to be told.
   // Nothing to reconcile at boot: the poller reads the branch on its first tick

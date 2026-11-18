@@ -30,6 +30,7 @@ export const NOTIFY_EVENTS = [
   "panel.restarted",
   "uptime.down",
   "metrics.high",
+  "task.failed",
 ] as const;
 
 export type NotifyEventKey = (typeof NOTIFY_EVENTS)[number];
@@ -145,6 +146,19 @@ export const NOTIFY_GROUPS: NotifyEventGroup[] = [
       },
     ],
   },
+  {
+    id: "tasks",
+    label: "Attività pianificate",
+    description: "I comandi dei progetti che girano da soli a orari fissi",
+    events: [
+      {
+        key: "task.failed",
+        label: "Un'attività pianificata non riesce",
+        description:
+          "Quando un'esecuzione a orario fallisce o supera il tempo massimo, e di nuovo quando torna a riuscire. Finché continua a fallire te lo ricorda al massimo ogni 12 ore. Le esecuzioni saltate e quelle lanciate a mano con «Esegui ora» non mandano niente.",
+      },
+    ],
+  },
 ];
 
 /** The default selection for a panel that has just connected a bot. */
@@ -159,6 +173,7 @@ export const DEFAULT_NOTIFY_EVENTS: NotifyEventKey[] = [
   "panel.update",
   "uptime.down",
   "metrics.high",
+  "task.failed",
 ];
 
 export function isNotifyEventKey(value: unknown): value is NotifyEventKey {
@@ -243,6 +258,8 @@ export const NOTIFY_EVENT_META: Partial<Record<NotifyEventKey, Partial<NotifyEve
   // server-wide reading (`metrics.high` for the host itself).
   "uptime.down": { permission: "monitor", href: "/monitor" },
   "metrics.high": { permission: "monitor", href: "/monitor" },
+  // Always about a project, named by id: only for one deleted since.
+  "task.failed": { href: "/projects" },
 };
 
 export const DEFAULT_NOTIFY_AUDIENCE: GlobalPermission = "monitor";

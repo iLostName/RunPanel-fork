@@ -174,6 +174,22 @@ export async function run({ repoRoot }) {
     { key: "metrics.high", up: true, scope: "project", name: p, metric: "memory", percent: 70, peak: 99, durationMs: 600_000 },
     { key: "uptime.down", up: false, name: p, cause: p, target: p, durationMs: null },
     { key: "uptime.down", up: true, name: p, cause: null, target: p, durationMs: 120_000 },
+    // The task's name and its last line of output are the operator's and the
+    // command's own: both arrive here unescaped.
+    {
+      key: "task.failed",
+      up: false,
+      project: p,
+      task: p,
+      outcome: p,
+      exitCode: 2,
+      detail: p,
+      failures: 3,
+      durationMs: 4_000,
+      projectId: p,
+      taskId: p,
+    },
+    { key: "task.failed", up: true, project: p, task: p, outcome: p, exitCode: 0, detail: null, failures: 2, durationMs: 1_000, projectId: p, taskId: p },
   ];
 
   const balanced = (s) => {

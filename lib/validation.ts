@@ -16,6 +16,12 @@ import {
   VOLUME_NAME_PATTERN,
   normalizeExcludePath,
 } from "./backup-settings";
+import {
+  TASK_COMMAND_MAX,
+  TASK_NAME_MAX,
+  TASK_TIMEOUT_MAX_SEC,
+  TASK_TIMEOUT_MIN_SEC,
+} from "./tasks-rules";
 
 
 
@@ -895,6 +901,45 @@ export const cronPreviewSchema = z.object({
   timezone: timeZoneSchema.optional(),
   count: z.number().int().min(1).max(10).optional(),
 });
+
+/**
+ * A project's scheduled task — see `services/tasks/`.
+ *
+ * The command has the 4000-character cap of every other command field, for
+ * the reason `oneTimeCommandSchema` gives. `service` is the Compose service the
+ * command runs in, required by the route for a Compose project and refused
+ * for any other: a name the stack does not have is caught when the task runs,
+ * since a stack can be down while it is being edited.
+ */
+const TIMEOUT_RANGE = `Il tempo massimo va da ${TASK_TIMEOUT_MIN_SEC} secondi a 24 ore`;
+
+export const taskSchema = z.object({
+  name: z.string().trim().min(1, "Dai un nome all'attività").max(TASK_NAME_MAX, `Il nome può avere al massimo ${TASK_NAME_MAX} caratteri`),
+  command: z
+    .string()
+    .trim()
+    .min(1, "Scrivi il comando da eseguire")
+    .max(TASK_COMMAND_MAX, `Il comando può avere al massimo ${TASK_COMMAND_MAX} caratteri`),
+  /** '' = only when somebody presses "Esegui ora". */
+  cron: z.union([z.literal(""), cronExpressionSchema]),
+  timezone: timeZoneSchema.nullable().optional(),
+  enabled: z.boolean().optional(),
+  timeoutSec: z
+    .number(TIMEOUT_RANGE)
+    .int(TIMEOUT_RANGE)
+    .min(TASK_TIMEOUT_MIN_SEC, TIMEOUT_RANGE)
+    .max(TASK_TIMEOUT_MAX_SEC, TIMEOUT_RANGE)
+    .optional(),
+  service: z
+    .string()
+    .trim()
+    .max(63, "Il nome del servizio può avere al massimo 63 caratteri")
+    .regex(COMPOSE_SERVICE_PATTERN, "Il servizio dello stack: lettere, numeri, punti, trattini e underscore")
+    .nullable()
+    .optional(),
+});
+
+export const taskUpdateSchema = taskSchema.partial();
 
 /** Only `local` is implemented; adding a transport means adding it here too. */
 export const destinationTypes = ["local", "s3"] as const;

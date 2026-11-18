@@ -413,6 +413,29 @@ export type NotifyEvent =
       durationMs: number | null;
       /** Which project, for the notification centre: names are not unique. */
       projectId?: string;
+    }
+  /**
+   * A scheduled task that failed, and later the first run that worked again —
+   * `afterRun` in lib/tasks-rules.ts decides which runs are worth saying. `up`
+   * is the way back.
+   */
+  | {
+      key: "task.failed";
+      up: boolean;
+      /** The project's name, and the task's. */
+      project: string;
+      task: string;
+      /** How the run ended, in words: "uscita con codice 1", "fermata dopo 15 minuti…". */
+      outcome: string;
+      exitCode: number | null;
+      /** The last line it printed, which is usually the error. */
+      detail: string | null;
+      /** Runs in a row that failed: this one included, or on the way back how many there were. */
+      failures: number;
+      durationMs: number | null;
+      /** For the notification centre, which shows it to whoever can see this project. */
+      projectId: string;
+      taskId: string;
     };
 
 /**
@@ -827,6 +850,30 @@ export function describe(event: NotifyEvent): NotifyMessage {
               textLine("Motivo", event.cause),
               line("Controllo", event.target ? code(event.target) : null),
               html`Il pannello riprova ogni minuto e ti avvisa quando torna a rispondere.`,
+            ]),
+          };
+
+    case "task.failed":
+      return event.up
+        ? {
+            level: "ok",
+            title: `Attività di nuovo riuscita — ${event.task}`,
+            body: join([
+              html`${bold(event.task)} di ${bold(event.project)} è tornata a riuscire${
+                event.failures > 1 ? html`, dopo ${event.failures} esecuzioni non riuscite di fila` : null
+              }.`,
+              line("Durata", duration(event.durationMs)),
+            ]),
+          }
+        : {
+            level: "danger",
+            title: `Attività non riuscita — ${event.task}`,
+            body: join([
+              html`${bold(event.task)} di ${bold(event.project)}: ${escapeHtml(event.outcome)}.`,
+              line("Ultima riga", event.detail ? code(firstLine(event.detail, 200)) : null),
+              event.failures > 1 ? html`Non riesce da ${event.failures} esecuzioni di fila.` : null,
+              line("Durata", duration(event.durationMs)),
+              html`Il log completo è nella cronologia dell'attività, nelle impostazioni del progetto. Ti avviso quando torna a riuscire.`,
             ]),
           };
   }
