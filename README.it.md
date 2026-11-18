@@ -128,7 +128,7 @@ n8n, WordPress, Uptime Kuma, Umami, Ghost, Vaultwarden, Gitea e MinIO a un clic:
 <td valign="top">
 
 ### 📈 Metriche, allarmi e uptime
-Storico di CPU, memoria, disco e rete con grafici su 1 ora, 24 ore e 7 giorni, avvisi quando qualcosa resta al limite, e un controllo ogni minuto che le app rispondano, con incidenti e percentuale di uptime.
+Storico di CPU, memoria, disco e rete con grafici su 1 ora, 24 ore e 7 giorni, avvisi quando qualcosa resta al limite, e un controllo ogni minuto che le app rispondano, con incidenti e percentuale di uptime, più una pagina di stato pubblica, facoltativa, per le app che scegli.
 
 </td>
 <td valign="top">
@@ -212,7 +212,7 @@ Sistema, Accessi e Impostazioni raggruppano più pagine in schede, ognuna con il
 | **Monitor** | processi e container con CPU, memoria e uptime, più il riepilogo dell'host (di ogni server, se sono più d'uno) |
 | **Sistema** | *Diagnostica* (cosa manca e cosa premere), *Avvio automatico* (cosa torna su dopo un riavvio), *Aggiornamenti* (versione, commit nuovi, il pulsante che li applica), *Domini* (i domini serviti da nginx e il sottodominio di ogni progetto), *Pulizia Docker* (cosa occupa il disco e cosa si recupera), *Server* (le installazioni collegate: stato, versione, diagnosi, ruolo, revoca) |
 | **Accessi** | *Utenti* (inviti con link a scadenza, permessi per account) e *Registro attività* (chi ha fatto cosa) |
-| **Impostazioni** | *Account* (email, password, sessioni, tema chiaro o scuro), *Pannello* (frequenza di refresh, fuso, indirizzo pubblico, intervallo del controllo periodico, colore d'accento, canali di notifica, server di posta, registry privati), *GitHub* (token, repository, branch) |
+| **Impostazioni** | *Account* (email, password, sessioni, tema chiaro o scuro), *Pannello* (frequenza di refresh, fuso, indirizzo pubblico, intervallo del controllo periodico, colore d'accento, canali di notifica, pagina di stato pubblica, server di posta, registry privati), *GitHub* (token, repository, branch) |
 
 </details>
 

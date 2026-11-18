@@ -24,6 +24,19 @@ import {
 } from "./tasks-rules";
 import { hasRunnableLine } from "./tasks-shell";
 import { MAX_BACKUP_PASSWORD, backupPasswordProblem } from "./backup-password";
+import {
+  MAX_PAGE_PROJECTS,
+  MESSAGE_MAX,
+  PUBLIC_NAME_MAX,
+  SLUG_MAX,
+  SLUG_MIN,
+  SLUG_PATTERN,
+  SLUG_RULE,
+  TITLE_MAX,
+  cleanLine,
+  cleanText,
+  entryKey,
+} from "./status-page";
 
 
 
@@ -1424,3 +1437,75 @@ export const catalogInstallSchema = z.object({
   /** The server's name as the person reaches it; checked again where it is used. */
   publicHost: z.string().trim().max(253).optional(),
 });
+
+/**
+ * The public status page — see `lib/status-page.ts`.
+ *
+ * Every field optional: what is sent replaces what is stored and the rest
+ * stays, so an API client switches the page on with `{ enabled: true }`.
+ * `projects`, when sent, is the whole list in the order the page shows it.
+ * Text is normalised here (one line for names and the title, no invisible
+ * characters anywhere) so what is stored is what was checked. Whether each
+ * project exists is the route's question: it needs the store.
+ */
+const statusPageIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "Identificativo non valido");
+
+const statusPageNameSchema = z
+  .string()
+  .max(PUBLIC_NAME_MAX * 4)
+  .transform((raw, ctx) => {
+    const name = cleanLine(raw, Number.MAX_SAFE_INTEGER);
+    if (!name) ctx.addIssue({ code: "custom", message: "Ogni progetto sulla pagina ha bisogno di un nome" });
+    else if (name.length > PUBLIC_NAME_MAX) ctx.addIssue({ code: "custom", message: `Un nome può avere al massimo ${PUBLIC_NAME_MAX} caratteri` });
+    return name;
+  });
+
+export const statusPageSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    slug: z.string().trim().toLowerCase().min(SLUG_MIN, SLUG_RULE).max(SLUG_MAX, SLUG_RULE).regex(SLUG_PATTERN, SLUG_RULE).optional(),
+    title: z
+      .string()
+      .max(TITLE_MAX * 4)
+      .transform((raw, ctx) => {
+        const title = cleanLine(raw, Number.MAX_SAFE_INTEGER);
+        if (!title) ctx.addIssue({ code: "custom", message: "Dai un titolo alla pagina" });
+        else if (title.length > TITLE_MAX) ctx.addIssue({ code: "custom", message: `Il titolo può avere al massimo ${TITLE_MAX} caratteri` });
+        return title;
+      })
+      .optional(),
+    message: z
+      .string()
+      .max(MESSAGE_MAX * 4)
+      .transform((raw, ctx) => {
+        const message = cleanText(raw, Number.MAX_SAFE_INTEGER);
+        if (message.length > MESSAGE_MAX) ctx.addIssue({ code: "custom", message: `Il messaggio può avere al massimo ${MESSAGE_MAX} caratteri` });
+        return message;
+      })
+      .optional(),
+    allowIndexing: z.boolean().optional(),
+    projects: z
+      .array(
+        z
+          .object({
+            /** The member of the cluster holding it; null or absent for this server. */
+            server: statusPageIdSchema.nullable().optional(),
+            projectId: statusPageIdSchema,
+            name: statusPageNameSchema,
+          })
+          .strict()
+      )
+      .max(MAX_PAGE_PROJECTS, `Al massimo ${MAX_PAGE_PROJECTS} progetti sulla pagina`)
+      .superRefine((entries, ctx) => {
+        const seen = new Set<string>();
+        entries.forEach((entry, index) => {
+          const key = entryKey({ server: entry.server ?? null, projectId: entry.projectId });
+          if (seen.has(key)) ctx.addIssue({ code: "custom", path: [index, "projectId"], message: "Lo stesso progetto compare due volte" });
+          seen.add(key);
+        });
+      })
+      .optional(),
+  })
+  .strict();
+
+export type StatusPageInput = z.infer<typeof statusPageSchema>;

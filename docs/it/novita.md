@@ -49,6 +49,8 @@ Un indirizzo si aggiunge dalla pagina del progetto: il pannello mostra il record
 
 Storico di CPU, memoria, disco e rete per il server, i progetti e i database, con grafici su 1 ora, 24 ore e 7 giorni; avvisi quando CPU o RAM restano sopra il 90% per 5 minuti; controllo ogni minuto che le app rispondano, con uptime e incidenti. Il Monitor si ordina, mostra i container dei Compose e quelli non gestiti dal pannello.
 
+**Pagina di stato pubblica**, facoltativa e spenta di default: un indirizzo da dare a chi usa le app, che si apre senza accedere al pannello e dice se le app che scegli rispondono, con l'uptime delle ultime 24 ore e degli ultimi 30 giorni e le interruzioni recenti. Mostra solo il titolo, il messaggio e i nomi che scrivi tu, anche per i progetti dei server collegati; spenta, il suo indirizzo risponde «Pagina non trovata». Si imposta in **Impostazioni › Generale**. Vedi [Operatività](operations.md#pagina-di-stato-pubblica).
+
 ## Backup
 
 - Il backup notturno con un clic include i volumi dei progetti e usa la destinazione predefinita.

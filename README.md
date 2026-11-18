@@ -128,7 +128,7 @@ n8n, WordPress, Uptime Kuma, Umami, Ghost, Vaultwarden, Gitea and MinIO in one c
 <td valign="top">
 
 ### 📈 Metrics, alerts and uptime
-CPU, memory, disk and network history with 1-hour, 24-hour and 7-day charts, alerts when something stays at its limit, and a check every minute that apps answer, with incidents and an uptime figure.
+CPU, memory, disk and network history with 1-hour, 24-hour and 7-day charts, alerts when something stays at its limit, and a check every minute that apps answer, with incidents and an uptime figure — plus an optional public status page for the apps you choose.
 
 </td>
 <td valign="top">
@@ -215,7 +215,7 @@ System, Access and Settings group several pages as tabs, each with its own addre
 | **Monitor** | processes and containers with CPU, memory and uptime, plus a summary of the host (of every server, with several) |
 | **System** | *Diagnostics* (what is missing and what to press), *Autostart* (what comes back after a reboot), *Updates* (version, waiting commits, the button that applies them), *Domains* (the domains nginx serves and every project's subdomain), *Docker cleanup* (what is using the disk and what can be reclaimed), *Servers* (the linked installs: status, version, diagnosis, role, revocation) |
 | **Access** | *Users* (invitations with expiring links, per-account permissions) and *Activity log* (who did what) |
-| **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (refresh rate, timezone, public address, polling interval, accent colour, notification channels, mail server, private registries), *GitHub* (token, repositories, branches) |
+| **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (refresh rate, timezone, public address, polling interval, accent colour, notification channels, public status page, mail server, private registries), *GitHub* (token, repositories, branches) |
 
 </details>
 
