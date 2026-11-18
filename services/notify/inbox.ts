@@ -134,10 +134,11 @@ function eventsOf(group: string | null | undefined): string[] | null {
 
 /** `createdAt|id`, so two notifications filed in the same millisecond still page apart. */
 function parseCursor(raw: string | null | undefined): { at: string; id: string } | null {
-  if (!raw) return null;
-  const at = raw.slice(0, raw.lastIndexOf("|"));
-  const id = raw.slice(raw.lastIndexOf("|") + 1);
-  return at && id ? { at, id } : null;
+  const bar = raw ? raw.lastIndexOf("|") : -1;
+  if (!raw || bar <= 0) return null;
+  const at = raw.slice(0, bar);
+  const id = raw.slice(bar + 1);
+  return id ? { at, id } : null;
 }
 
 export async function listInbox(principal: Principal, query: InboxQuery): Promise<{ items: InboxItem[]; unread: number; nextBefore: string | null }> {
@@ -211,16 +212,17 @@ export async function listInbox(principal: Principal, query: InboxQuery): Promis
   const last = page[page.length - 1];
   return {
     items,
-    unread: await unreadCount(principal, visibility),
+    unread: await unreadCount(principal, visibility, mark),
     nextBefore: rows.length > query.limit && last ? `${last.created_at}|${last.id}` : null,
   };
 }
 
-export async function unreadCount(principal: Principal, known?: Visibility | null): Promise<number> {
+/** `known` and `knownMark` save the queries when the caller has already made them. */
+export async function unreadCount(principal: Principal, known?: Visibility | null, knownMark?: string): Promise<number> {
   const visibility = known === undefined ? await visibilityOf(principal) : known;
   if (seesNothing(visibility)) return 0;
   const db = await getDb();
-  const mark = await readMark(principal.userId);
+  const mark = knownMark ?? (await readMark(principal.userId));
   let query = db
     .selectFrom("notifications")
     .select((eb) => eb.fn.countAll<number>().as("count"))
