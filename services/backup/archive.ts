@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { Transform } from "stream";
 import { pipeline } from "stream/promises";
 import yazl from "yazl";
+import type { ArchiveSeal } from "./archive-crypto";
 import type { BackupManifest, StagedFile } from "./types";
 
 /**
@@ -19,6 +20,14 @@ import type { BackupManifest, StagedFile } from "./types";
  *  - members that are already compressed are stored rather than deflated,
  *    since compressing a gzip stream costs CPU to make the file slightly
  *    bigger.
+ *
+ * With a `seal`, the zip is encrypted on its way to the disk (see
+ * archive-crypto.ts): the bytes in clear exist only in memory, a chunk at a
+ * time. The sha256 returned is then the encrypted file's, which is what the
+ * destinations store and what "Verifica integrità" compares.
+ *
+ * The seal arrives as an argument rather than being looked up here, so this
+ * module keeps importing nothing of the panel and the unit suites load it.
  */
 
 const README = `RunPanel — archivio di backup
@@ -70,7 +79,8 @@ export interface ArchiveResult {
 export async function writeArchive(
   destination: string,
   files: StagedFile[],
-  manifest: BackupManifest
+  manifest: BackupManifest,
+  opts: { seal?: ArchiveSeal | null } = {}
 ): Promise<ArchiveResult> {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
 
@@ -122,7 +132,8 @@ export async function writeArchive(
     forceZip64Format: true,
     comment: `RunPanel backup ${manifest.runId}`,
   });
-  await pipeline(zip.outputStream, digest, sink);
+  if (opts.seal) await pipeline(zip.outputStream, opts.seal.createStream(), digest, sink);
+  else await pipeline(zip.outputStream, digest, sink);
 
   // Rename is atomic, but only meaningful if the content is actually on disk.
   const fd = fs.openSync(partial, "r+");

@@ -4,6 +4,7 @@ import { Transform, Writable, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import zlib from "node:zlib";
 import yauzl from "yauzl";
+import type { ZipOpener } from "./archive-crypto";
 
 /**
  * Whether an archive is still what the panel wrote.
@@ -22,6 +23,11 @@ import yauzl from "yauzl";
  *
  * Nothing is written to disk: members are streamed through the checks and
  * dropped. Only `node:` imports and yauzl, so the unit suite loads it directly.
+ *
+ * An encrypted archive is checked the same way through `open`, the opener
+ * that knows its password: the sha256 is the encrypted file's, the members
+ * are read through the decryption — which authenticates every chunk on the
+ * way. Without `open` a file is read as a plain zip, as it always was.
  */
 
 export interface MemberFailure {
@@ -87,13 +93,19 @@ export async function hashFile(file: string, onProgress?: Progress) {
 
 // --- Inside the zip -------------------------------------------------------------
 
-function openZip(file: string): Promise<yauzl.ZipFile> {
+function openZip(file: string, open?: ZipOpener): Promise<yauzl.ZipFile> {
+  if (open) return open(file);
   return new Promise((resolve, reject) => {
     yauzl.open(file, { lazyEntries: true, autoClose: false }, (err, zip) => {
       if (err || !zip) reject(err ?? new Error("Archivio illeggibile"));
       else resolve(zip);
     });
   });
+}
+
+/** A missing or wrong password: a fact about the reader, not about the archive. */
+function isLocked(err: unknown): err is Error {
+  return err instanceof Error && err.name === "ArchiveLockedError";
 }
 
 /** One entry at a time, so each can be checked before the next is read. */
@@ -150,8 +162,8 @@ async function readSmallEntry(zip: yauzl.ZipFile, entry: yauzl.Entry, max: numbe
 }
 
 /** The archive's own `checksums.txt`, or an empty map when it has none. */
-export async function readArchiveChecksums(file: string): Promise<Map<string, string>> {
-  const zip = await openZip(file);
+export async function readArchiveChecksums(file: string, open?: ZipOpener): Promise<Map<string, string>> {
+  const zip = await openZip(file, open);
   try {
     for (let entry = await nextEntry(zip); entry; entry = await nextEntry(zip)) {
       if (entry.fileName === "checksums.txt") {
@@ -181,15 +193,16 @@ export async function verifyMembers(
     only?: readonly string[];
     signal?: AbortSignal;
     onProgress?: Progress;
+    open?: ZipOpener;
   } = {}
 ): Promise<MemberReport> {
-  const checksums = opts.checksums ?? (await readArchiveChecksums(file));
+  const checksums = opts.checksums ?? (await readArchiveChecksums(file, opts.open));
   const wanted = (name: string) =>
     !opts.only || opts.only.some((path) => (path.endsWith("/") ? name.startsWith(path) : name === path));
 
   const report: MemberReport = { checked: 0, withSha256: 0, bytes: 0, failures: [] };
   const found = new Set<string>();
-  const zip = await openZip(file);
+  const zip = await openZip(file, opts.open);
 
   try {
     for (let entry = await nextEntry(zip); entry; entry = await nextEntry(zip)) {
@@ -270,7 +283,7 @@ function summarise(failures: MemberFailure[]): string {
  */
 export async function verifyArchiveFile(
   file: string,
-  opts: { expectedSha256?: string | null; signal?: AbortSignal; onProgress?: Progress } = {}
+  opts: { expectedSha256?: string | null; signal?: AbortSignal; onProgress?: Progress; open?: ZipOpener } = {}
 ): Promise<IntegrityReport> {
   const expected = opts.expectedSha256 ?? null;
   let archiveSha256: string | null = null;
@@ -294,11 +307,25 @@ export async function verifyArchiveFile(
 
   let members: MemberReport;
   try {
-    members = await verifyMembers(file, { signal: opts.signal, onProgress: opts.onProgress });
+    members = await verifyMembers(file, { signal: opts.signal, onProgress: opts.onProgress, open: opts.open });
   } catch (err) {
+    if (isLocked(err)) {
+      return {
+        ok: false,
+        message:
+          (archiveMatches ? "Identico a quando è stato creato, ma il contenuto non si può controllare: " : "Il contenuto non si può controllare: ") +
+          err.message,
+        archiveSha256,
+        expectedSha256: expected,
+        archiveMatches,
+        members: null,
+      };
+    }
+    // An encrypted archive that fails its own checks already says so in a sentence.
+    const sealed = err instanceof Error && err.name === "SealedArchiveError";
     return {
       ok: false,
-      message: `Non è uno zip leggibile: ${err instanceof Error ? err.message : String(err)}`,
+      message: sealed ? (err as Error).message : `Non è uno zip leggibile: ${err instanceof Error ? err.message : String(err)}`,
       archiveSha256,
       expectedSha256: expected,
       archiveMatches,

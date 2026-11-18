@@ -3,6 +3,7 @@ import path from "path";
 import { pipeline } from "stream/promises";
 import type { Readable } from "stream";
 import yauzl from "yauzl";
+import type { ZipOpener } from "./archive-crypto";
 import type { BackupManifest } from "./types";
 
 /**
@@ -15,6 +16,10 @@ import type { BackupManifest } from "./types";
  * Every entry name is treated as hostile. A zip is a list of paths chosen by
  * whoever built it, and `../../.ssh/authorized_keys` is a perfectly legal one —
  * the classic zip-slip. Names are rejected before they are joined, not after.
+ *
+ * An archive is a path, read as a plain zip, or a path with the opener that
+ * knows its password (`createArchiveOpener` in archive-crypto.ts): an
+ * encrypted archive is then read like any other, without a copy in clear.
  */
 
 export interface ArchiveEntry {
@@ -24,6 +29,15 @@ export interface ArchiveEntry {
   compressionMethod: number;
 }
 
+/** An archive and how to open it. */
+export interface ArchiveHandle {
+  file: string;
+  open: ZipOpener;
+}
+
+export type ArchiveInput = string | ArchiveHandle;
+
+/** A plain zip. Also what project uploads use: those are never encrypted. */
 export function openArchive(file: string): Promise<yauzl.ZipFile> {
   return new Promise((resolve, reject) => {
     yauzl.open(file, { lazyEntries: true, autoClose: false }, (err, zipfile) => {
@@ -31,6 +45,10 @@ export function openArchive(file: string): Promise<yauzl.ZipFile> {
       else resolve(zipfile);
     });
   });
+}
+
+function openInput(input: ArchiveInput): Promise<yauzl.ZipFile> {
+  return typeof input === "string" ? openArchive(input) : input.open(input.file);
 }
 
 /** True for a name that is safe to turn into a path under a destination root. */
@@ -44,8 +62,8 @@ export function isSafeEntryPath(name: string): boolean {
   return true;
 }
 
-export async function listArchiveEntries(file: string): Promise<ArchiveEntry[]> {
-  const zip = await openArchive(file);
+export async function listArchiveEntries(file: ArchiveInput): Promise<ArchiveEntry[]> {
+  const zip = await openInput(file);
   const entries: ArchiveEntry[] = [];
 
   try {
@@ -71,8 +89,8 @@ export async function listArchiveEntries(file: string): Promise<ArchiveEntry[]> 
   return entries;
 }
 
-function findEntry(file: string, wanted: string): Promise<{ zip: yauzl.ZipFile; entry: yauzl.Entry } | null> {
-  return openArchive(file).then(
+function findEntry(file: ArchiveInput, wanted: string): Promise<{ zip: yauzl.ZipFile; entry: yauzl.Entry } | null> {
+  return openInput(file).then(
     (zip) =>
       new Promise<{ zip: yauzl.ZipFile; entry: yauzl.Entry } | null>((resolve, reject) => {
         let found = false;
@@ -100,7 +118,7 @@ function findEntry(file: string, wanted: string): Promise<{ zip: yauzl.ZipFile; 
 }
 
 /** A stream over one member. The caller must consume it; the handle closes after. */
-export async function openArchiveEntry(file: string, entryPath: string): Promise<Readable> {
+export async function openArchiveEntry(file: ArchiveInput, entryPath: string): Promise<Readable> {
   const match = await findEntry(file, entryPath);
   if (!match) throw new Error(`L'archivio non contiene ${entryPath}`);
 
@@ -120,7 +138,7 @@ export async function openArchiveEntry(file: string, entryPath: string): Promise
 
 /** Extract one member to a path chosen by us, never by the archive. */
 export async function extractArchiveEntry(
-  file: string,
+  file: ArchiveInput,
   entryPath: string,
   destination: string
 ): Promise<number> {
@@ -134,11 +152,17 @@ export async function extractArchiveEntry(
   return fs.statSync(destination).size;
 }
 
-export async function readArchiveManifest(file: string): Promise<BackupManifest | null> {
+/**
+ * The archive's own manifest, or null when it has none. A password that is
+ * missing or wrong is not "no manifest": that error is thrown, so the caller
+ * can ask for the password instead of calling the archive foreign.
+ */
+export async function readArchiveManifest(file: ArchiveInput): Promise<BackupManifest | null> {
   let stream: Readable;
   try {
     stream = await openArchiveEntry(file, "manifest.json");
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === "ArchiveLockedError") throw err;
     return null;
   }
 

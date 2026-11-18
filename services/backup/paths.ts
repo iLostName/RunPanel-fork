@@ -77,13 +77,28 @@ export function archiveDirFor(at: Date): string {
  * A name that sorts chronologically, says which policy produced it, and still
  * carries the run id so the file and the row can always be matched up.
  * Stamped in UTC: a filename that shifts by an hour twice a year sorts wrong.
+ *
+ * An encrypted archive is `.zip.enc`: whoever finds it in a bucket can tell it
+ * is a zip they cannot just open, and the decrypt script gives back the name
+ * without `.enc`. Nothing in the panel reads the format from the name — the
+ * file's first bytes say it — so a renamed archive still restores.
  */
-export function archiveFileName(runId: string, policyName: string | null, at: Date): string {
+export function archiveFileName(
+  runId: string,
+  policyName: string | null,
+  at: Date,
+  opts: { encrypted?: boolean } = {}
+): string {
   const stamp =
     `${at.getUTCFullYear()}${two(at.getUTCMonth() + 1)}${two(at.getUTCDate())}` +
     `-${two(at.getUTCHours())}${two(at.getUTCMinutes())}${two(at.getUTCSeconds())}`;
   const label = policyName ? slugify(policyName).slice(0, 32) || "backup" : "manuale";
-  return `runpanel-${stamp}-${label}-${assertBackupId(runId)}.zip`;
+  return `runpanel-${stamp}-${label}-${assertBackupId(runId)}.zip${opts.encrypted ? ".enc" : ""}`;
+}
+
+/** What a browser or a bucket is told an archive is. */
+export function archiveContentType(fileName: string): string {
+  return fileName.toLowerCase().endsWith(".enc") ? "application/octet-stream" : "application/zip";
 }
 
 /** Archive paths are stored relative, so moving the data directory is not a migration. */
@@ -115,9 +130,9 @@ export function clearStaging(runId: string): void {
 }
 
 /**
- * `.zip.part` files left by a run that died mid-write. They are removed at boot
- * rather than kept: a partial archive has no readable central directory, so
- * there is nothing to recover from it.
+ * `.zip.part` files left by a run that died mid-write (`.zip.enc.part` for an
+ * encrypted one). They are removed at boot rather than kept: a partial archive
+ * has no readable central directory, so there is nothing to recover from it.
  */
 export function removePartialArchives(): number {
   const root = config.backupArchivesDir;
@@ -128,7 +143,7 @@ export function removePartialArchives(): number {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith(".zip.part")) {
+      else if (entry.name.endsWith(".zip.part") || entry.name.endsWith(".zip.enc.part")) {
         try {
           fs.rmSync(full, { force: true });
           removed++;
