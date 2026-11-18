@@ -41,6 +41,9 @@ The same header as the project page and tabs Panoramica, Connessione, Console, *
 
 An address is added from the project page: the panel shows the DNS record to create, checks it live and requests the certificate only once DNS is ready. Each address shows its certificate state; the domain can bring its `www` along. See [Domains](domains.md).
 
+- **The panel on HTTPS**: from **Impostazioni › Generale** give it a name on your domain; the panel checks DNS and the certificate, tries the new address, and only then offers to use it as the public address. The usual port keeps working, and "Disattiva" puts everything back.
+- **Instant address**: a project without a domain can get a name like `project.1-2-3-4.sslip.io` right away, HTTP only (the service is shared and does not allow dependable certificates): handy for a test, not for real use.
+
 ## Metrics and Monitor
 
 History of CPU, memory, disk and network for the server, projects and databases, with 1-hour, 24-hour and 7-day charts; alerts when CPU or RAM stay above 90% for 5 minutes; a check every minute that apps answer, with uptime and incidents. The Monitor sorts, and shows Compose containers and the ones the panel does not manage.

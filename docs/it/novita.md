@@ -41,6 +41,9 @@ Stesso header della pagina progetto e schede Panoramica, Connessione, Console, *
 
 Un indirizzo si aggiunge dalla pagina del progetto: il pannello mostra il record DNS da creare, lo controlla dal vivo e chiede il certificato solo quando il DNS è pronto. Ogni indirizzo mostra lo stato del certificato; il dominio può portarsi dietro il suo `www`. Vedi [Domini](domains.md).
 
+- **Il pannello su HTTPS**: da **Impostazioni › Generale** gli dai un nome sul tuo dominio; il pannello verifica DNS e certificato, prova l'indirizzo nuovo e solo dopo propone di usarlo come indirizzo pubblico. La porta di sempre continua a funzionare, e «Disattiva» rimette tutto com'era.
+- **Indirizzo immediato**: un progetto senza dominio può avere subito un nome del tipo `progetto.1-2-3-4.sslip.io`, solo in HTTP (il servizio è condiviso e non permette certificati affidabili): comodo per una prova, non per l'uso vero.
+
 ## Metriche e Monitor
 
 Storico di CPU, memoria, disco e rete per il server, i progetti e i database, con grafici su 1 ora, 24 ore e 7 giorni; avvisi quando CPU o RAM restano sopra il 90% per 5 minuti; controllo ogni minuto che le app rispondano, con uptime e incidenti. Il Monitor si ordina, mostra i container dei Compose e quelli non gestiti dal pannello.
