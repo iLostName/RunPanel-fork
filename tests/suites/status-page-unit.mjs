@@ -44,6 +44,12 @@ export async function run({ repoRoot }) {
     r.check("no dash at either end", !s.isValidSlug("-abc") && !s.isValidSlug("abc-") && s.isValidSlug("a-b-c"));
     r.check("not a number or nothing", !s.isValidSlug(123) && !s.isValidSlug(null) && !s.isValidSlug(""));
     r.check("the path is under /status", s.statusPagePath("abc") === "/status/abc");
+    r.check(
+      "the proxy gates /status and below, and nothing else",
+      s.isStatusPagePath("/status") && s.isStatusPagePath("/status/abc") && s.isStatusPagePath("/status/abc/x") && !s.isStatusPagePath("/statuses") && !s.isStatusPagePath("/api/status-page")
+    );
+    r.check("the slug it sees is what the page would", s.slugOfPath("/status/abc") === "abc" && s.slugOfPath("/status") === "" && !s.isValidSlug(s.slugOfPath("/status/abc/x")));
+    r.check("a miss goes where no page can be: a private folder", /^\/_[a-z-]+$/.test(s.STATUS_PAGE_MISS) && !s.STATUS_PAGE_MISS.startsWith("/_next"));
   }
 
   // --- what is stored ----------------------------------------------------------------------

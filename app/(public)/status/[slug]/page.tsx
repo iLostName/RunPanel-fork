@@ -18,8 +18,10 @@ import { StatusView } from "./_components/StatusView";
  * on the server, from the store, so there is no public endpoint to exclude
  * from `proxy.ts` and nothing for a script to poll but the page itself.
  *
- * Off, or at any address but the owner's, it is `notFound()`: the 404 every
- * mistyped path gets, never a 403 that would say something is there. The one
+ * Off, or at any address but the owner's, it is the 404 every mistyped path
+ * gets, never a 403 that would say something is there: `proxy.ts` rewrites
+ * those requests to the ordinary 404 before this renders, and `notFound()`
+ * below repeats the decision for whatever slips between the two. The one
  * exception is the owner, signed in, opening the right address of a page
  * that is off: they get a preview, marked as such, so a page can be checked
  * before it goes public. What it shows comes from `statusSnapshot`, cached for
@@ -51,7 +53,11 @@ const resolve = cache(async (slug: string): Promise<Resolved | null> => {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const page = await resolve((await params).slug);
-  if (!page) notFound();
+  // No `notFound()` here: thrown from the metadata it lands outside the
+  // not-found boundary, and Next answers with its error shell and a body
+  // drawn in the browser — a 404 that looks like no other 404. The page
+  // throws it instead, and this one is the root's title, like any 404.
+  if (!page) return {};
   const index = allowsIndexing(page.config, page.access);
   return {
     // Absolute: the panel's " · RunPanel" suffix is not the owner's title.

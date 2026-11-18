@@ -78,6 +78,24 @@ export function statusPagePath(slug: string): string {
   return `${STATUS_PAGE_BASE}/${slug}`;
 }
 
+/** Whether a request path is one `proxy.ts` gates for the page: the prefix itself or anything under it. */
+export function isStatusPagePath(pathname: string): boolean {
+  return pathname === STATUS_PAGE_BASE || pathname.startsWith(`${STATUS_PAGE_BASE}/`);
+}
+
+/** The path after the prefix, as the page's `[slug]` would receive it; checked by `isValidSlug` before use. */
+export function slugOfPath(pathname: string): string {
+  return isStatusPagePath(pathname) ? pathname.slice(STATUS_PAGE_BASE.length + 1) : "";
+}
+
+/**
+ * Where `proxy.ts` sends a request the page does not answer. A folder whose
+ * name starts with `_` is private in the app router, so no page can ever
+ * live here: the request gets the panel's 404 exactly as any mistyped
+ * address does.
+ */
+export const STATUS_PAGE_MISS = "/_status-page-miss";
+
 // --- What the owner set ------------------------------------------------------------
 
 export interface StatusPageEntry {
