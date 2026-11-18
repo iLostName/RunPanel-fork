@@ -61,8 +61,9 @@ export async function run({ repoRoot }) {
   // --- labels ----------------------------------------------------------------
   {
     const { actions, unreadable, calls, read } = recordedActions(repoRoot);
-    const page = readFileSync(join(repoRoot, "app", "(panel)", "(access)", "audit", "page.tsx"), "utf8");
-    const block = page.slice(page.indexOf("const ACTION_LABEL"), page.indexOf("/** Who did what"));
+    // The map lives in lib/audit-labels.ts, shared by the log page and the Overview's feed.
+    const page = readFileSync(join(repoRoot, "lib", "audit-labels.ts"), "utf8");
+    const block = page.slice(page.indexOf("export const ACTION_LABEL"), page.indexOf("export function actionLabel"));
     const labels = new Set([...block.matchAll(/^\s*"([^"]+)":/gm)].map((m) => m[1]));
 
     r.check("the scan reads every audit call", calls > 50 && read === calls, `${read} of ${calls}`);
