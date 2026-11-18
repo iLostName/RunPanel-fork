@@ -264,6 +264,40 @@
   --accent-foreground: oklch(99% 0 0);
 }
 
+/* ── Folder colours ──────────────────────────────────────────────────────────
+ * The Projects page gives every folder a colour (components/folders/FolderLook.tsx).
+ * Only the hue comes from the page, as `--folder-hue`: a pure function of the
+ * folder's name (lib/project-folders.ts), so there is nothing to store and
+ * nothing to pick. Lightness, chroma and the wash behind an icon are set here,
+ * per theme, like every other colour — which is what lets any of the 360 hues
+ * read on both: light enough on the dark page, dark enough on white.
+ *
+ * The chroma stays below the status colours' on purpose: a folder is a label,
+ * and it must never shout louder than a red "Errore" next to it.
+ */
+:root,
+.dark,
+[data-theme="dark"] {
+  --folder-lightness: 78%;
+  --folder-chroma: 0.11;
+  --folder-wash: 15%;
+}
+
+[data-theme="light"] {
+  --folder-lightness: 50%;
+  --folder-chroma: 0.12;
+  --folder-wash: 11%;
+}
+
+@utility folder-tint {
+  color: oklch(var(--folder-lightness) var(--folder-chroma) var(--folder-hue, 265));
+  background-color: oklch(var(--folder-lightness) var(--folder-chroma) var(--folder-hue, 265) / var(--folder-wash));
+}
+
+@utility folder-dot {
+  background-color: oklch(var(--folder-lightness) var(--folder-chroma) var(--folder-hue, 265));
+}
+
 @layer base {
   html {
     background-color: var(--background);
