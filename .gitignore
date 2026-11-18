@@ -51,3 +51,6 @@ next-env.d.ts
 # IDE
 .idea/
 .vscode/
+
+# Claude Code agent worktrees (full checkouts of other branches)
+.claude/worktrees/
