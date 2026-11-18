@@ -1,11 +1,13 @@
 "use client";
 
+import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Dropdown } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { useExpertMode, useThemeMode } from "@/components/Providers";
 import { useMe } from "@/lib/hooks/useMe";
 import { useServerHref } from "@/lib/hooks/useNode";
+import { startInstall, useInstall } from "@/lib/pwa/install";
 import { cn } from "@/lib/utils";
 import type { ThemeMode } from "@/lib/theme-mode";
 
@@ -16,11 +18,20 @@ const THEMES: { id: ThemeMode; label: string; icon: string }[] = [
 ];
 
 /** Two letters from the address, for the avatar: "mario.rossi@…" → "MR". */
-function initialsOf(email: string | null): string {
+export function initialsOf(email: string | null): string {
   const name = (email ?? "?").split("@")[0];
   const parts = name.split(/[._-]+/).filter(Boolean);
   const letters = parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2);
   return letters.toUpperCase();
+}
+
+/** Signs out and goes to the login page; shared with the phone's "Altro" sheet. */
+export function useLogout(): () => Promise<void> {
+  const router = useRouter();
+  return useCallback(async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  }, [router]);
 }
 
 /**
@@ -28,19 +39,18 @@ function initialsOf(email: string | null): string {
  *
  * The shell never said who you were: the only control was an "Esci" button.
  * The avatar opens your account, expert mode and the theme, which used to sit
- * two levels down in Impostazioni › Account.
+ * two levels down in Impostazioni › Account — and, until it runs as one,
+ * installing the panel as an app. On a phone all of this lives in the "Altro"
+ * sheet instead (components/MoreSheet.tsx).
  */
 export function UserMenu() {
   const me = useMe();
   const router = useRouter();
   const href = useServerHref();
+  const logout = useLogout();
   const { expert, setExpert } = useExpertMode();
   const { mode, setMode } = useThemeMode();
-
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-  }
+  const install = useInstall();
 
   return (
     <Dropdown>
@@ -60,6 +70,7 @@ export function UserMenu() {
           onAction={(key) => {
             if (key === "account") router.push(href("/account"));
             else if (key === "expert") setExpert(!expert);
+            else if (key === "install") void startInstall();
             else if (key === "logout") void logout();
             else {
               const theme = THEMES.find((t) => t.id === key);
@@ -90,6 +101,13 @@ export function UserMenu() {
               {mode === theme.id && <Icon icon="solar:check-read-linear" width={15} className="text-accent" aria-label="in uso" />}
             </Dropdown.Item>
           ))}
+          {/* Not offered inside the installed app itself. */}
+          {install.ready && !install.standalone ? (
+            <Dropdown.Item id="install" textValue="Installa l'app">
+              <Icon icon="solar:monitor-smartphone-linear" width={16} aria-hidden />
+              <span className="flex-1">Installa l&apos;app</span>
+            </Dropdown.Item>
+          ) : null}
           <Dropdown.Item id="logout" textValue="Esci" className="text-danger">
             <Icon icon="solar:logout-2-linear" width={16} aria-hidden />
             <span className="flex-1">Esci</span>

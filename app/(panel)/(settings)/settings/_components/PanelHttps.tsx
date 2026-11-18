@@ -122,8 +122,17 @@ function summaryOf(data: Data): string {
   return `${host.hostname} · ${state}`;
 }
 
-export function PanelHttpsSection({ onPublicUrlChange }: { onPublicUrlChange: (url: string) => void }) {
+export function PanelHttpsSection({
+  onPublicUrlChange,
+  focus = false,
+}: {
+  onPublicUrlChange: (url: string) => void;
+  /** Opened and scrolled to: "Installa l'app" on plain HTTP sends the owner here (`?open=https`). */
+  focus?: boolean;
+}) {
   const api = useNodeApi();
+  const anchor = useRef<HTMLDivElement>(null);
+  const scrolled = useRef(false);
   const steady = usePollInterval(60_000);
   const busy = usePollInterval(8_000);
   const [settledPoll, setSettledPoll] = useState(true);
@@ -135,6 +144,14 @@ export function PanelHttpsSection({ onPublicUrlChange }: { onPublicUrlChange: (u
   const host = data?.panelHost ?? null;
   const nowSettled = !host || (host.certificate !== "missing" && host.certificate !== "issuing");
   if (data && nowSettled !== settledPoll) setSettledPoll(nowSettled);
+
+  // Once, when the section has something to show: it sits below the preferences.
+  const loaded = Boolean(data);
+  useEffect(() => {
+    if (!focus || !loaded || scrolled.current) return;
+    scrolled.current = true;
+    anchor.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [focus, loaded]);
 
   if (!data) {
     if (!error) return <SkeletonBlock className="h-14" />;
@@ -152,19 +169,21 @@ export function PanelHttpsSection({ onPublicUrlChange }: { onPublicUrlChange: (u
 
   const attention = host !== null && !(host.certificate === "active" && data.adopted);
   return (
-    <Section
-      title={host ? "Il pannello su HTTPS" : "Metti il pannello su HTTPS"}
-      summary={summaryOf(data)}
-      defaultExpanded={attention}
-    >
-      {host ? (
-        <Progress data={data} onChanged={refresh} onPublicUrlChange={onPublicUrlChange} />
-      ) : data.proxy.state !== "ready" ? (
-        <NotReady data={data} onChanged={refresh} />
-      ) : (
-        <ChooseName data={data} onChanged={refresh} />
-      )}
-    </Section>
+    <div ref={anchor} className="scroll-mt-[calc(var(--top-bar-height)+var(--safe-top)+1rem)] md:scroll-mt-20">
+      <Section
+        title={host ? "Il pannello su HTTPS" : "Metti il pannello su HTTPS"}
+        summary={summaryOf(data)}
+        defaultExpanded={attention || focus}
+      >
+        {host ? (
+          <Progress data={data} onChanged={refresh} onPublicUrlChange={onPublicUrlChange} />
+        ) : data.proxy.state !== "ready" ? (
+          <NotReady data={data} onChanged={refresh} />
+        ) : (
+          <ChooseName data={data} onChanged={refresh} />
+        )}
+      </Section>
+    </div>
   );
 }
 

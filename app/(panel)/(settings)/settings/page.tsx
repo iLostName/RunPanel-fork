@@ -63,7 +63,8 @@ export default function PanelSettingsPage() {
   const canNotify = useCan("notifications");
   const canRegistries = useCan("registries");
   // `?open=notifications` comes from the bell's "Dove ricevere gli avvisi",
-  // `?open=status-page` from the uptime card and the page's own preview.
+  // `?open=status-page` from the uptime card and the page's own preview,
+  // `?open=https` from "Installa l'app" on a panel served over plain HTTP.
   const openSection = useSearchParams()?.get("open") ?? null;
 
   const [pollingInterval, setPollingInterval] = useState("5");
@@ -273,7 +274,7 @@ export default function PanelSettingsPage() {
           change the public address above: it reports back, so a later "Salva
           preferenze" sends the new value instead of the one this page loaded.
         */}
-        {me.isOwner && <PanelHttpsSection onPublicUrlChange={setPublicUrl} />}
+        {me.isOwner && <PanelHttpsSection onPublicUrlChange={setPublicUrl} focus={openSection === "https"} />}
 
         {me.isOwner && (
           <Section title="Colore d'accento" summary="Il colore delle azioni principali e della selezione">

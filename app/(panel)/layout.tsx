@@ -15,6 +15,8 @@ import { TopBar } from "@/components/TopBar";
 import { PollingProvider } from "@/lib/hooks/usePollingInterval";
 import { PanelUpdateProvider } from "@/lib/hooks/usePanelUpdate";
 import { UpdateBanner } from "@/components/UpdateBanner";
+import { InstallDialog } from "@/components/pwa/InstallDialog";
+import { InstallHint } from "@/components/pwa/InstallHint";
 import { panelRelease } from "@/services/panel-update/release";
 
 export default async function PanelLayout({
@@ -94,6 +96,10 @@ export default async function PanelLayout({
       {/* Mounted once for the whole panel: it listens for Ctrl/Cmd+K and
           renders nothing until it is asked for. */}
       <CommandPalette />
+      {/* "Installa l'app": the explanation where the browser has no button, and
+          the one-time suggestion on a phone. Both render nothing until needed. */}
+      <InstallDialog />
+      <InstallHint />
     </div>
     </PanelUpdateProvider>
     </PollingProvider>
