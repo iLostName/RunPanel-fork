@@ -16,7 +16,7 @@ import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { formatBytes, formatDurationBetween, formatRelative, formatUptime } from "@/lib/format";
 import { engineLabel } from "@/lib/labels";
 import { connectionEnvKey } from "@/lib/service-env";
-import { deploymentActive, deploymentSucceeded, explainDeployError, type DeployFix } from "@/lib/deploy-explain";
+import { ROLLBACK_NOTE, deploymentActive, deploymentSucceeded, explainDeployError, type DeployFix } from "@/lib/deploy-explain";
 import { parseContractJson } from "@/lib/deploy-contract";
 import { cn } from "@/lib/utils";
 import { projectHasSource } from "./project-facts";
@@ -152,10 +152,13 @@ export const ProjectOverview = memo(function ProjectOverview({
     };
   } else if (last.status === "failed") {
     const explanation = explainDeployError(last.error_message);
+    // A deploy that went back already says so in its hint: the generic line
+    // would follow "è tornata online la versione precedente" with a hedge.
+    const wentBack = (last.error_message ?? "").includes(ROLLBACK_NOTE);
     verdict = {
       tone: "danger",
       title: `Ultimo deploy non riuscito: ${explanation.title.charAt(0).toLowerCase()}${explanation.title.slice(1)}`,
-      text: `${explanation.hint}${project.last_success_at ? " Intanto resta online la versione precedente, se era attiva." : ""}`,
+      text: `${explanation.hint}${project.last_success_at && !wentBack ? " Intanto resta online la versione precedente, se era attiva." : ""}`,
       actions: canOperate ? (
         <>
           {fixButtons(explanation.fixes)}
