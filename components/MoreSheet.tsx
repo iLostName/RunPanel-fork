@@ -182,7 +182,7 @@ export function MoreSheet({
 
             <Group>
               <RowLink href={href("/account")} icon="solar:user-circle-linear" label="Il mio account" onNavigate={close} />
-              {install.ready && !install.standalone && (
+              {install.ready && !install.standalone && !install.installed && (
                 <button
                   type="button"
                   className={cn(ROW, "text-foreground")}

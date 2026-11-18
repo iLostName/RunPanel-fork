@@ -132,7 +132,10 @@ export function InstallDialog() {
                   <strong className="text-foreground">Aggiungi a schermata Home</strong>; in Chrome ed Edge per computer
                   c&apos;è anche l&apos;icona di installazione a destra nella barra degli indirizzi.
                 </p>
-                <p className="text-muted text-xs">Firefox per computer non installa le app web: apri il pannello con Chrome, Edge o Safari.</p>
+                <p className="text-muted text-xs">
+                  Se l&apos;hai già installata, aprila dalla sua icona: il browser non la propone una seconda volta. Firefox per
+                  computer non installa le app web: apri il pannello con Chrome, Edge o Safari.
+                </p>
               </>
             )}
           </Modal.Body>

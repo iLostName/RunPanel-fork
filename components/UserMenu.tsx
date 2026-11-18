@@ -101,8 +101,8 @@ export function UserMenu() {
               {mode === theme.id && <Icon icon="solar:check-read-linear" width={15} className="text-accent" aria-label="in uso" />}
             </Dropdown.Item>
           ))}
-          {/* Not offered inside the installed app itself. */}
-          {install.ready && !install.standalone ? (
+          {/* Not offered inside the installed app, nor once it was installed from here. */}
+          {install.ready && !install.standalone && !install.installed ? (
             <Dropdown.Item id="install" textValue="Installa l'app">
               <Icon icon="solar:monitor-smartphone-linear" width={16} aria-hidden />
               <span className="flex-1">Installa l&apos;app</span>
