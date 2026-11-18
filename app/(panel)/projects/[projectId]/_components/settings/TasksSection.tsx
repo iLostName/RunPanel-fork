@@ -79,7 +79,8 @@ export function TasksSection({ projectId }: { projectId: string }) {
   const anyRunning = tasks.some((task) => task.lastRun?.status === "running");
   if (anyRunning !== running) setRunning(anyRunning);
 
-  const canManage = Boolean(data && (data.canEdit || data.editBlockedReason));
+  // Every change to a task — its switch and its deletion too — is the editors'.
+  const canManage = Boolean(data?.canEdit);
 
   async function call(task: TaskView, path: string, init: RequestInit, done: string): Promise<boolean> {
     setBusy(task.id);
@@ -175,7 +176,7 @@ export function TasksSection({ projectId }: { projectId: string }) {
         />
         {data && !data.canEdit && data.editBlockedReason && (
           <Hint className="mt-3" tone="info">
-            {data.editBlockedReason} Puoi eseguirle, accenderle, spegnerle ed eliminarle, ma non scriverne i comandi.
+            {data.editBlockedReason} Puoi eseguirle e fermarle, ma non modificarle, spegnerle o eliminarle.
           </Hint>
         )}
         {error && !data && <p className="text-danger mt-3 text-sm">{MSG.loadFailed}</p>}
@@ -242,8 +243,8 @@ export function TasksSection({ projectId }: { projectId: string }) {
 function TaskMeta({ task, zone }: { task: TaskView; zone: string | undefined }) {
   const ownZone = task.timezone ?? zone;
   const next =
-    task.needsReview
-      ? "Il progetto ora gira in un altro modo: riapri l'attività e salvala per confermare dove deve girare il comando"
+    task.needsReview && task.reviewReason
+      ? capitalize(task.reviewReason)
       : task.enabled && task.nextRunAt
         ? `Prossima ${formatRelative(task.nextRunAt)} · ${formatInZone(task.nextRunAt, ownZone)}`
         : task.cron && !task.enabled

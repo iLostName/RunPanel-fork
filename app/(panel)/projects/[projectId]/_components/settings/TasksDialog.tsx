@@ -137,9 +137,11 @@ export function TasksDialog({
       onSubmit={submit}
     >
       {task?.needsReview && (
-        <Hint tone="warn" title="Il progetto ora gira in un altro modo">
-          Questo comando era stato scritto per {task.runsIn === "container" ? "un container" : "girare sul server"}, e
-          finché non lo confermi l&apos;attività salta ogni giro. Controlla che abbia ancora senso, poi salva.
+        <Hint tone="warn" title="Da confermare prima che riparta">
+          {task.runsIn !== info.runsIn
+            ? `Questo comando era stato scritto per ${task.runsIn === "container" ? "un container" : "girare sul server"}, e il progetto ora gira in un altro modo.`
+            : "Questo comando era stato scritto quando il progetto non raggiungeva l'host, da chi non ha il permesso «Accesso all'host»."}{" "}
+          Finché non lo confermi l&apos;attività salta ogni giro: controlla che abbia ancora senso, poi salva.
         </Hint>
       )}
 
@@ -177,7 +179,7 @@ export function TasksDialog({
         onChange={setCommand}
         rows={3}
         placeholder={PLACEHOLDER[info.runtimeType] ?? PLACEHOLDER.custom}
-        hint="Un comando per riga: girano in ordine nella stessa shell, e il primo che fallisce ferma gli altri. Non metterci password: il comando resta nella cronologia, e così il suo output."
+        hint="Un comando per riga: girano in ordine nella stessa shell, e il primo che fallisce ferma gli altri. Le righe che iniziano con # sono commenti. Non metterci password: il comando resta nella cronologia, e così il suo output."
       />
 
       <div className="border-separator border-t pt-4">
