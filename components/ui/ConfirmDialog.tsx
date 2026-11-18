@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertDialog, Button } from "@heroui/react";
+import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
 
@@ -15,6 +15,11 @@ import { MSG } from "@/lib/copy";
  *
  * `onConfirm` may be async: the dialog stays open with the button in a pending
  * state until it settles, so a slow delete cannot be fired twice.
+ *
+ * Two levels, one dialog. Something that interrupts (stop, restart, revoke)
+ * says what will happen and asks. Something that cannot be undone and loses
+ * data passes `confirmText`: the button stays disabled until that name is
+ * typed, so the dialog cannot be dismissed with a reflexive Enter.
  */
 export function ConfirmDialog({
   isOpen,
@@ -24,6 +29,7 @@ export function ConfirmDialog({
   confirmLabel = "Conferma",
   cancelLabel = "Annulla",
   destructive = false,
+  confirmText,
   onConfirm,
 }: {
   isOpen: boolean;
@@ -33,12 +39,25 @@ export function ConfirmDialog({
   confirmLabel?: string;
   cancelLabel?: string;
   destructive?: boolean;
+  /** For what cannot be undone: the name to type before the button unlocks. */
+  confirmText?: string;
   /** Return `false` to keep the dialog open after a failure it already reported. */
   onConfirm: () => void | boolean | Promise<void | boolean>;
 }) {
   const [pending, setPending] = useState(false);
+  const [typed, setTyped] = useState("");
+  const locked = confirmText !== undefined && typed.trim() !== confirmText;
+
+  // A fresh dialog starts empty: what was typed for the last one is not consent
+  // for this one. Adjusted during render, not in an effect.
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen);
+    if (isOpen) setTyped("");
+  }
 
   async function handleConfirm() {
+    if (locked) return;
     setPending(true);
     try {
       // `false` means the action failed and said so itself: stay open.
@@ -73,10 +92,18 @@ export function ConfirmDialog({
           <AlertDialog.Header>
             <AlertDialog.Heading>{title}</AlertDialog.Heading>
           </AlertDialog.Header>
-          {description && (
-            <AlertDialog.Body>
+          {(description || confirmText !== undefined) && (
+            <AlertDialog.Body className="space-y-4">
               {/* A div, not a p: callers put labels and controls in here. */}
-              <div className="text-muted text-sm">{description}</div>
+              {description && <div className="text-muted text-sm">{description}</div>}
+              {confirmText !== undefined && (
+                <TextField value={typed} onChange={setTyped} isDisabled={pending} autoFocus>
+                  <Label>
+                    Scrivi <span className="text-foreground font-mono">{confirmText}</span> per confermare
+                  </Label>
+                  <Input autoComplete="off" spellCheck={false} className="font-mono text-sm" />
+                </TextField>
+              )}
             </AlertDialog.Body>
           )}
           <AlertDialog.Footer className="justify-end gap-2">
@@ -86,6 +113,7 @@ export function ConfirmDialog({
             <Button
               variant={destructive ? "danger" : "primary"}
               isPending={pending}
+              isDisabled={locked}
               onPress={handleConfirm}
             >
               {confirmLabel}
