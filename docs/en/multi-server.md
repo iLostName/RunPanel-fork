@@ -37,7 +37,7 @@ A page's server is part of its address (`?server=…`): a link to a project on "
 - **Actions.** Starting a service, running a backup, downloading an archive, applying a diagnostics fix or updating a server always go to the row's server.
 - **Creating.** New project, new database and new backup policy ask which server.
 - **Single-server pages.** A project or service page, Autostart, Docker cleanup, Settings and the Activity log are about one server at a time: its name shows in the breadcrumb. A link to a project on another server takes you there by itself.
-- The **command palette** (Ctrl+K) searches projects and services on every server, **Telegram notifications** start with the name of the server that sent them, and the update banner says which server has one.
+- The **command palette** (Ctrl+K) searches projects and services on every server, **notifications** sent to a channel start with the name of the server that sent them, and the update banner says which server has one.
 
 Permissions are the account's on the other server too: whoever may read a project reads it wherever it lives.
 
@@ -47,9 +47,9 @@ These stay with the panel you are using, whatever server is selected: **Accessi 
 
 Users, permissions, grants and folders are replicated to every server and edited from any panel. Every change is pushed to the others at once, nodes included, and a check every minute repairs whatever did not arrive (a server that was off, for instance). If two servers edit the same account or the same folder, the more recent change wins; deleting a folder always wins, even over a later rename. A deleted account or folder leaves a trace for 30 days, so a stale copy cannot bring it back.
 
-The GitHub token and the Telegram bot (token and chat) are shared too: every server clones and notifies with the same credentials, and encrypts them with its own key.
+The GitHub token is shared too: every server clones with the same credentials, and encrypts them with its own key. Notification channels are not: each server has its own, configured with that server selected (a Telegram bot configured before channels existed was copied into each server's list on upgrade).
 
-Each server keeps its own: sessions (you sign in on each panel separately), invitation links (they open on the panel that issued them), the activity log, backups and destinations, registries, public address, polling interval, update settings and which notifications to send.
+Each server keeps its own: sessions (you sign in on each panel separately), invitation links (they open on the panel that issued them), the activity log, backups and destinations, registries, public address, polling interval, update settings, its notification channels and the bell's notifications.
 
 ## Diagnosis
 

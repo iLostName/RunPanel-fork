@@ -1,249 +1,269 @@
 "use client";
 
 import { useState } from "react";
-import { LoadError } from "@/components/ui/LoadError";
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { toast } from "@/lib/toast";
-import { SettingToggle } from "./SettingToggle";
-import { FieldHint, Hint } from "./Hint";
-import { SkeletonBlock } from "./Skeletons";
+import { LoadError } from "./LoadError";
+import { ListSkeleton } from "./PageState";
+import { ListRow, RowMenu } from "./ListRow";
+import { Badge, type BadgeTone } from "./Badge";
+import { Panel } from "./Panel";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { Technical } from "./Technical";
+import { ChannelDialog } from "@/components/notifications/ChannelDialog";
 import { useResource } from "@/lib/hooks/useResource";
-import { MSG } from "@/lib/copy";
-import { NOTIFY_GROUPS, type NotifyEventKey } from "@/lib/notify-events";
+import { useMe } from "@/lib/hooks/useMe";
 import { useNodeApi } from "@/lib/hooks/useNode";
+import { formatRelative, formatWhen } from "@/lib/format";
+import { toast } from "@/lib/toast";
+import { MSG } from "@/lib/copy";
+import { CHANNEL_KIND_INFO, DEFAULT_NTFY_SERVER, channelHealth, type ChannelHealth, type PublicChannel } from "@/lib/notify-channels";
 
-interface Config {
-  tokenSet: boolean;
-  chatId: string;
-  events: NotifyEventKey[];
-  configured: boolean;
+interface ChannelsResponse {
+  channels: PublicChannel[];
+  mailReady: boolean;
+  max: number;
 }
 
-interface Chat {
-  id: string;
-  title: string;
-  kind: string;
+const HEALTH: Record<ChannelHealth, { label: string; tone: BadgeTone }> = {
+  off: { label: "Spento", tone: "neutral" },
+  never: { label: "Mai usato", tone: "neutral" },
+  ok: { label: "Funziona", tone: "success" },
+  failing: { label: "Non riesce a inviare", tone: "danger" },
+};
+
+/** Where a channel sends, in a few words, without any of its secrets. */
+function destination(channel: PublicChannel): string {
+  const config = channel.config;
+  switch (channel.kind) {
+    case "email":
+      return Array.isArray(config.to) ? (config.to as string[]).join(", ") : "";
+    case "telegram":
+      return typeof config.chatId === "string" && config.chatId ? `Chat ${config.chatId}` : "Chat da scegliere";
+    case "ntfy": {
+      const server =
+        typeof config.server === "string" && config.server !== DEFAULT_NTFY_SERVER ? ` su ${config.server.replace(/^https?:\/\//, "")}` : "";
+      return `Argomento ${String(config.topic ?? "")}${server}`;
+    }
+    default:
+      return typeof config.hint === "string" ? config.hint : "";
+  }
+}
+
+function eventsText(count: number): string {
+  if (count === 0) return "nessun evento";
+  return count === 1 ? "1 tipo di evento" : `${count} tipi di evento`;
 }
 
 /**
- * Connecting a Telegram bot, and choosing what it is allowed to say.
+ * The places notifications are sent, besides the bell.
  *
- * The awkward part of setting one of these up is not the token, it is the chat
- * id: every guide answers it with "message @userinfobot" or "open this URL and
- * read the JSON". The panel already holds the token, so it can just ask
- * Telegram who has written to the bot and offer the list — which turns the
- * whole setup into paste, write to the bot, press two buttons.
+ * One row per channel, saying what it is, where it sends, what it receives and
+ * how its last attempt went — "non riesce a inviare", with the reason, is the
+ * row's whole point when something is wrong. Adding and editing happen in a
+ * dialog; trying a channel is one press.
  *
- * The token is write-only from here. It goes back encrypted and never comes
- * out again; the screen is told whether one exists, which is all it needs to
- * draw the difference between "connect" and "replace".
+ * Replaces the single Telegram form that lived here: that bot, if there was
+ * one, is the first channel of the list.
  */
 export function NotificationSettings() {
   const api = useNodeApi();
-  const { data, loading, error: loadError, refresh } = useResource<Config>(api("/api/notifications"));
+  const me = useMe();
+  const { data, loading, error, refresh } = useResource<ChannelsResponse>(api("/api/notifications/channels"));
 
-  const [token, setToken] = useState("");
-  const [chatId, setChatId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [busy, setBusy] = useState<"test" | "chats" | null>(null);
-  const [chats, setChats] = useState<Chat[] | null>(null);
+  const [dialog, setDialog] = useState<{ key: number; channel: PublicChannel | null } | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState<PublicChannel | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
 
-  if (!data && loadError) {
-    return <LoadError what="le notifiche" error={loadError} onRetry={() => void refresh()} />;
+  if (!data && error) return <LoadError what="i canali di notifica" error={error} onRetry={() => void refresh()} />;
+  if (loading || !data) return <ListSkeleton rows={2} />;
+
+  const channels = data.channels;
+
+  // A new key per opening, so the dialog starts from the channel as it is now
+  // and not from what was typed the last time it was open.
+  function openDialog(channel: PublicChannel | null) {
+    setDialog((current) => ({ key: (current?.key ?? 0) + 1, channel }));
+    setDialogOpen(true);
   }
-  if (loading || !data) return <SkeletonBlock className="h-40" />;
 
-  // Local edit wins until it is saved; otherwise show what the panel holds.
-  const chatValue = chatId ?? data.chatId;
-
-  async function save(patch: Record<string, unknown>, message: string) {
-    setSaving(true);
+  async function test(channel: PublicChannel) {
+    setTesting(channel.id);
     try {
-      const res = await fetch(api("/api/notifications"), {
-        method: "PUT",
+      const res = await fetch(api(`/api/notifications/channels/${channel.id}/test`), { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (body.ok) toast.success(`Prova inviata a «${channel.name}»: controlla che sia arrivata.`);
+      else toast.error(body.error ?? "Invio non riuscito");
+    } catch {
+      toast.error(MSG.unreachable);
+    } finally {
+      setTesting(null);
+      void refresh();
+    }
+  }
+
+  async function setEnabled(channel: PublicChannel, enabled: boolean) {
+    try {
+      const res = await fetch(api(`/api/notifications/channels/${channel.id}`), {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
+        body: JSON.stringify({ enabled }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
         toast.error(body.error ?? MSG.saveFailed);
-        return false;
-      }
-      toast.success(message);
-      refresh();
-      return true;
-    } catch {
-      toast.error(MSG.unreachable);
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function act(action: "test" | "chats") {
-    setBusy(action);
-    try {
-      const res = await fetch(api("/api/notifications"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      const body = (await res.json().catch(() => ({}))) as {
-        ok?: boolean;
-        error?: string;
-        chats?: Chat[];
-      };
-
-      if (action === "test") {
-        if (body.ok) toast.success("Messaggio di prova inviato");
-        else toast.error(body.error ?? "Invio non riuscito");
         return;
       }
-
-      setChats(body.chats ?? []);
-      if (body.error) toast.error(body.error);
-      else if (body.chats?.length) toast.success(`${body.chats.length} chat trovate`);
+      toast.success(enabled ? `«${channel.name}» riattivato` : `«${channel.name}» spento`);
+      void refresh();
     } catch {
       toast.error(MSG.unreachable);
-    } finally {
-      setBusy(null);
     }
   }
 
-  function toggle(key: NotifyEventKey, on: boolean) {
-    const next = on ? [...data!.events, key] : data!.events.filter((event) => event !== key);
-    void save({ events: next }, on ? "Notifica attivata" : "Notifica disattivata");
+  async function remove(channel: PublicChannel) {
+    const res = await fetch(api(`/api/notifications/channels/${channel.id}`), { method: "DELETE" });
+    if (!res.ok) {
+      toast.error(MSG.deleteFailed);
+      return false;
+    }
+    toast.success(`«${channel.name}» eliminato`);
+    void refresh();
   }
 
   return (
-    <div className="space-y-5">
-      {!data.configured && (
-        <Hint tone="tip" title="Come si collega">
-          Crea un bot con <strong className="text-foreground">@BotFather</strong> su Telegram,
-          incolla qui il token che ti dà, poi scrivi un messaggio qualsiasi al tuo bot e premi
-          Rileva. Il pannello parla solo in uscita: non serve che sia raggiungibile da internet.
-        </Hint>
+    <div className="space-y-4">
+      <p className="text-muted text-sm">
+        Le notifiche compaiono sempre nella campanella in alto. Qui scegli dove mandarle anche fuori dal pannello, e per
+        quali eventi: per esempio «avvisami su Telegram quando un deploy fallisce».
+      </p>
+
+      {channels.length === 0 ? (
+        <div className="border-border flex flex-col items-center rounded-[var(--radius)] border border-dashed px-6 py-8 text-center">
+          <Icon icon="solar:bell-bing-linear" width={28} className="text-muted/60" aria-hidden />
+          <p className="text-foreground mt-2 text-sm font-medium">Nessun canale</p>
+          <p className="text-muted mt-1 max-w-sm text-xs">
+            Email, Telegram, Discord, Slack, ntfy sul telefono, o un webhook verso un tuo servizio.
+          </p>
+          <Button className="mt-4" variant="primary" size="sm" onPress={() => openDialog(null)}>
+            <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+            Aggiungi un canale
+          </Button>
+        </div>
+      ) : (
+        <Panel nested padding="flush" className="divide-separator divide-y overflow-hidden">
+          {channels.map((channel) => {
+            const info = CHANNEL_KIND_INFO[channel.kind];
+            const health = channelHealth(channel);
+            const look = HEALTH[health];
+            const noMail = channel.kind === "email" && !data.mailReady;
+            const where = destination(channel);
+            return (
+              <div key={channel.id}>
+                <ListRow
+                  icon={info.icon}
+                  title={channel.name}
+                  status={<Badge tone={look.tone}>{look.label}</Badge>}
+                  badges={
+                    <>
+                      <Badge>{info.label}</Badge>
+                      {channel.filter === "problems" && <Badge tone="warning">Solo problemi</Badge>}
+                      {!channel.secretsReadable && <Badge tone="danger">Segreti da reinserire</Badge>}
+                      {noMail && <Badge tone="warning">Manca il server di posta</Badge>}
+                    </>
+                  }
+                  description={`${where}${where ? " · " : ""}${eventsText(channel.events.length)}`}
+                  meta={
+                    health === "ok" && channel.lastOkAt ? (
+                      <span title={formatWhen(channel.lastOkAt)}>Ultimo invio riuscito {formatRelative(channel.lastOkAt)}</span>
+                    ) : health === "never" ? (
+                      "Non ha ancora inviato niente"
+                    ) : undefined
+                  }
+                  action={
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      isPending={testing === channel.id}
+                      isDisabled={testing !== null}
+                      onPress={() => void test(channel)}
+                      aria-label={`Invia una prova a ${channel.name}`}
+                    >
+                      <Icon icon="solar:plain-linear" width={15} aria-hidden />
+                      <span className="hidden sm:inline">Invia una prova</span>
+                    </Button>
+                  }
+                  menu={
+                    <RowMenu
+                      label={`Azioni per ${channel.name}`}
+                      actions={[
+                        { id: "edit", label: "Modifica", icon: "solar:pen-linear", onAction: () => openDialog(channel) },
+                        channel.enabled
+                          ? { id: "off", label: "Spegni", icon: "solar:pause-circle-linear", onAction: () => void setEnabled(channel, false) }
+                          : { id: "on", label: "Riattiva", icon: "solar:play-circle-linear", onAction: () => void setEnabled(channel, true) },
+                        {
+                          id: "delete",
+                          label: "Elimina",
+                          icon: "solar:trash-bin-trash-linear",
+                          danger: true,
+                          onAction: () => setDeleting(channel),
+                        },
+                      ]}
+                    />
+                  }
+                />
+                {health === "failing" && channel.lastError && (
+                  <p role="status" className="text-danger -mt-1.5 pr-4 pb-3 pl-[60px] text-xs break-words">
+                    <span title={channel.lastErrorAt ? formatWhen(channel.lastErrorAt) : undefined}>
+                      Ultimo invio non riuscito {formatRelative(channel.lastErrorAt)}:
+                    </span>{" "}
+                    {channel.lastError}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </Panel>
       )}
 
-      <div>
-        <TextField type="password" value={token} onChange={setToken}>
-          <Label>Token del bot</Label>
-          <Input
-            placeholder={data.tokenSet ? "••••••••  (configurato)" : "123456789:AA…"}
-            className="font-mono text-sm"
-          />
-        </TextField>
-        <FieldHint>
-          {data.tokenSet
-            ? "Un token è già salvato, cifrato a riposo. Incollane un altro per sostituirlo."
-            : "Viene salvato cifrato e non viene più restituito da questa pagina."}
-        </FieldHint>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            isDisabled={!token.trim() || saving}
-            isPending={saving}
-            onPress={async () => {
-              // Verified against Telegram before it is stored, so a typo is
-              // refused here rather than discovered by a silent notification.
-              if (await save({ token: token.trim() }, "Bot collegato")) setToken("");
-            }}
-          >
-            {data.tokenSet ? "Sostituisci il token" : "Collega il bot"}
+      {channels.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" isDisabled={channels.length >= data.max} onPress={() => openDialog(null)}>
+            <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+            Aggiungi un canale
           </Button>
-          {data.tokenSet && (
-            <Button
-              size="sm"
-              variant="ghost"
-              isDisabled={saving}
-              onPress={() => void save({ token: "" }, "Bot scollegato")}
-            >
-              Scollega
-            </Button>
-          )}
+          <Technical>
+            <span className="text-muted text-meta">
+              Più avvisi ravvicinati arrivano come un messaggio solo; un webhook riceve ogni evento, fino a 30 ogni 10 minuti.
+            </span>
+          </Technical>
         </div>
-      </div>
+      )}
 
-      <div>
-        <TextField value={chatValue} onChange={setChatId}>
-          <Label>Chat di destinazione</Label>
-          <Input placeholder="123456789" className="font-mono text-sm" />
-        </TextField>
-        <FieldHint>
-          L&apos;id numerico della chat, negativo per i gruppi. Un bot non può scrivere per primo:
-          mandagli un messaggio, poi premi Rileva.
-        </FieldHint>
+      {dialog && (
+        <ChannelDialog
+          key={dialog.key}
+          isOpen={dialogOpen}
+          onOpenChange={setDialogOpen}
+          channel={dialog.channel}
+          mailReady={data.mailReady}
+          isOwner={me.isOwner}
+          onSaved={() => void refresh()}
+        />
+      )}
 
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            isDisabled={chatValue === data.chatId || saving}
-            isPending={saving}
-            onPress={() => void save({ chatId: chatValue.trim() }, "Chat salvata")}
-          >
-            Salva la chat
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            isDisabled={!data.tokenSet || busy !== null}
-            isPending={busy === "chats"}
-            onPress={() => void act("chats")}
-          >
-            <Icon icon="solar:magnifer-linear" width={15} aria-hidden />
-            Rileva
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            isDisabled={!data.configured || busy !== null}
-            isPending={busy === "test"}
-            onPress={() => void act("test")}
-          >
-            <Icon icon="solar:plain-linear" width={15} aria-hidden />
-            Invia una prova
-          </Button>
-        </div>
-
-        {chats !== null && chats.length > 0 && (
-          <ul className="border-border divide-border mt-3 divide-y overflow-hidden rounded-[var(--radius)] border">
-            {chats.map((chat) => (
-              <li key={chat.id} className="flex items-center gap-3 px-3 py-2">
-                <span className="text-foreground min-w-0 flex-1 truncate text-sm">
-                  {chat.title}
-                  <span className="text-muted ml-2 text-xs">{chat.kind}</span>
-                </span>
-                <code className="text-muted shrink-0 font-mono text-xs">{chat.id}</code>
-                <Button size="sm" variant="ghost" onPress={() => setChatId(chat.id)}>
-                  Usa
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="space-y-4">
-        <p className="text-muted text-sm font-medium">Cosa notificare</p>
-        {NOTIFY_GROUPS.map((group) => (
-          <div key={group.id} className="space-y-2.5">
-            <p className="text-muted/60 text-meta tracking-wider uppercase">{group.label}</p>
-            {group.events.map((event) => (
-              <SettingToggle
-                key={event.key}
-                label={event.label}
-                description={event.description}
-                isSelected={data.events.includes(event.key)}
-                isDisabled={saving}
-                onChange={(on) => toggle(event.key, on)}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
+      <ConfirmDialog
+        isOpen={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+        title={deleting ? `Eliminare «${deleting.name}»?` : "Eliminare il canale?"}
+        description="Non riceverà più niente. Le notifiche restano comunque nella campanella del pannello."
+        confirmLabel="Elimina"
+        destructive
+        onConfirm={() => (deleting ? remove(deleting) : undefined)}
+      />
     </div>
   );
 }

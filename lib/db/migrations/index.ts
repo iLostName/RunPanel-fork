@@ -30,6 +30,7 @@ import * as clusterLastSeen from "./028-cluster-last-seen";
 import * as sourceUrlCredentials from "./029-source-url-credentials";
 import * as hostPassword from "./030-host-password";
 import * as apiTokens from "./031-api-tokens";
+import * as notifications from "./032-notifications";
 import * as metricSamples from "./033-metric-samples";
 import * as uptime from "./034-uptime";
 import * as twoFactor from "./035-two-factor";
@@ -74,6 +75,7 @@ export const migrations: Record<string, Migration> = {
   "029-source-url-credentials": sourceUrlCredentials,
   "030-host-password": hostPassword,
   "031-api-tokens": apiTokens,
+  "032-notifications": notifications,
   "033-metric-samples": metricSamples,
   "034-uptime": uptime,
   "035-two-factor": twoFactor,

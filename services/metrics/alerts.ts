@@ -77,6 +77,7 @@ export function evaluateAlerts(readings: readonly AlertReading[], at: number): v
             percent: Math.round(event.value),
             peak: Math.round(event.kind === "clear" ? event.peak : event.value),
             durationMs: event.kind === "clear" ? at - event.since : null,
+            ...(reading.scope === "project" ? { projectId: reading.id } : {}),
           });
         }
       }

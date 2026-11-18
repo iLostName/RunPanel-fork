@@ -173,7 +173,7 @@ System, Access and Settings group several pages as tabs, each with its own addre
 | **Monitor** | processes and containers with CPU, memory and uptime, plus a summary of the host (of every server, with several) |
 | **System** | *Diagnostics* (what is missing and what to press), *Autostart* (what comes back after a reboot), *Updates* (version, waiting commits, the button that applies them), *Domains* (the domains nginx serves and every project's subdomain), *Docker cleanup* (what is using the disk and what can be reclaimed), *Servers* (the linked installs: status, version, diagnosis, role, revocation) |
 | **Access** | *Users* (invitations with expiring links, per-account permissions) and *Activity log* (who did what) |
-| **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (refresh rate, timezone, public address, polling interval, accent colour, Telegram notifications, private registries), *GitHub* (token, repositories, branches) |
+| **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (refresh rate, timezone, public address, polling interval, accent colour, notification channels, mail server, private registries), *GitHub* (token, repositories, branches) |
 
 </details>
 
@@ -277,7 +277,7 @@ Everything lives in `.env` (see `.env.example` for the annotated version) and is
 <td valign="top">
 
 **[🔧 Operations](docs/en/operations.md)**<br>
-<sub>Starting at boot, scheduled restarts, freeing space, updating the panel, Telegram notifications</sub>
+<sub>Starting at boot, scheduled restarts, freeing space, updating the panel, notifications</sub>
 
 </td>
 <td valign="top">
@@ -324,7 +324,7 @@ Everything lives in `.env` (see `.env.example` for the annotated version) and is
 - Several accounts with permissions per project, service, folder and resource, checked by the server on every route and every stream; a test fails when a new route does not declare what it protects ([Users and permissions](docs/en/users.md))
 - `proxy.ts` refuses `/api` requests without a session before they reach a handler, in addition to each handler's own check; the exceptions are listed in [Architecture](docs/en/architecture.md)
 - Calls between linked servers carry an HMAC-SHA256 over method, path, body, user and time, keyed with a cluster secret encrypted at rest; each signature is accepted once, within five minutes ([More than one server](docs/en/multi-server.md))
-- Project variables, service credentials, registry and backup credentials, the GitHub token and the Telegram bot encrypted at rest (AES-256-GCM)
+- Project variables, service credentials, registry and backup credentials, the GitHub token, notification channel secrets and the SMTP password encrypted at rest (AES-256-GCM)
 - No `RUNPANEL_*` variable reaches deployed projects: the encryption key, the store's credentials and the setup token stay with the panel
 - Webhook signatures verified with HMAC-SHA256 and a constant-time compare
 - File operations resolve symlinks and are confined to the project; ZIP uploads are unpacked in-process, refusing traversal entries and links, capped by both archive and decompressed size
@@ -348,7 +348,7 @@ For TLS and reverse proxies in front of the panel, see [Putting it on the intern
 - Port restrictions are enforced by the panel process: with the panel stopped the port simply closes. A rule that has to hold with the panel down needs a host firewall as well.
 - **Restore** does not compare engine versions, and refuses RunPanel's own Postgres store (the `pg_restore` command is in the archive's manifest). See [Backups](docs/en/backups.md#restore).
 - Installing at boot is **Linux-only**; elsewhere the panel shows what to do by hand.
-- **Notifications** have one channel, Telegram, and go to one chat. The bot takes no commands.
+- **Notification channels** only send: the Telegram bot takes no commands, and each server of a cluster has its own channels.
 - **Several servers** need a private, encrypted network between them (Tailscale, for instance) or HTTPS, and a server can only join on its first run. See [More than one server](docs/en/multi-server.md#limits).
 - **Updating the panel from the panel** needs a supervisor that starts it again after it exits (systemd or the `@reboot` script); without one the swap and the restart are two commands to run by hand. It is not available in a container or on Windows.
 

@@ -506,6 +506,65 @@ export interface ApiTokensTable {
   expires_at: string | null;
 }
 
+/** Where notifications go — see migration 032 and services/notify/channels.ts. */
+export interface NotificationChannelsTable {
+  id: string;
+  name: string;
+  /** `email` | `telegram` | `discord` | `slack` | `ntfy` | `webhook` — lib/notify-channels.ts. */
+  kind: string;
+  /** 0 | 1 */
+  enabled: number;
+  /** JSON map of event key → on/off; a key missing from it takes its default. */
+  events: string;
+  /** `all` | `problems` */
+  filter: string;
+  /** JSON of the plain settings: chat id, topic, recipients, a hint of the URL. */
+  config: string;
+  /** Encrypted JSON of the secrets. Never sent to the browser. */
+  secrets: string | null;
+  last_ok_at: string | null;
+  /** The last failure, in words and with every secret taken out. */
+  last_error: string | null;
+  last_error_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** The notification centre — see migration 032 and services/notify/center.ts. */
+export interface NotificationsTable {
+  id: string;
+  event: string;
+  /** `ok` | `warn` | `danger` | `info` */
+  level: string;
+  title: string;
+  /** The catalogue's HTML dialect: `<b>`, `<code>`, `<a href>` and three entities. */
+  body: string;
+  /** Where in the panel it leads. */
+  href: string | null;
+  /** `project` | `service`, or null for the machine and the panel. */
+  scope: string | null;
+  scope_id: string | null;
+  /** Who sees a notification with no scope: the holders of this panel permission. */
+  permission: string | null;
+  /** How many more times it happened while it was being held back. */
+  repeats: number;
+  created_at: string;
+  /** The last of those times. */
+  last_at: string;
+}
+
+export interface NotificationReadsTable {
+  notification_id: string;
+  user_id: string;
+  read_at: string;
+}
+
+/** Per user: everything created up to `read_before` counts as read. */
+export interface NotificationReadMarksTable {
+  user_id: string;
+  read_before: string;
+}
+
 /** Two-step sign-in of one account, on this panel only — see migration 035. */
 export interface UserTwoFactorTable {
   user_id: string;
@@ -794,6 +853,10 @@ export interface Database {
   settings: SettingsTable;
   sessions: SessionsTable;
   api_tokens: ApiTokensTable;
+  notification_channels: NotificationChannelsTable;
+  notifications: NotificationsTable;
+  notification_reads: NotificationReadsTable;
+  notification_read_marks: NotificationReadMarksTable;
   users: UsersTable;
   user_permissions: UserPermissionsTable;
   user_grants: UserGrantsTable;

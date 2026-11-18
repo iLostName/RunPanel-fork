@@ -23,6 +23,10 @@ export interface TelegramResult {
   ok: boolean;
   /** Telegram's own wording, which is usually the useful part. */
   error?: string;
+  /** A network failure, a 5xx or a 429: worth one more try in a moment. */
+  retryable?: boolean;
+  /** What Telegram asked for with a 429, when it said. */
+  retryAfterMs?: number;
 }
 
 interface TelegramResponse<T> {
@@ -30,6 +34,9 @@ interface TelegramResponse<T> {
   result?: T;
   description?: string;
   error_code?: number;
+  parameters?: { retry_after?: number };
+  /** Set by `call` when Telegram was never reached, or did not answer in JSON. */
+  network?: boolean;
 }
 
 async function call<T>(
@@ -58,6 +65,7 @@ async function call<T>(
     return {
       ok: false,
       description: aborted ? `Nessuna risposta entro ${TIMEOUT_MS / 1000}s` : reason(err),
+      network: true,
     };
   } finally {
     clearTimeout(timer);
@@ -110,7 +118,13 @@ export async function sendMessage(
   });
 
   if (res.ok) return { ok: true };
-  return { ok: false, error: explain(res.description, chatId) };
+  const code = res.error_code ?? 0;
+  return {
+    ok: false,
+    error: explain(res.description, chatId),
+    retryable: res.network === true || code === 429 || code >= 500,
+    retryAfterMs: res.parameters?.retry_after ? res.parameters.retry_after * 1000 : undefined,
+  };
 }
 
 export interface BotIdentity {

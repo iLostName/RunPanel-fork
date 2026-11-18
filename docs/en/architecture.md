@@ -55,7 +55,8 @@ services/
   backup/               policies, dumps, archives, destinations, restore
   autostart/            detection, unit generation, reconcile
   panel-update/         check, staged build, swap, restart exit
-  notify/               events, message text, Telegram bot, host checks
+  notify/               events, message text, channels and delivery, notification centre, host checks
+  mail/                 the SMTP server and sendMail()
   docker/               cli, registries, labels, images, volumes, stats, cleanup
   builders/             node, docker, static, compose, custom
   process-drivers/      pm2, docker, compose

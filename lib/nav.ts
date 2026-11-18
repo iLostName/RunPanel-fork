@@ -291,6 +291,8 @@ export const SEGMENT_LABELS: Record<string, string> = {
   runs: "Esecuzioni",
   restore: "Ripristino",
   new: "Nuovo",
+  // Reached from the bell, not the sidebar: every account has one.
+  notifications: "Notifiche",
 };
 
 /**

@@ -22,7 +22,7 @@ Everything lives in `.env` in the panel's folder; `.env.example` is the commente
 | `RUNPANEL_SETUP_TOKEN` | issued at each boot | Pins the first-run token, which also guards [linking the server to a cluster](multi-server.md). Not validated |
 | `RUNPANEL_DEV_ORIGINS` | — | `next dev` only: extra hosts, comma-separated, with `*` and `**` wildcards (no CIDR). Not validated |
 
-**The secret key.** It encrypts project variables, service credentials, registries, backup destinations, the GitHub token and the Telegram bot. If it changes or is lost, all of these become unreadable: keep it with your backups. With [several servers](multi-server.md) each install has its own; shared values (GitHub token, Telegram bot) are encrypted again by each server.
+**The secret key.** It encrypts project variables, service credentials, registries, backup destinations, the GitHub token, the notification channels' secrets and the mail server's password. If it changes or is lost, all of these become unreadable: keep it with your backups. With [several servers](multi-server.md) each install has its own; the shared GitHub token is encrypted again by each server.
 
 **Background timers.** `RUNPANEL_DISABLE_SCHEDULERS` is for a test instance next to the real one. It turns off Docker cleanup, scheduled backups and restarts, auto-deploy, the update check, cluster sync, status checks with their notifications, and bringing projects and services back after the machine reboots. It also turns off the access gates: restricted ports stay closed. And it keeps the panel away from the host's nginx: [domains](domains.md) are stored but never applied.
 

@@ -73,36 +73,6 @@ L'aggiornamento viene rifiutato se il pannello non è un clone git con un remote
 
 Se il pannello non tornasse su, i comandi per rimettere la versione precedente sono in `<dataDir>/panel-update.json` e nel log del supervisore (journal di systemd, o `logs/autostart.log` con lo script).
 
-## Notifiche su Telegram
+## Notifiche
 
-Si configurano in **Impostazioni › Pannello**, sezione **Notifiche Telegram** (serve il permesso Notifiche): crei un bot con `@BotFather`, incolli il token, scrivi un messaggio al bot e premi **Rileva** per scegliere la chat. Il pannello parla solo in uscita, quindi non serve che sia raggiungibile; in cambio il bot non accetta comandi. Il token è cifrato e la pagina sa solo se c'è.
-
-In un [cluster](multi-server.md) bot e chat sono condivisi da tutti i server; quali eventi inviare resta per server.
-
-### Cosa viene notificato
-
-| Evento | Quando |
-|---|---|
-| **Un progetto si è fermato da solo**, **Un servizio si è fermato da solo** | Il processo non c'è più e non l'ha fermato il pannello (due interruttori separati, conferma su due letture) |
-| **Riavvio programmato** | Un riavvio programmato eseguito, o il tentativo dopo un crash fallito |
-| **Docker non risponde** | Il daemon diventa irraggiungibile, e quando torna (non se era già giù all'avvio del pannello) |
-| **Deploy concluso** | Sempre per i deploy automatici; per quelli manuali solo se falliscono |
-| **Backup concluso** | Riuscito, parziale o fallito, con artefatti, dimensione e durata |
-| **Aggiornamento del pannello disponibile** | Il controllo ha trovato commit nuovi |
-| **Il pannello è ripartito** | Dopo un riavvio o un aggiornamento; spento di default |
-| **Spazio su disco in esaurimento** | Vedi sotto |
-
-Ogni voce ha il suo interruttore; tutte sono accese di default tranne il riavvio del pannello.
-
-Viene notificato il momento in cui una soglia viene attraversata, non lo stato. Crash, Docker e disco hanno in più un silenzio di quindici minuti per evento e per soggetto, così un progetto che continua a cadere non copre un altro. L'aggiornamento è annunciato quando cambia il commit di destinazione.
-
-### Lo spazio su disco
-
-- **Basso**: sotto il 10% o i 4 GB liberi, o sotto il 5% degli inode. Funziona ancora tutto, ma il prossimo build o la copia di un volume grande possono riempire il resto.
-- **Critico**: sotto i 2 GB (la riserva sotto cui un backup non parte), sotto il 3%, o sotto il 2% degli inode. Backup rifiutati, build che falliscono, database che non scrivono.
-
-Il controllo gira ogni cinque minuti, il primo 90 secondi dopo l'avvio, sul disco dei dati e, se è un altro, su quello di Docker. Ogni policy di backup pianificata viene confrontata con lo spazio che le servirà (il doppio dell'ultimo archivio più la riserva): se non ci sta, l'avviso arriva prima dell'esecuzione. Le soglie hanno un margine prima di dirsi rientrate, e il rientro viene notificato.
-
-### Se la notifica non parte
-
-Non si blocca niente: un deploy non fallisce perché Telegram non risponde. L'errore finisce nel log del pannello, spiegato dove Telegram è criptico: `chat not found` di solito vuol dire che non hai ancora scritto al bot.
+La campanella nella barra in alto raccoglie tutto quello che succede sul server, per ogni account e solo su quello che può vedere. Mandare gli stessi eventi fuori dal pannello — email, Telegram, Discord, Slack, ntfy o un webhook firmato — si imposta in **Impostazioni › Generale › Notifiche**: cosa viene notificato, i canali, la firma dei webhook e come gli avvisi ravvicinati non diventano rumore sono in [Notifiche](notifications.md).
