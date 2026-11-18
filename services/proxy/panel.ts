@@ -9,6 +9,7 @@ import { generateId } from "@/lib/utils";
 import { isInstantHostname, isPanelAddress, panelHttpsUrl } from "@/lib/proxy-names";
 import { isBlockedRepoHost, panelPublicUrlSchema } from "@/lib/validation";
 import type { PanelHostsTable } from "@/lib/db/schema";
+import { clusterState, getMember } from "@/services/cluster/state";
 import { CHECK_PATH, SITES_DIR, siteFileName } from "./render";
 import { loadPanelHost, panelDomain, setPanelHost } from "./panel-store";
 import { explainProxiedAnswer, explainTlsFailure, isPanelCheckAnswer } from "./panel-checks";
@@ -64,6 +65,20 @@ export type PanelOutcome<T> = { ok: true; value: T } | { ok: false; status: numb
 
 const refuse = (status: number, error: string): { ok: false; status: number; error: string } => ({ ok: false, status, error });
 
+/**
+ * Whether the other servers of the cluster reach this one through the name:
+ * the address stored for this server in the cluster's directory, set when it
+ * was linked — from the public address, if that was the name by then. Turning
+ * the name off would then cut them off until that address is changed, so the
+ * page says so before it is done.
+ */
+async function clusterReachesThroughName(hostname: string): Promise<boolean> {
+  const state = await clusterState().catch(() => null);
+  if (!state) return false;
+  const self = await getMember(state.selfId).catch(() => null);
+  return self !== null && URL.canParse(self.url) && new URL(self.url).hostname.toLowerCase() === hostname;
+}
+
 /** Everything the settings section shows, in one answer. */
 export async function panelHttpsState(fresh = false) {
   const db = await getDb();
@@ -75,7 +90,9 @@ export async function panelHttpsState(fresh = false) {
     serverAddresses(fresh),
   ]);
   const port = panelListenPort();
-  const domain = row ? await panelDomain(row.hostname) : null;
+  const [domain, clusterUsesName] = row
+    ? await Promise.all([panelDomain(row.hostname), clusterReachesThroughName(row.hostname)])
+    : [null, false];
   return {
     proxy,
     panelHost: row ? panelHostView(row) : null,
@@ -98,6 +115,8 @@ export async function panelHttpsState(fresh = false) {
     blockFile: row ? `${SITES_DIR}/${siteFileName(row.hostname)}` : null,
     /** Where the browser asks the name for `panelHost.checkToken`, over HTTPS. */
     checkPath: CHECK_PATH,
+    /** The other servers of the cluster reach this one through the name: turning it off cuts them off. */
+    clusterUsesName,
   };
 }
 

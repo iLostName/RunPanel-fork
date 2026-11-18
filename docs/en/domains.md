@@ -111,7 +111,7 @@ The panel can open on a name of yours, with the padlock — `https://panel.examp
 
 **HSTS.** The panel's own header (two years, `includeSubDomains`) is not passed on: on a name like `example.com` it would pin every project of the domain to HTTPS, some of them still waiting for their certificate. nginx sends `max-age=63072000` without `includeSubDomains`, and only once the name is the public address, so trying it out and turning it off leaves every browser as it was. From then on, browsers that opened the name use HTTPS only for it, on any port: `http://panel.example.com:3000` no longer opens there, the server's IP still does.
 
-**Several servers.** Each server has its own name, set from its own settings (choose it with the server selector). The other servers keep reaching it at the address it was linked with: the name does not change that.
+**Several servers.** Each server has its own name, set from its own settings (choose it with the server selector). The other servers keep reaching it at the address it was linked with: the name does not change that. If that address is the name itself — a server linked after the name became the public address is given that one — turning the name off cuts the others off until the address is changed, and **Disattiva** says so first.
 
 ## A test address without a domain
 

@@ -777,6 +777,12 @@ function Progress({
                 {data.direct[0] ? <span className="font-mono">{data.direct[0]}</span> : "quello che usavi prima"}.
               </p>
             )}
+            {data.clusterUsesName && (
+              <p className="text-warning">
+                Gli altri server del cluster raggiungono questo proprio da {httpsUrl}: dopo non lo raggiungeranno più, finché
+                non cambi l&apos;indirizzo con cui è registrato nel cluster.
+              </p>
+            )}
           </div>
         }
       />

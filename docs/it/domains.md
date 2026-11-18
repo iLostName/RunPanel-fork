@@ -111,7 +111,7 @@ Il pannello può aprirsi da un tuo nome, con il lucchetto — `https://pannello.
 
 **HSTS.** L'header del pannello (due anni, `includeSubDomains`) non viene passato: su un nome come `esempio.it` obbligherebbe all'HTTPS ogni progetto del dominio, compresi quelli che aspettano ancora il certificato. nginx manda `max-age=63072000` senza `includeSubDomains`, e solo quando il nome è l'indirizzo pubblico: provarlo e disattivarlo lascia ogni browser com'era. Da lì in poi i browser che hanno aperto il nome usano solo HTTPS per quel nome, su qualsiasi porta: `http://pannello.esempio.it:3000` non si apre più da quei browser, l'IP del server sì.
 
-**Più server.** Ogni server ha il suo nome, impostato dalle sue impostazioni (lo scegli con il selettore dei server). Gli altri server continuano a raggiungerlo all'indirizzo con cui è stato collegato: il nome non lo cambia.
+**Più server.** Ogni server ha il suo nome, impostato dalle sue impostazioni (lo scegli con il selettore dei server). Gli altri server continuano a raggiungerlo all'indirizzo con cui è stato collegato: il nome non lo cambia. Se quell'indirizzo è proprio il nome — chi si collega dopo che il nome è diventato l'indirizzo pubblico riceve quello — disattivarlo taglia fuori gli altri finché l'indirizzo non viene cambiato, e **Disattiva** lo dice prima.
 
 ## Un indirizzo di prova senza dominio
 
