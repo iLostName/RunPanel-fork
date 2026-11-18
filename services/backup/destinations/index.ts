@@ -2,7 +2,8 @@ import { decrypt, encrypt } from "@/lib/crypto";
 import { getDb, nowIso } from "@/lib/db";
 import type { BackupDestinationsTable } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
-import { localDestination } from "./local";
+import type { DestinationFacts } from "@/lib/backup-copies";
+import { localDestination, localDirectory } from "./local";
 import { s3Destination } from "./s3";
 import { readTelegramChat, telegramDestination } from "./telegram";
 import type { Destination } from "../types";
@@ -21,7 +22,7 @@ import type { Destination } from "../types";
 type Factory = (row: BackupDestinationsTable, config: Record<string, unknown>) => Destination;
 
 const FACTORIES: Record<string, Factory> = {
-  local: (row) => localDestination(row),
+  local: (row, config) => localDestination(row, config),
   s3: (row, config) => s3Destination(row, config),
   telegram: (row, config) => telegramDestination(row, config),
 };
@@ -93,22 +94,57 @@ export function telegramTarget(row: BackupDestinationsTable): TelegramTarget | n
   };
 }
 
+/** A local destination's folder of its own; null for the panel's archive folder and for every other type. */
+export function destinationDirectory(row: BackupDestinationsTable): string | null {
+  return row.type === "local" ? localDirectory(destinationConfig(row)) : null;
+}
+
+/**
+ * What a policy's list needs to know about every destination: its name, and
+ * where it writes, so two copies in one place can be refused. A row whose
+ * type this build does not know has no location, and is trusted to be
+ * somewhere else.
+ */
+export function destinationFacts(rows: BackupDestinationsTable[]): Map<string, DestinationFacts & { local: boolean }> {
+  const facts = new Map<string, DestinationFacts & { local: boolean }>();
+  for (const row of rows) {
+    let location: string | null = null;
+    let local = false;
+    try {
+      const destination = buildDestination(row);
+      location = destination.location?.() ?? null;
+      local = typeof destination.localPath === "function";
+    } catch {
+      /* an unknown type is still a destination, just not one this build can open */
+    }
+    facts.set(row.id, { name: row.name, location, local });
+  }
+  return facts;
+}
+
+export interface DestinationUse {
+  /** Every policy listing it; `primary` when it is that policy's first destination. */
+  policies: { id: string; name: string; primary: boolean }[];
+  /** Copies of an archive stored there. */
+  archives: number;
+  archiveBytes: number;
+}
+
 /** Which policies write to each destination, and how many archives each one holds. */
-export async function destinationUsage(): Promise<
-  Map<string, { policies: { id: string; name: string }[]; archives: number; archiveBytes: number }>
-> {
+export async function destinationUsage(): Promise<Map<string, DestinationUse>> {
   const db = await getDb();
-  const [policies, runs] = await Promise.all([
+  const [policies, entries, copies] = await Promise.all([
     db.selectFrom("backup_policies").select(["id", "name", "destination_id"]).orderBy("created_at", "asc").execute(),
+    db.selectFrom("backup_policy_destinations").select(["policy_id", "destination_id"]).execute(),
     db
-      .selectFrom("backup_runs")
-      .select(["destination_id", "archive_bytes"])
-      .where("archive_path", "is not", null)
+      .selectFrom("backup_run_copies")
+      .select(["destination_id", "bytes"])
+      .where("status", "=", "done")
       .where("destination_id", "is not", null)
       .execute(),
   ]);
 
-  const usage = new Map<string, { policies: { id: string; name: string }[]; archives: number; archiveBytes: number }>();
+  const usage = new Map<string, DestinationUse>();
   const entry = (id: string) => {
     let found = usage.get(id);
     if (!found) {
@@ -117,11 +153,27 @@ export async function destinationUsage(): Promise<
     }
     return found;
   };
-  for (const policy of policies) entry(policy.destination_id).policies.push({ id: policy.id, name: policy.name });
-  for (const run of runs) {
-    const found = entry(run.destination_id as string);
+
+  const listed = new Map<string, Set<string>>();
+  for (const row of entries) {
+    const set = listed.get(row.policy_id) ?? new Set<string>();
+    set.add(row.destination_id);
+    listed.set(row.policy_id, set);
+  }
+  for (const policy of policies) {
+    // The primary column as well as the list: should they ever disagree, a
+    // delete has to be refused for either, or the foreign key on the column
+    // would take the whole policy with it.
+    const ids = new Set(listed.get(policy.id) ?? []);
+    ids.add(policy.destination_id);
+    for (const id of ids) {
+      entry(id).policies.push({ id: policy.id, name: policy.name, primary: id === policy.destination_id });
+    }
+  }
+  for (const copy of copies) {
+    const found = entry(copy.destination_id as string);
     found.archives += 1;
-    found.archiveBytes += run.archive_bytes ?? 0;
+    found.archiveBytes += copy.bytes ?? 0;
   }
   return usage;
 }

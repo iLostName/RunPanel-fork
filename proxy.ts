@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { HDR_API_TOKEN_MARK, MCP_PATH, apiTokenMark, lookupApiToken, readBearer } from "@/lib/api-tokens";
-import { SESSION_COOKIE, isSessionTokenValid } from "@/lib/auth";
+import { SESSION_COOKIE, isOwnerSessionToken, isSessionTokenValid } from "@/lib/auth";
 import { HDR_PROXIED, proxiedMark, verifySignedHeaders } from "@/lib/cluster-auth";
 import { EMPTY_BODY_SHA256, HDR_MEMBER, sha256Hex } from "@/lib/cluster-sign";
 import { refuseCrossOrigin } from "@/lib/request-origin";
+import { getSetting } from "@/lib/settings";
+import {
+  STATUS_PAGE_MISS,
+  STATUS_PAGE_SETTING,
+  isStatusPagePath,
+  pageAccess,
+  parseStatusPageConfig,
+  slugOfPath,
+  type StatusPageConfig,
+} from "@/lib/status-page";
 
 /**
  * Deny-by-default in front of the API.
@@ -23,6 +33,10 @@ import { refuseCrossOrigin } from "@/lib/request-origin";
  * at all. Setting `runtime` here is an error, so it is not set.
  */
 export async function proxy(request: NextRequest) {
+  // Not the API: the public status page, the one page matched here. It never
+  // falls through to the checks below, and nothing under /api starts like it.
+  if (isStatusPagePath(request.nextUrl.pathname)) return gateStatusPage(request);
+
   const refused = refuseCrossOrigin(request);
   if (refused) return refused;
 
@@ -67,6 +81,33 @@ export async function proxy(request: NextRequest) {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
 
+/**
+ * The status page answers only at its own address while it is on, or for the
+ * owner, signed in, previewing it while it is off (`pageAccess`). Any other
+ * request under `/status` is rewritten here, before anything renders, to a
+ * path no page can have, and so gets the panel's 404 exactly as any mistyped
+ * address does — same status, same page, drawn on the server.
+ *
+ * The page decides again by itself (`app/(public)/status/[slug]/page.tsx`);
+ * deciding here first is what makes the two 404s one. `notFound()` thrown by
+ * the page is still a 404, but Next answers it with its error shell and draws
+ * the body in the browser: a 404 that can be told apart from the others, and
+ * a blank page without JavaScript. A store that cannot be read has no page.
+ */
+async function gateStatusPage(request: NextRequest): Promise<NextResponse> {
+  const slug = slugOfPath(request.nextUrl.pathname);
+  let config: StatusPageConfig | null = null;
+  try {
+    config = parseStatusPageConfig(await getSetting(STATUS_PAGE_SETTING));
+  } catch {
+    config = null;
+  }
+  const owner =
+    pageAccess(config, slug, true) === "preview" && (await isOwnerSessionToken(request.cookies.get(SESSION_COOKIE)?.value));
+  if (pageAccess(config, slug, owner)) return NextResponse.next();
+  return NextResponse.rewrite(new URL(STATUS_PAGE_MISS, request.url));
+}
+
 const BODYLESS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 function hasBody(request: NextRequest): boolean {
@@ -92,6 +133,10 @@ export const config = {
    * Written as an exclusion rather than a list of protected paths so that a new
    * route is covered the moment it exists. Adding a public endpoint is then a
    * deliberate edit here, which is the direction the mistake should have to run.
+   *
+   * The second entry is no endpoint and opens nothing: the public status page
+   * is a page, public by design, and is matched only so that `gateStatusPage`
+   * can turn every address it does not answer into the ordinary 404.
    */
-  matcher: ["/api/((?!auth/|webhooks/|cluster/join|upload$|nodes/).*)"],
+  matcher: ["/api/((?!auth/|webhooks/|cluster/join|upload$|nodes/).*)", "/status/:path*"],
 };

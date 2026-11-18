@@ -60,7 +60,7 @@ const BLOCKED = [
   /^\/api\/backups\/uploads\/[^/]+\/chunk$/,
   /^\/api\/mcp$/,
   /^\/api\/api-tokens$/,
-  /^\/api\/cluster\/(join|directory|leave|ping|secret|folders\/sync)$/,
+  /^\/api\/cluster\/(join|directory|leave|ping|secret|folders\/sync|status-page)$/,
   /^\/api\/services\/[^/]+\/browse$/,
 ];
 

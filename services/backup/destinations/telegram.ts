@@ -934,6 +934,19 @@ export function telegramDestination(
       });
     },
 
+    /**
+     * Two destinations on one chat would keep their copies side by side in
+     * it: a second copy there protects from nothing, so a policy refuses the
+     * pair. A channel is the same place whichever account writes to it; Saved
+     * Messages are one account's.
+     */
+    location() {
+      if (!config) return `telegram:${row.id}`;
+      return config.chat.kind === "channel"
+        ? `telegram:c${config.chat.id}`
+        : `telegram:me:${config.account?.id ?? row.id}`;
+    },
+
     async stat(ref): Promise<DestinationStat> {
       const parsed = requireRef(ref);
       return session(async (transport, cfg) => {

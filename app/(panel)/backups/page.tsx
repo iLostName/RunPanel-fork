@@ -24,12 +24,14 @@ import { capitalize } from "@/lib/schedule";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatBytes, formatDuration, formatRelative, formatWhen } from "@/lib/format";
 import { triggerLabel } from "./_components/format";
+import { CopiesBadge, deleteWhere, runWhere } from "./_components/copies";
 import { useMemberApi, useNode, useServerHref } from "@/lib/hooks/useNode";
 import { onlyMember, type Located, type MemberStatus } from "@/lib/cluster-merge";
 import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
 import {
   describeTarget,
-  destinationPhrase,
+  destinationsPhrase,
+  policyDestinations,
   type DestinationView,
   type PolicyView,
   type RunView,
@@ -361,7 +363,7 @@ export default function BackupsPage() {
                     <p className="text-muted mt-0.5 truncate text-xs">
                       {capitalize(policy.schedule)}
                       {policy.cron && policy.timezone ? ` (ora di ${policy.timezone})` : ""} ·{" "}
-                      {destinationPhrase(policy.destinationType, policy.destinationName)}
+                      {destinationsPhrase(policyDestinations(policy))}
                     </p>
                     <p className="text-muted/80 mt-0.5 truncate text-meta">
                       {policy.targets.map((t) => describeTarget(t, catalogFor(policy.memberId))).join(" · ")}
@@ -421,7 +423,7 @@ export default function BackupsPage() {
           error={destinationsError}
           description={
             isSolo
-              ? "Dove finiscono gli archivi: il disco di questo server, oppure un archivio S3 o Telegram fuori da qui."
+              ? "Dove finiscono gli archivi: il disco di questo server, oppure un archivio S3 o Telegram fuori da qui. Una pianificazione può mandarne una copia in più destinazioni."
               : `Dove finiscono gli archivi. Una nuova va su ${nameOf(target)}.`
           }
           onChanged={refreshAll}
@@ -496,12 +498,13 @@ export default function BackupsPage() {
                           <Icon icon="solar:lock-password-linear" width={14} aria-label="Archivio cifrato" />
                         </span>
                       )}
+                      <CopiesBadge run={run} />
                     </div>
                     <p className="text-muted mt-0.5 truncate text-xs">
                       {formatWhen(run.startedAt)} · {triggerLabel(run.trigger)} ·{" "}
                       {formatDuration(run.durationMs)}
                       {run.archiveBytes ? ` · ${formatBytes(run.archiveBytes)}` : ""}
-                      {run.hasArchive && run.destinationType ? ` · ${destinationPhrase(run.destinationType, run.destinationName)}` : ""}
+                      {run.hasArchive ? ` · ${runWhere(run)}` : ""}
                       {run.errorMessage ? ` · ${run.errorMessage}` : ""}
                     </p>
                   </div>
@@ -520,14 +523,10 @@ export default function BackupsPage() {
                     <LinkButton href={href(`/backups/runs/${run.id}`, run.memberId)}>Dettagli</LinkButton>
                     <DeleteButton
                       label="Elimina questo backup"
-                      isDisabled={run.status === "running"}
+                      isDisabled={run.status === "running" || run.copies?.some((copy) => copy.status === "uploading")}
                       confirm={{
                         title: "Eliminare questo backup?",
-                        description: `L'archivio viene cancellato ${
-                          run.destinationType && run.destinationType !== "local" && run.destinationName
-                            ? `anche da «${run.destinationName}»`
-                            : "dal disco di questo server"
-                        }. Se è l'ultimo riuscito, resti senza un punto di ripristino.`,
+                        description: `${deleteWhere(run)} Se è l'ultimo riuscito, resti senza un punto di ripristino.`,
                       }}
                       onConfirm={() => removeRun(run.id, run.memberId)}
                     />

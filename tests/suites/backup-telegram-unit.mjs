@@ -1,6 +1,6 @@
 import { createReporter } from "../harness.mjs";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -275,6 +275,19 @@ export async function run({ repoRoot }) {
       r.check("the run log says who and with which limit", lines.some((line) => line.includes("Mario Rossi (@mario)") && line.includes("senza Premium")), lines.join(" | "));
       r.check("pieces are never larger than the piece size, only the last is short", account.state.pieceSizes.every((size) => size === 16));
       r.check("the connection is closed afterwards", account.state.closed === account.state.connections);
+      // Several copies hand the same staged archive to every destination in turn.
+      r.check("the staged archive is left where it was, for the next copy", existsSync(file) && readFileSync(file).equals(data));
+    }
+    {
+      const channel = destination(fakeAccount());
+      const otherChannel = telegramDestination({ ...ROW, id: "dest2" }, { ...CONFIG, chat: { ...CHANNEL, id: "888" } }, { connect: fakeAccount().connect });
+      const sameChannel = telegramDestination({ ...ROW, id: "dest3" }, { ...CONFIG, account: { id: "99", name: "Altro", username: null } }, { connect: fakeAccount().connect });
+      const saved = (accountId) =>
+        telegramDestination({ ...ROW, id: `saved-${accountId}` }, { ...CONFIG, chat: { kind: "saved" }, account: { id: accountId, name: "", username: null } }, { connect: fakeAccount().connect });
+      r.check("two destinations on one channel are one place, whichever account writes", channel.location() === sameChannel.location(), channel.location());
+      r.check("another channel is another place", channel.location() !== otherChannel.location());
+      r.check("Saved Messages are one account's", saved("42").location() === saved("42").location() && saved("42").location() !== saved("43").location());
+      r.check("and never the same place as a channel", saved("42").location() !== channel.location());
     }
     {
       const account = fakeAccount();

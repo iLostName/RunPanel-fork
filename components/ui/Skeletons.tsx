@@ -7,29 +7,39 @@ import { PageHeader } from "./PageHeader";
  * Every placeholder pulses on the same clock.
  *
  * A CSS animation starts from its first frame whenever its element is created,
- * and a navigation creates two skeletons in a row — the route's `loading.tsx`,
- * then the page's own while its first fetch runs. Each started its own pulse,
- * so the hand-over was a jump from half-faded back to full. Started at the
- * document's time origin instead, every block is at the same point of the
- * cycle however late it arrived, and the new one picks up where the old one
- * left off. The same holds for a block drawn by the server and hydrated later.
+ * so blocks that appear at different moments — a card's own placeholder under
+ * a page that was already pulsing, a block drawn by the server and hydrated
+ * later — would each pulse on their own beat. Started at the document's time
+ * origin instead, every block is at the same point of the cycle however late
+ * it arrived.
+ *
+ * Only the pulse. `skeleton-appear` (globals.css) is the delay before a
+ * placeholder shows at all, and it has to count from the block's own birth:
+ * moved to the time origin it would be long over, and every placeholder would
+ * show at once again.
  */
 function inPhase(element: HTMLDivElement | null) {
   if (!element) return;
-  for (const animation of element.getAnimations()) animation.startTime = 0;
+  for (const animation of element.getAnimations()) {
+    if (animation instanceof CSSAnimation && animation.animationName === "skeleton-appear") continue;
+    animation.startTime = 0;
+  }
 }
 
 /**
  * Shape-matched placeholders. A skeleton that matches the real layout keeps the
  * page from jumping when data lands — a centred spinner, which is what every
  * route used before, guarantees it will.
+ *
+ * They show after a short delay (the `skeleton` class): an answer that comes
+ * back sooner goes straight to the content, without a grey blink first.
  */
 export function SkeletonBlock({ className }: { className?: string }) {
-  return <div ref={inPhase} className={cn("bg-default animate-pulse rounded-[var(--radius)]", className)} />;
+  return <div ref={inPhase} className={cn("bg-default skeleton rounded-[var(--radius)]", className)} />;
 }
 
 export function SkeletonText({ className }: { className?: string }) {
-  return <div ref={inPhase} className={cn("bg-default h-3 animate-pulse rounded-full", className)} />;
+  return <div ref={inPhase} className={cn("bg-default skeleton h-3 rounded-full", className)} />;
 }
 
 /** Placeholder for a page built from a header, a stat row and a list. */
@@ -41,12 +51,11 @@ export function SkeletonText({ className }: { className?: string }) {
  * the content arrives. `tiles` matches the stat row the page really has —
  * four grey tiles above a page with three read as a layout that changed.
  *
- * No fade-in. A navigation draws this twice in a row — the route's
- * `loading.tsx`, then the page's own while its first fetch runs — and the
- * second is a new element, so a fade started over from transparent: the
- * skeleton came up, vanished, and came up again before the data. Where a page
- * draws a different one from the generic, its folder has a `loading.tsx` that
- * draws the same, so the hand-over is invisible.
+ * Drawn once per navigation, by the page itself. The panel's routes have no
+ * `loading.tsx`: a route-level placeholder followed by the page's own was two
+ * different grey pages in a row, which is the flash this replaced. While the
+ * next page is on its way, the current one stays on screen under the bar of
+ * `NavigationProgress`.
  */
 export function PageSkeleton({
   title,

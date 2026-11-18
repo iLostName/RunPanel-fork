@@ -404,12 +404,17 @@ export async function run({ repoRoot }) {
   }
 
   // --- a policy pointed at nothing ---------------------------------------------
+  // The list of destinations is looked up whole — each one, none twice, no two
+  // in one place — through `destinationListError`, before anything is written.
   {
     const route = read("app", "api", "backups", "policies", "[policyId]", "route.ts");
-    const check = route.indexOf('.selectFrom("backup_destinations")');
-    r.check("PUT looks the destination up", check !== -1);
-    r.check("and does so before writing", check < route.indexOf('.updateTable("backup_policies")'));
-    r.check("an unknown destination is a 404", /Destinazione non trovata[^\n]*status: 404/.test(route));
+    const check = route.indexOf("await destinationListError(");
+    r.check("PUT looks the destinations up", check !== -1);
+    r.check("and does so before writing", check !== -1 && check < route.indexOf('.updateTable("backup_policies")'));
+    r.check("an unknown destination is a 404", /listProblem\.notFound \? 404/.test(route));
+    const lookup = read("services", "backup", "policy-destinations.ts");
+    r.check("the lookup reads the destinations themselves", lookup.includes('.selectFrom("backup_destinations")'));
+    r.check("and says when one is not there", /"Destinazione non trovata", notFound: true/.test(read("lib", "backup-copies.ts")));
   }
 
   return r.result();

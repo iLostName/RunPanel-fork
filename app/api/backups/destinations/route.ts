@@ -1,3 +1,4 @@
+import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 import { encrypt } from "@/lib/crypto";
 import { isDenied, requirePermission } from "@/lib/auth-guard";
@@ -6,7 +7,14 @@ import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import { generateId } from "@/lib/utils";
 import { destinationSchema, telegramDestinationConfigSchema } from "@/lib/validation";
-import { buildDestination, destinationTarget, destinationUsage, telegramTarget } from "@/services/backup/destinations";
+import {
+  buildDestination,
+  destinationDirectory,
+  destinationTarget,
+  destinationUsage,
+  telegramTarget,
+} from "@/services/backup/destinations";
+import { localPathProblem } from "@/services/backup/destinations/local";
 import { TelegramFailure, type TelegramConfig } from "@/services/backup/destinations/telegram";
 import { linkedTelegramLogin, releaseTelegramLogin, suggestedChannelTitle } from "@/services/backup/telegram-login";
 import { telegramConfigFromLogin } from "@/services/backup/telegram-setup";
@@ -39,8 +47,12 @@ export async function GET() {
         createdAt: row.created_at,
         target: destinationTarget(row),
         telegram: telegramTarget(row),
+        // A local destination's folder of its own; null for the panel's own
+        // archive folder, and for every other type.
+        directory: destinationDirectory(row),
         // Names only of the policies this account may see; the count is all of
         // them, because a delete is refused for the ones it cannot see too.
+        // `primary` when it is that policy's first destination.
         usedBy: policies.filter((policy) => visible === "all" || visible.has(policy.id)),
         usedByCount: policies.length,
         archives: used?.archives ?? 0,
@@ -71,7 +83,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, type, config, isDefault } = parsed.data;
+    const { name, type, isDefault } = parsed.data;
+    let config = parsed.data.config;
 
     // The default is where the restore's safety copy goes — a copy of exactly
     // what is about to be overwritten, the panel's own store included. Moving
@@ -81,6 +94,20 @@ export async function POST(request: NextRequest) {
         { error: "Solo il proprietario può scegliere la destinazione predefinita" },
         { status: 403 }
       );
+    }
+
+    // A folder of its own is a place on this server's disks where the panel
+    // will write and delete files: the owner's choice, like the host itself.
+    if (type === "local") {
+      const folder = typeof config?.path === "string" ? config.path.trim() : "";
+      if (folder) {
+        if (!denied.principal.isOwner) {
+          return NextResponse.json({ error: "Solo il proprietario può scegliere una cartella del server" }, { status: 403 });
+        }
+        const problem = localPathProblem(folder);
+        if (problem) return NextResponse.json({ error: problem }, { status: 400 });
+      }
+      config = folder ? { path: path.resolve(folder) } : {};
     }
 
     const db = await getDb();

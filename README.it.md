@@ -56,7 +56,7 @@ PostgreSQL, MySQL, Redis e MongoDB creati come container etichettati con i propr
 <td valign="top">
 
 ### 💾 Backup che si ripristinano
-Dump programmati dei database, dello store del pannello, della configurazione e dei volumi dei progetti, in un unico zip verificabile, su disco locale, su un bucket S3-compatibile o su Telegram (con il tuo account, diviso in parti se serve), e se vuoi cifrato con una password tua.
+Dump programmati dei database, dello store del pannello, della configurazione e dei volumi dei progetti, in un unico zip verificabile, copiato in tutte le destinazioni che scegli — dischi locali, bucket S3-compatibili, Telegram con il tuo account (diviso in parti se serve) — ognuna con la sua conservazione, e se vuoi cifrato con una password tua.
 
 </td>
 <td valign="top">
@@ -128,7 +128,7 @@ n8n, WordPress, Uptime Kuma, Umami, Ghost, Vaultwarden, Gitea e MinIO a un clic:
 <td valign="top">
 
 ### 📈 Metriche, allarmi e uptime
-Storico di CPU, memoria, disco e rete con grafici su 1 ora, 24 ore e 7 giorni, avvisi quando qualcosa resta al limite, e un controllo ogni minuto che le app rispondano, con incidenti e percentuale di uptime.
+Storico di CPU, memoria, disco e rete con grafici su 1 ora, 24 ore e 7 giorni, avvisi quando qualcosa resta al limite, e un controllo ogni minuto che le app rispondano, con incidenti e percentuale di uptime, più una pagina di stato pubblica, facoltativa, per le app che scegli.
 
 </td>
 <td valign="top">
@@ -212,7 +212,7 @@ Sistema, Accessi e Impostazioni raggruppano più pagine in schede, ognuna con il
 | **Monitor** | processi e container con CPU, memoria e uptime, più il riepilogo dell'host (di ogni server, se sono più d'uno) |
 | **Sistema** | *Diagnostica* (cosa manca e cosa premere), *Avvio automatico* (cosa torna su dopo un riavvio), *Aggiornamenti* (versione, commit nuovi, il pulsante che li applica), *Domini* (i domini serviti da nginx e il sottodominio di ogni progetto), *Pulizia Docker* (cosa occupa il disco e cosa si recupera), *Server* (le installazioni collegate: stato, versione, diagnosi, ruolo, revoca) |
 | **Accessi** | *Utenti* (inviti con link a scadenza, permessi per account) e *Registro attività* (chi ha fatto cosa) |
-| **Impostazioni** | *Account* (email, password, sessioni, tema chiaro o scuro), *Pannello* (frequenza di refresh, fuso, indirizzo pubblico, intervallo del controllo periodico, colore d'accento, canali di notifica, server di posta, registry privati), *GitHub* (token, repository, branch) |
+| **Impostazioni** | *Account* (email, password, sessioni, tema chiaro o scuro), *Pannello* (frequenza di refresh, fuso, indirizzo pubblico, intervallo del controllo periodico, colore d'accento, canali di notifica, pagina di stato pubblica, server di posta, registry privati), *GitHub* (token, repository, branch) |
 
 </details>
 
@@ -386,7 +386,7 @@ Per il TLS e i reverse proxy davanti al pannello, vedi [Metterlo su internet](do
 <br>
 
 - I comandi una tantum girano **almeno una volta**, non esattamente una volta: un riavvio del pannello a metà esecuzione rimette il comando in coda.
-- Un health check fallito **torna da solo alla versione precedente solo per i progetti Docker**: l'immagine di prima viene rimessa online. I progetti nativi e Compose compilano nella stessa cartella e restano in errore fino al deploy successivo.
+- Un health check fallito **torna da solo alla versione precedente per i progetti Docker** (acceso di serie): viene rimessa online l'immagine di prima. **I progetti nativi collegati a GitHub, su Linux, possono accendere** le cartelle per versione (spente di serie, segnate come novità nelle impostazioni), e allora torna online la cartella della versione di prima, dal secondo deploy dopo averle accese. I progetti Compose, quelli nativi che non le hanno accese, e quelli nativi su Windows o caricati da ZIP compilano nella stessa cartella e restano in errore fino al deploy successivo. Con le cartelle per versione, i file di build fuori dalle cartelle note che un deploy sul posto ha lasciato nella cartella del progetto restano in comune tra le versioni, quindi il ritorno indietro non li rimette com'erano. Vedi [Tornare alla versione precedente](docs/it/deploy.md#tornare-alla-versione-precedente).
 - Le restrizioni sulle porte le applica il processo del pannello: a pannello fermo la porta semplicemente si chiude. Una regola che deve valere anche a pannello spento richiede in più un firewall sull'host.
 - Il **ripristino** non confronta le versioni dei motori, e rifiuta lo store Postgres di RunPanel (il comando `pg_restore` è nel manifest dell'archivio). Vedi [Backup](docs/it/backups.md#ripristino).
 - L'installazione automatica all'avvio è **solo per Linux**; altrove il pannello mostra cosa fare a mano.

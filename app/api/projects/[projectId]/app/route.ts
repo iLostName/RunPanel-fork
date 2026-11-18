@@ -6,6 +6,7 @@ import { processManager } from "@/services/process-manager";
 import { clearQueuedDeploy } from "@/services/deploy-queue";
 import { busyMessage, tryLock } from "@/services/project-lock";
 import { DEPLOYING_MESSAGE } from "@/services/project-restart";
+import { removeProjectReleases } from "@/services/project-releases";
 import { removeProjectImages } from "@/services/docker/images";
 import { removePm2Artifacts } from "@/services/process-drivers/pm2-driver";
 import { forgetRun } from "@/services/process-drivers/run-log";
@@ -58,11 +59,12 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       // own immutable tag, so removing a single name would leave the rest behind.
       await removeProjectImages(slug);
 
-      // 3. Delete source files
+      // 3. Delete source files, and the version folders built from them
       const repoDir = path.join(config.reposDir, slug);
       if (fs.existsSync(repoDir)) {
         fs.rmSync(repoDir, { recursive: true, force: true });
       }
+      await removeProjectReleases(slug);
 
       // 4. Delete generated PM2 files, including the sidecar with the environment
       // and the process logs of an app that no longer exists

@@ -76,3 +76,20 @@ Se il pannello non tornasse su, i comandi per rimettere la versione precedente s
 ## Notifiche
 
 La campanella nella barra in alto raccoglie tutto quello che succede sul server, per ogni account e solo su quello che può vedere. Mandare gli stessi eventi fuori dal pannello — email, Telegram, Discord, Slack, ntfy o un webhook firmato — si imposta in **Impostazioni › Generale › Notifiche**: cosa viene notificato, i canali, la firma dei webhook e come gli avvisi ravvicinati non diventano rumore sono in [Notifiche](notifications.md).
+
+## Pagina di stato pubblica
+
+Ogni minuto il pannello chiede a ogni app con una porta e il controllo di salute acceso se risponde: due risposte mancate di fila aprono un'interruzione, e la Panoramica del progetto mostra uptime e incidenti. La **pagina di stato pubblica** fa vedere le stesse cose a chi usa le app, senza dargli un accesso al pannello. È facoltativa e resta spenta finché non la accendi.
+
+Si imposta in **Impostazioni › Generale › Pagina di stato pubblica**, ed è del solo proprietario (come le altre preferenze del pannello). Diversamente dal resto di questa pagina, riguarda il pannello che hai aperto, non il server selezionato nella barra.
+
+- **Indirizzo**: `<indirizzo del pannello>/status/<percorso>`. Il percorso proposto è casuale, dodici lettere e cifre, così la pagina la trova solo chi riceve il link. Puoi sceglierne uno facile da ricordare, per esempio `stato`, ma allora chiunque può arrivarci provando. **Nuovo indirizzo** ne genera un altro: quello vecchio smette di funzionare quando salvi. La pagina risponde ovunque risponda il pannello, anche al suo indirizzo HTTPS, e il link da copiare usa l'indirizzo pubblico del pannello, se l'hai impostato.
+- **Titolo** e **messaggio**: il messaggio è facoltativo e compare in cima alla pagina così com'è, per esempio per annunciare una manutenzione.
+- **Progetti**: quali compaiono, in che ordine e con che nome. Il nome proposto è quello del progetto nel pannello: lo confermi o lo cambi, e da lì resta quello che hai scritto, anche se il progetto viene rinominato. Accanto a un progetto che il controllo non interroga (controllo di salute spento, nessuna porta, app ferma) il pannello dice cosa comparirà sulla pagina.
+- **Motori di ricerca**: spento di default; la pagina chiede di non essere indicizzata.
+
+La pagina dice in una frase come vanno le cose e, per ogni progetto, lo stato (**Operativo**, **Non risponde**, **In aggiornamento** durante un deploy o un riavvio, **Nessun dato** quando non ci sono controlli recenti), l'uptime delle ultime 24 ore e degli ultimi 30 giorni, una barra per ogni giorno e le interruzioni degli ultimi 30 giorni, con l'inizio, la fine e la durata. Gli orari sono nel fuso orario del pannello, che la pagina indica. Non mostra mai il nome interno dei progetti, porte, percorsi, indirizzi, server né il motivo tecnico di un'interruzione: solo il titolo, il messaggio e i nomi che hai scritto. Funziona su telefono, in chiaro e in scuro, e anche senza JavaScript.
+
+Spenta, o a un percorso sbagliato, risponde **Pagina non trovata**, esattamente come un indirizzo che non esiste: chi tira a indovinare non scopre che la pagina c'è. Se sei il proprietario e hai fatto l'accesso, il link di una pagina spenta ti apre un'anteprima, segnata come tale, che vedi solo tu. I dati vengono ricalcolati al massimo ogni 30 secondi, per quanti visitatori ci siano, e una pagina aperta si aggiorna da sola ogni minuto. Accendere, spegnere e modificare la pagina finisce nel registro attività. Il link si copia anche dalla scheda del controllo, nella Panoramica di ogni progetto di questo server che compare sulla pagina.
+
+Con [più server](multi-server.md) la pagina può mostrare anche progetti dei server collegati: ognuno controlla le proprie app, e il pannello chiede a ciascuno, con una richiesta firmata e al massimo ogni 30 secondi, il solo stato pubblico dei progetti scelti. Se un server non risponde, i suoi progetti compaiono come **Nessun dato**; un progetto eliminato sparisce dalla pagina. Per i progetti degli altri server il link non compare nella loro scheda: si copia dalle impostazioni.

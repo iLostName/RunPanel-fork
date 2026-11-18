@@ -49,7 +49,7 @@ Users, permissions, grants and folders are replicated to every server and edited
 
 The GitHub token is shared too: every server clones with the same credentials, and encrypts them with its own key. Notification channels are not: each server has its own, configured with that server selected (a Telegram bot configured before channels existed was copied into each server's list on upgrade).
 
-Each server keeps its own: sessions (you sign in on each panel separately), invitation links (they open on the panel that issued them), the activity log, backups and destinations, registries, public address, polling interval, update settings, its notification channels and the bell's notifications.
+Each server keeps its own: sessions (you sign in on each panel separately), invitation links (they open on the panel that issued them), the activity log, backups and destinations, registries, public address, polling interval, update settings, its notification channels and the bell's notifications, and the [public status page](operations.md#public-status-page), which can still show projects of every server.
 
 ## Diagnosis
 

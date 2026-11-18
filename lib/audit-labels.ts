@@ -101,6 +101,7 @@ export const ACTION_LABEL: Record<string, string> = {
   "backup.run": "Backup eseguito",
   "backup.run.delete": "Backup eliminato",
   "backup.run.verify": "Integrità di un backup verificata",
+  "backup.copy.retry": "Copia di un backup riprovata",
   "backup.restore": "Ripristino avviato",
   "backup.upload": "Archivio in caricamento",
   "backup.upload.finish": "Archivio caricato",
@@ -153,6 +154,9 @@ export const ACTION_LABEL: Record<string, string> = {
   "registries.update": "Registry salvato",
   "registries.delete": "Registry eliminato",
   "settings.update": "Impostazioni del pannello",
+  "status-page.enable": "Pagina di stato pubblicata",
+  "status-page.disable": "Pagina di stato spenta",
+  "status-page.update": "Pagina di stato modificata",
   "storage.clean": "Spazio disco liberato",
   "updates.apply": "Aggiornamento del pannello",
 };

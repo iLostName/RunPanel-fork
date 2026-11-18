@@ -22,29 +22,21 @@ import { useMemberApi, useServerHref } from "@/lib/hooks/useNode";
 import { formatBytes } from "@/lib/format";
 import type { Located } from "@/lib/cluster-merge";
 import { DestinationForm, type DestinationDetail } from "./DestinationForm";
-import { providerLabel } from "./providers";
-import { telegramWhere, type DestinationView } from "@/components/backups/types";
+import { describeDestination } from "./providers";
+import type { DestinationView } from "@/components/backups/types";
 
 type Row = Located<DestinationView>;
 
-/** "Backblaze B2 · bucket «runpanel»", the Telegram chat, or the local disk said as what it is. */
-function whereItWrites(destination: DestinationView): string {
-  if (destination.type === "local") return "Disco di questo server";
-  if (destination.type === "telegram") return telegramWhere(destination.telegram);
-  const target = destination.target;
-  if (!target) return "Archivio S3";
-  return `${providerLabel(target.endpoint)} · bucket «${target.bucket}»`;
-}
-
 /** Where a deleted destination's archives stay, for the sentence that says so. */
 function whereArchivesStay(destination: DestinationView): string {
-  if (destination.type === "local") return "sul disco di questo server";
+  if (destination.type === "local") return destination.directory ? `in ${destination.directory}` : "sul disco di questo server";
+  if (destination.type === "s3") return `nel bucket «${destination.target?.bucket ?? ""}»`;
   if (destination.type === "telegram") {
     return destination.telegram?.chat === "channel"
       ? `su Telegram, nel canale «${destination.telegram.title ?? ""}»`
       : "su Telegram, nei Messaggi salvati";
   }
-  return `nel bucket «${destination.target?.bucket ?? ""}»`;
+  return `in «${destination.name}»`;
 }
 
 const ICONS: Record<string, string> = {
@@ -55,10 +47,11 @@ const ICONS: Record<string, string> = {
 function usageLine(destination: DestinationView): string {
   const used = destination.usedBy ?? [];
   const count = destination.usedByCount ?? used.length;
+  // A policy that keeps a copy here, rather than writing here first, says so.
   const policies =
     count === 0
       ? "Nessuna pianificazione la usa"
-      : `La usa${count === 1 ? "" : "no"} ${used.map((p) => `«${p.name}»`).join(", ")}${count > used.length ? `${used.length ? " e " : ""}${count - used.length} di altri account` : ""}`;
+      : `La usa${count === 1 ? "" : "no"} ${used.map((p) => `«${p.name}»${p.primary === false ? " (copia)" : ""}`).join(", ")}${count > used.length ? `${used.length ? " e " : ""}${count - used.length} di altri account` : ""}`;
   const archives = destination.archives ?? 0;
   return archives > 0
     ? `${policies} · ${archives} archivi${destination.archiveBytes ? ` (${formatBytes(destination.archiveBytes)})` : ""}`
@@ -175,11 +168,23 @@ export function DestinationsPanel({
     onChanged();
   }
 
-  /** Policies of the same server that write somewhere else: what "sposta" would move. */
-  const elsewhere = (row: Row) =>
-    destinations
-      .filter((d) => d.memberId === row.memberId && d.id !== row.id)
-      .reduce((n, d) => n + (d.usedByCount ?? 0), 0);
+  /**
+   * Policies of the same server whose primary is somewhere else: what "sposta"
+   * would move. A policy keeping a copy here counts — it would make this its
+   * primary. Without `primary` (an older server) every listed policy is one
+   * that writes here first.
+   */
+  const elsewhere = (row: Row) => {
+    const all = new Set<string>();
+    const here = new Set<string>();
+    for (const destination of destinations.filter((d) => d.memberId === row.memberId)) {
+      for (const policy of destination.usedBy ?? []) {
+        all.add(policy.id);
+        if (destination.id === row.id && policy.primary !== false) here.add(policy.id);
+      }
+    }
+    return [...all].filter((id) => !here.has(id)).length;
+  };
 
   const deleteDialog = (() => {
     if (!deleting) return null;
@@ -198,8 +203,8 @@ export function DestinationsPanel({
             <>
               <p>{usageLine(deleting)}.</p>
               <p className="mt-2">
-                Eliminandola sparirebbero anche quelle pianificazioni. Apri ognuna e scegli un&apos;altra destinazione,
-                oppure rendi predefinita un&apos;altra destinazione spostandoci le pianificazioni; poi riprova.
+                Eliminandola sparirebbero anche quelle pianificazioni, o una loro copia. Apri ognuna e togli questa
+                destinazione dalla lista, o sostituiscila con un&apos;altra; poi riprova.
               </p>
             </>
           }
@@ -226,9 +231,12 @@ export function DestinationsPanel({
               <p>
                 Qui ci sono {archives} archivi{deleting.archiveBytes ? ` (${formatBytes(deleting.archiveBytes)})` : ""}.
                 Restano dove sono — {whereArchivesStay(deleting)} —
-                ma il pannello non li vedrà più: niente ripristino, download o pulizia automatica.
+                ma il pannello non li vedrà più: niente ripristino, download o pulizia automatica da qui.
               </p>
-              <p className="mt-2">Se ti servono, scaricali prima dalla Cronologia.</p>
+              <p className="mt-2">
+                I backup che hanno una copia anche in un&apos;altra destinazione restano ripristinabili da quella. Se ti
+                servono gli altri, scaricali prima dalla Cronologia.
+              </p>
               {deleting.type === "telegram" && (
                 <p className="mt-2">La sessione del pannello su Telegram viene chiusa: sparisce dai dispositivi dell&apos;account.</p>
               )}
@@ -291,10 +299,12 @@ export function DestinationsPanel({
                 }
                 description={
                   <>
-                    {whereItWrites(row)}
+                    {describeDestination(row)}
                     <Technical>
                       {row.type === "local"
-                        ? " · data/backups/archives"
+                        ? row.directory
+                          ? ""
+                          : " · data/backups/archives"
                         : row.target
                           ? ` · ${row.target.region} · ${row.target.endpoint}${row.target.prefix ? ` · /${row.target.prefix}` : ""}`
                           : ""}
@@ -355,7 +365,13 @@ export function DestinationsPanel({
 
       {/* Mounted only while open, so a cancelled form starts empty next time. */}
       {adding && (
-        <DestinationForm isOpen onOpenChange={setAdding} onSaved={onChanged} canSetDefault={me.isOwner} />
+        <DestinationForm
+          isOpen
+          onOpenChange={setAdding}
+          onSaved={onChanged}
+          canSetDefault={me.isOwner}
+          canChooseFolder={me.isOwner}
+        />
       )}
       {editing && (
         <DestinationForm
@@ -389,7 +405,7 @@ export function DestinationsPanel({
                   className="mt-3"
                   isSelected={defaulting.move}
                   onChange={(move) => setDefaulting({ ...defaulting, move })}
-                  label={`Sposta qui anche ${elsewhere(defaulting.row) === 1 ? "la pianificazione che oggi salva" : `le ${elsewhere(defaulting.row)} pianificazioni che oggi salvano`} altrove`}
+                  label={`Sposta qui anche ${elsewhere(defaulting.row) === 1 ? "la pianificazione che oggi salva" : `le ${elsewhere(defaulting.row)} pianificazioni che oggi salvano`} prima altrove (le loro altre copie restano)`}
                 />
               )}
             </>

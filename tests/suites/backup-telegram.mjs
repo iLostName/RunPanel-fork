@@ -1,4 +1,6 @@
 import { createReporter, client, SETUP_TOKEN } from "../harness.mjs";
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * The Telegram destination's API on a real server, as far as it goes without
@@ -14,7 +16,7 @@ export const meta = { name: "backup-telegram", needsDocker: false, drivers: ["sq
 const PASSWORD = "telegram-suite-password";
 const FAKE_LOGIN = "AAAAAAAAAAAAAAAAAAAAAAAA";
 
-export async function run({ base }) {
+export async function run({ base, dataDir }) {
   const r = createReporter("backup-telegram");
   const api = client(base);
 
@@ -107,5 +109,75 @@ export async function run({ base }) {
   const detail = await api.call(`/api/backups/destinations/${local?.id}`);
   r.check("the edit form's detail says null for Telegram on another type", detail.status === 200 && detail.body?.telegram === null, JSON.stringify(detail.body));
 
+  // --- a policy with a Telegram copy -------------------------------------------------
+  // The destination is written straight into the store, with a config the panel
+  // cannot read: no session, so nothing ever reaches Telegram. What is checked is
+  // everything around it — the policy lists it with a rule of its own, the run
+  // keeps the local copy when the Telegram one fails, and says why.
+  const storeFile = path.join(dataDir, "runpanel.db");
+  if (fs.existsSync(storeFile)) {
+    const Database = (await import("better-sqlite3")).default;
+    const store = new Database(storeFile);
+    const now = new Date().toISOString();
+    store
+      .prepare("INSERT INTO backup_destinations (id, name, type, config, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)")
+      .run("tgsuitedest1", "Telegram di prova", "telegram", "illeggibile", now, now);
+    store.close();
+
+    const listed = await api.call("/api/backups/destinations");
+    const telegramRow = listed.body?.destinations?.find((d) => d.id === "tgsuitedest1");
+    r.check(
+      "a Telegram destination without a session is listed as one to link",
+      telegramRow?.type === "telegram" && telegramRow.telegram?.linked === false,
+      JSON.stringify(telegramRow)
+    );
+    const probe = await api.call("/api/backups/destinations/tgsuitedest1", { method: "POST" });
+    r.check("its check says the account is not linked", probe.body?.ok === false && /non collegato/.test(probe.body?.message ?? ""), JSON.stringify(probe.body));
+
+    const policy = await api.call("/api/backups/policies", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Con Telegram",
+        cron: "",
+        destinationId: local.id,
+        targets: [{ kind: "panel" }],
+        destinations: [
+          { destinationId: local.id, retention: null },
+          { destinationId: "tgsuitedest1", retention: { count: 2 } },
+        ],
+      }),
+    });
+    r.check("a policy can list Telegram among its destinations", policy.status === 201, JSON.stringify(policy.body).slice(0, 300));
+    const saved = await api.call(`/api/backups/policies/${policy.body?.id}`);
+    const entry = saved.body?.destinations?.find((d) => d.destinationId === "tgsuitedest1");
+    r.check("with a retention of its own", entry?.retention?.count === 2, JSON.stringify(saved.body?.destinations));
+
+    const started = await api.call(`/api/backups/policies/${policy.body?.id}/run`, { method: "POST" });
+    const run = await waitForRun(api, started.body?.runId);
+    const telegramCopy = run.copies?.find((copy) => copy.destinationId === "tgsuitedest1");
+    const localCopy = run.copies?.find((copy) => copy.destinationId === local.id);
+    r.check("the run keeps the local copy", run.status === "success" && localCopy?.status === "done", JSON.stringify(run.copies));
+    r.check(
+      "and says why the Telegram copy failed, without trying to reach Telegram",
+      telegramCopy?.status === "failed" && /non collegato/.test(telegramCopy.errorMessage ?? ""),
+      JSON.stringify(telegramCopy)
+    );
+
+    await api.call(`/api/backups/runs/${run.id}`, { method: "DELETE" });
+    await api.call(`/api/backups/policies/${policy.body?.id}`, { method: "DELETE" });
+    const removed = await api.call("/api/backups/destinations/tgsuitedest1", { method: "DELETE" });
+    r.check("an unused Telegram destination can be deleted", removed.status === 200, JSON.stringify(removed.body));
+  }
+
   return r.result();
+}
+
+async function waitForRun(api, runId, deadlineMs = 120_000) {
+  const deadline = Date.now() + deadlineMs;
+  for (;;) {
+    const { body } = await api.call(`/api/backups/runs/${runId}`);
+    if (body?.status && body.status !== "running") return body;
+    if (Date.now() > deadline) throw new Error(`Il backup ${runId} non è finito in tempo`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
 }

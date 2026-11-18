@@ -5,6 +5,10 @@ import { DOWN_AFTER, UP_AFTER, UPTIME_INTERVAL_MS, UPTIME_TIMEOUT_MS } from "@/l
 import { planFor, runningContract } from "@/services/uptime/targets";
 import { uptimeSummary } from "@/services/uptime/summary";
 import { checkerInfo } from "@/services/uptime/checker";
+import { HDR_MEMBER } from "@/lib/cluster-sign";
+import { panelBaseUrl } from "@/lib/panel-url";
+import { statusPagePath } from "@/lib/status-page";
+import { readStatusPageConfig } from "@/services/status-page/store";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -15,7 +19,8 @@ type Params = { params: Promise<{ projectId: string }> };
  * no port to ask, the project not running — so the card can say it in words
  * instead of showing an empty chart. `tz` is the browser's
  * `getTimezoneOffset()`, so the thirty bars of the strip are the reader's days
- * rather than the server's.
+ * rather than the server's. `publicPage` is the public status page the
+ * project appears on, if any.
  */
 export async function GET(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
@@ -35,12 +40,26 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const plan = planFor(project, await runningContract(project.id));
   const now = Date.now();
-  const summary = await uptimeSummary(project.id, now, tz);
+  const [summary, page] = await Promise.all([uptimeSummary(project.id, now, tz), readStatusPageConfig()]);
+
+  // On this server's public status page, under the name the owner chose: the
+  // card links to it. Only while the page is on — a link to a page that is off
+  // opens "Pagina non trovata" — and only with an address the reader can use:
+  // through another panel of the cluster, the request's own host is this
+  // server as that panel reaches it, not as a browser would.
+  const entry = page?.enabled ? page.projects.find((e) => e.server === null && e.projectId === project.id) : undefined;
+  let publicPage: { name: string; path: string; url: string | null } | null = null;
+  if (page && entry) {
+    const base = await panelBaseUrl(request.headers.get(HDR_MEMBER) ? undefined : request);
+    const path = statusPagePath(page.slug);
+    publicPage = { name: entry.name, path, url: base ? `${base.origin}${path}` : null };
+  }
 
   return NextResponse.json(
     {
       // The clock every duration on the card is measured against.
       now,
+      publicPage,
       watch: {
         active: plan.target !== null,
         skip: plan.skip,

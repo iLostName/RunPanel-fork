@@ -11,6 +11,7 @@ import { Field } from "@/components/ui/Field";
 import { Advanced, Technical } from "@/components/ui/Technical";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { MSG } from "@/lib/copy";
+import { LOCAL_PATH_RULE } from "@/lib/validation";
 import { useNode, useNodeApi } from "@/lib/hooks/useNode";
 import { PROVIDERS, PROVIDER_IDS, detectProvider, type ProviderId } from "./providers";
 import { TelegramFields, type TelegramChoice, type TelegramDetail } from "./TelegramFields";
@@ -23,6 +24,8 @@ export interface DestinationDetail {
   name: string;
   type: string;
   isDefault: boolean;
+  /** A local destination's folder of its own; null or absent for the panel's archive folder. */
+  directory?: string | null;
   config: {
     endpoint: string;
     region: string;
@@ -81,6 +84,7 @@ export function DestinationForm({
   editing,
   archives = 0,
   canSetDefault = true,
+  canChooseFolder = false,
   apiFor,
   memberId,
 }: {
@@ -93,6 +97,8 @@ export function DestinationForm({
   archives?: number;
   /** Only the owner chooses where the safety copies go. */
   canSetDefault?: boolean;
+  /** Only the owner points a local destination at a folder of the server. */
+  canChooseFolder?: boolean;
   /** The server the destination lives on, when it is not the one the page is about. */
   apiFor?: (path: string) => string;
   /** That server's id, for the backup password a Telegram destination suggests setting. */
@@ -109,6 +115,8 @@ export function DestinationForm({
   );
   const [name, setName] = useState(editing?.name ?? "");
   const [telegram, setTelegram] = useState<TelegramChoice>({ linked: null, chat: "channel", channelTitle: "" });
+  /** A local destination's folder of its own; empty is the panel's archive folder. */
+  const [folder, setFolder] = useState("");
 
   const [providerId, setProviderId] = useState<ProviderId>(initialProvider);
   const provider = PROVIDERS[providerId];
@@ -181,8 +189,12 @@ export function DestinationForm({
     forcePathStyle: pathStyle === "path",
   });
 
+  const localConfig = () => (folder.trim() ? { path: folder.trim() } : {});
+  const folderError =
+    kind === "local" && folder.trim() && !/^(\/|[A-Za-z]:[\\/]|\\\\)/.test(folder.trim()) ? LOCAL_PATH_RULE : undefined;
+
   /** What was checked, so a failure stops counting as soon as a field changes. */
-  const signature = JSON.stringify([kind, kind === "s3" ? s3Config() : null]);
+  const signature = JSON.stringify([kind, kind === "s3" ? s3Config() : localConfig()]);
 
   /** Tried with exactly what the form holds, before anything is stored. */
   async function precheck(): Promise<CheckResult> {
@@ -192,7 +204,7 @@ export function DestinationForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: kind,
-          config: kind === "s3" ? s3Config() : {},
+          config: kind === "s3" ? s3Config() : editing ? {} : localConfig(),
           ...(editing ? { destinationId: editing.id } : {}),
         }),
       });
@@ -271,7 +283,7 @@ export function DestinationForm({
             name: name.trim(),
             type: kind,
             isDefault: canSetDefault && makeDefault,
-            config: kind === "s3" ? { ...s3Config(), prefix: prefix.trim() || undefined } : {},
+            config: kind === "s3" ? { ...s3Config(), prefix: prefix.trim() || undefined } : localConfig(),
           }),
         });
 
@@ -306,7 +318,7 @@ export function DestinationForm({
               ? "Verifica e salva"
               : "Verifica e aggiungi"
       }
-      isSubmitDisabled={incomplete || Boolean(kind === "s3" && endpointError)}
+      isSubmitDisabled={incomplete || Boolean(kind === "s3" && endpointError) || Boolean(folderError)}
       // Room for the QR code beside its instructions, and the two chats side by side.
       wide={kind === "telegram"}
       onSubmit={submit}
@@ -345,10 +357,30 @@ export function DestinationForm({
       </TextField>
 
       {kind === "local" ? (
-        <FieldHint>
-          Gli archivi restano su questo server, in <Code>data/backups</Code>. Utile come copia rapida, ma un
-          backup che si perde insieme al server che protegge non è un vero backup.
-        </FieldHint>
+        <>
+          <FieldHint>
+            Gli archivi restano su questo server, in{" "}
+            <Code>{editing?.directory ?? (folder.trim() || "data/backups")}</Code>. Utile come copia rapida, ma un backup
+            che si perde insieme al server che protegge non è un vero backup: affiancagli una copia fuori da qui.
+          </FieldHint>
+          {editing?.directory && (
+            <FieldHint>La cartella non si cambia: per scrivere altrove aggiungi una nuova destinazione.</FieldHint>
+          )}
+          {/* A folder of the server is the owner's to choose, like the host itself. */}
+          {!editing && canChooseFolder && (
+            <Advanced summary="un'altra cartella, per una seconda copia" defaultExpanded={folder !== "" || undefined}>
+              <Field
+                label="Cartella"
+                error={folderError}
+                hint="Vuota: la cartella del pannello. Per una seconda copia scegline una su un altro disco o su un NAS montato: deve esistere, fuori dai dati del pannello, e l'utente del pannello deve poterci scrivere."
+              >
+                <TextField value={folder} onChange={setFolder} aria-label="Cartella">
+                  <Input placeholder="/mnt/backup/runpanel" className="font-mono text-sm" />
+                </TextField>
+              </Field>
+            </Advanced>
+          )}
+        </>
       ) : kind === "telegram" ? (
         <TelegramFields
           api={api}

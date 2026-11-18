@@ -4,7 +4,7 @@ import { requireHostFor } from "@/lib/host-guard";
 import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { isPathShapeSafe, resolveInside } from "@/lib/fs-safe";
-import { getRepoPath } from "@/services/git-manager";
+import { projectFileRoots } from "@/services/project-releases";
 import { appContainerName } from "@/services/docker/labels";
 import { assertOwnAppContainer, ForeignContainerError } from "@/services/process-drivers/docker-driver";
 import { execFile } from "child_process";
@@ -98,9 +98,9 @@ export async function GET(request: NextRequest, { params }: Params) {
       }
     }
 
-    // Local
-    const repoDir = getRepoPath(project.slug);
-    const fullPath = resolveInside(repoDir, filePath);
+    // Local: the version that runs, and the project folder its data links lead to.
+    const { root: repoDir, also } = projectFileRoots(project.slug);
+    const fullPath = resolveInside(repoDir, filePath, also);
     if (!fullPath) {
       return NextResponse.json({ error: "Percorso non valido" }, { status: 400 });
     }
@@ -180,9 +180,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
         return NextResponse.json({ success: true });
       }
 
-      // Local
-      const repoDir = getRepoPath(project.slug);
-      const fullPath = resolveInside(repoDir, filePath);
+      // Local: an edit lands in the version that runs, as it used to land in
+      // the checkout the app ran from. The next deploy starts from git again.
+      const { root: repoDir, also } = projectFileRoots(project.slug);
+      const fullPath = resolveInside(repoDir, filePath, also);
       if (!fullPath) {
         return NextResponse.json({ error: "Percorso non valido" }, { status: 400 });
       }

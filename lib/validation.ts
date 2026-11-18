@@ -24,6 +24,20 @@ import {
 } from "./tasks-rules";
 import { hasRunnableLine } from "./tasks-shell";
 import { MAX_BACKUP_PASSWORD, backupPasswordProblem } from "./backup-password";
+import { MAX_COPIES } from "./backup-copies";
+import {
+  MAX_PAGE_PROJECTS,
+  MESSAGE_MAX,
+  PUBLIC_NAME_MAX,
+  SLUG_MAX,
+  SLUG_MIN,
+  SLUG_PATTERN,
+  SLUG_RULE,
+  TITLE_MAX,
+  cleanLine,
+  cleanText,
+  entryKey,
+} from "./status-page";
 
 
 
@@ -991,13 +1005,41 @@ export const timeZoneSchema = z
   .max(64)
   .refine(isValidTimeZone, "Fuso orario sconosciuto");
 
+/**
+ * How many archives one destination of a policy keeps, in place of the
+ * policy's rule. Every field null or absent: all of them. The bounds are the
+ * policy's own.
+ */
+export const copyRetentionSchema = z
+  .object({
+    count: z.number().int().min(1).max(1000).nullable().optional(),
+    days: z.number().int().min(1).max(3650).nullable().optional(),
+    bytes: z.number().int().min(1024 * 1024).nullable().optional(),
+  })
+  .strict();
+
+/** One destination of a policy, in order: the first is the primary. */
+export const policyDestinationSchema = z
+  .object({
+    destinationId: z.string().min(1).max(32),
+    /** Null or absent: the policy's own rule. */
+    retention: copyRetentionSchema.nullable().optional(),
+  })
+  .strict();
+
 export const backupPolicySchema = z.object({
   name: z.string().min(1).max(80),
   enabled: z.boolean().optional(),
   /** Empty means the policy exists but only ever runs when someone asks. */
   cron: z.union([z.literal(""), cronExpressionSchema]),
   timezone: timeZoneSchema.nullable().optional(),
-  destinationId: z.string().min(1).max(32),
+  /**
+   * The primary destination. Required on create unless `destinations` is
+   * given (the route checks): with both, it has to be their first.
+   */
+  destinationId: z.string().min(1).max(32).optional(),
+  /** Every destination, in order: each receives a copy of the same archive. */
+  destinations: z.array(policyDestinationSchema).min(1).max(MAX_COPIES).optional(),
   targets: z.array(backupTargetSchema).min(1).max(200),
   retentionCount: z.number().int().min(1).max(1000).nullable().optional(),
   retentionDays: z.number().int().min(1).max(3650).nullable().optional(),
@@ -1179,6 +1221,27 @@ export const telegramDestinationConfigSchema = z
   })
   .strict();
 
+/**
+ * A local destination's configuration: nothing, for the panel's own archive
+ * folder, or a folder of its own — a second disk, a mounted NAS — so two local
+ * destinations can be two copies. Absolute, since a relative path would be
+ * relative to wherever the panel happened to start; whether it is outside the
+ * panel's data directory, and writable, is checked on the server.
+ */
+export const LOCAL_PATH_RULE = "Scrivi il percorso completo di una cartella, per esempio /mnt/backup";
+
+export const localConfigSchema = z
+  .object({
+    path: z
+      .string()
+      .trim()
+      .max(1024)
+      .refine((value) => value === "" || /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(value), { message: LOCAL_PATH_RULE })
+      .refine((value) => !value.includes("\u0000"), { message: LOCAL_PATH_RULE })
+      .optional(),
+  })
+  .strict();
+
 export const destinationSchema = z
   .object({
     name: z.string().min(1).max(60),
@@ -1186,13 +1249,18 @@ export const destinationSchema = z
     config: z.record(z.string(), z.unknown()).optional(),
     isDefault: z.boolean().optional(),
   })
-  // `local` needs no configuration; `s3` needs all of it, and half a
-  // configuration is worse than none — it would be accepted, encrypted, and
-  // then fail on first use.
+  // `local` needs no configuration beyond an optional folder; `s3` needs all
+  // of it, and half a configuration is worse than none — it would be
+  // accepted, encrypted, and then fail on first use.
   .refine((value) => value.type !== "s3" || s3ConfigSchema.safeParse(value.config ?? {}).success, {
     message: "Configurazione S3 incompleta o non valida",
     path: ["config"],
   })
+  .refine((value) => value.type !== "local" || localConfigSchema.safeParse(value.config ?? {}).success, {
+    message: LOCAL_PATH_RULE,
+    path: ["config"],
+  })
+  // Telegram takes a finished login, never a session: see the schema above.
   .refine((value) => value.type !== "telegram" || telegramDestinationConfigSchema.safeParse(value.config ?? {}).success, {
     message: "Collega l'account Telegram e scegli dove salvare",
     path: ["config"],
@@ -1228,11 +1296,16 @@ export const destinationUpdateSchema = z
   })
   .strict();
 
-/** A backup now, outside any schedule: what to save, and optionally where and under what name. */
+/**
+ * A backup now, outside any schedule: what to save, and optionally where and
+ * under what name. `destinationIds` asks for a copy on each, in order; with
+ * neither field, the one default destination.
+ */
 export const manualBackupSchema = z
   .object({
     targets: z.array(backupTargetSchema).min(1).max(50),
     destinationId: z.string().min(1).max(32).optional(),
+    destinationIds: z.array(z.string().min(1).max(32)).min(1).max(MAX_COPIES).optional(),
     name: z.string().trim().min(1).max(80).optional(),
   })
   .strict();
@@ -1497,3 +1570,75 @@ export const catalogInstallSchema = z.object({
   /** The server's name as the person reaches it; checked again where it is used. */
   publicHost: z.string().trim().max(253).optional(),
 });
+
+/**
+ * The public status page — see `lib/status-page.ts`.
+ *
+ * Every field optional: what is sent replaces what is stored and the rest
+ * stays, so an API client switches the page on with `{ enabled: true }`.
+ * `projects`, when sent, is the whole list in the order the page shows it.
+ * Text is normalised here (one line for names and the title, no invisible
+ * characters anywhere) so what is stored is what was checked. Whether each
+ * project exists is the route's question: it needs the store.
+ */
+const statusPageIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "Identificativo non valido");
+
+const statusPageNameSchema = z
+  .string()
+  .max(PUBLIC_NAME_MAX * 4)
+  .transform((raw, ctx) => {
+    const name = cleanLine(raw, Number.MAX_SAFE_INTEGER);
+    if (!name) ctx.addIssue({ code: "custom", message: "Ogni progetto sulla pagina ha bisogno di un nome" });
+    else if (name.length > PUBLIC_NAME_MAX) ctx.addIssue({ code: "custom", message: `Un nome può avere al massimo ${PUBLIC_NAME_MAX} caratteri` });
+    return name;
+  });
+
+export const statusPageSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    slug: z.string().trim().toLowerCase().min(SLUG_MIN, SLUG_RULE).max(SLUG_MAX, SLUG_RULE).regex(SLUG_PATTERN, SLUG_RULE).optional(),
+    title: z
+      .string()
+      .max(TITLE_MAX * 4)
+      .transform((raw, ctx) => {
+        const title = cleanLine(raw, Number.MAX_SAFE_INTEGER);
+        if (!title) ctx.addIssue({ code: "custom", message: "Dai un titolo alla pagina" });
+        else if (title.length > TITLE_MAX) ctx.addIssue({ code: "custom", message: `Il titolo può avere al massimo ${TITLE_MAX} caratteri` });
+        return title;
+      })
+      .optional(),
+    message: z
+      .string()
+      .max(MESSAGE_MAX * 4)
+      .transform((raw, ctx) => {
+        const message = cleanText(raw, Number.MAX_SAFE_INTEGER);
+        if (message.length > MESSAGE_MAX) ctx.addIssue({ code: "custom", message: `Il messaggio può avere al massimo ${MESSAGE_MAX} caratteri` });
+        return message;
+      })
+      .optional(),
+    allowIndexing: z.boolean().optional(),
+    projects: z
+      .array(
+        z
+          .object({
+            /** The member of the cluster holding it; null or absent for this server. */
+            server: statusPageIdSchema.nullable().optional(),
+            projectId: statusPageIdSchema,
+            name: statusPageNameSchema,
+          })
+          .strict()
+      )
+      .max(MAX_PAGE_PROJECTS, `Al massimo ${MAX_PAGE_PROJECTS} progetti sulla pagina`)
+      .superRefine((entries, ctx) => {
+        const seen = new Set<string>();
+        entries.forEach((entry, index) => {
+          const key = entryKey({ server: entry.server ?? null, projectId: entry.projectId });
+          if (seen.has(key)) ctx.addIssue({ code: "custom", path: [index, "projectId"], message: "Lo stesso progetto compare due volte" });
+          seen.add(key);
+        });
+      })
+      .optional(),
+  })
+  .strict();
+
+export type StatusPageInput = z.infer<typeof statusPageSchema>;

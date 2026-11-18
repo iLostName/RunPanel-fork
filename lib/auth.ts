@@ -173,6 +173,20 @@ export async function isSessionTokenValid(token: string | undefined | null): Pro
   }
 }
 
+/**
+ * Whether a cookie value names a live session of the owner, without recording
+ * a visit: `proxy.ts` asks it for the one page outside the panel that has an
+ * owner-only view, the status page's preview.
+ */
+export async function isOwnerSessionToken(token: string | undefined | null): Promise<boolean> {
+  if (!token) return false;
+  try {
+    return (await lookupSession(token, false))?.user.isOwner === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function getSession(): Promise<SessionInfo | null> {
   try {
     const requestHeaders = await headers();

@@ -4,8 +4,9 @@ import { isDenied, requireOwner, requirePermission } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { formatBytes } from "@/lib/format";
-import { destinationTypes, destinationUpdateSchema, s3ConfigSchema } from "@/lib/validation";
+import { destinationTypes, destinationUpdateSchema, localConfigSchema, s3ConfigSchema } from "@/lib/validation";
 import { destinationConfig, destinationUsage, transientDestination } from "@/services/backup/destinations";
+import { localPathProblem } from "@/services/backup/destinations/local";
 import { accountLabel } from "@/services/backup/destinations/telegram";
 import { linkedTelegramLogin } from "@/services/backup/telegram-login";
 import { relinkTelegramConfig } from "@/services/backup/telegram-setup";
@@ -13,7 +14,8 @@ import { relinkTelegramConfig } from "@/services/backup/telegram-setup";
 const checkSchema = z
   .object({
     type: z.enum(destinationTypes),
-    config: destinationUpdateSchema.shape.config,
+    /** S3's fields, or a local destination's folder of its own. */
+    config: z.union([destinationUpdateSchema.shape.config.unwrap(), localConfigSchema]).optional(),
     /** Editing: the stored configuration fills what the form left empty — the secret, above all. */
     destinationId: z.string().min(1).max(32).optional(),
   })
@@ -75,6 +77,20 @@ export async function POST(request: NextRequest) {
       merged = valid.data;
     }
 
+    // Writing a probe into a folder of the server is the owner's call, as is
+    // saving a destination there.
+    if (type === "local") {
+      const folder = typeof merged.path === "string" ? merged.path : "";
+      if (folder) {
+        if (!denied.principal.isOwner) {
+          return NextResponse.json({ error: "Solo il proprietario può scegliere una cartella del server" }, { status: 403 });
+        }
+        const problem = localPathProblem(folder);
+        if (problem) return NextResponse.json({ ok: false, message: problem });
+      }
+      merged = folder ? { path: folder } : {};
+    }
+
     try {
       return NextResponse.json(await transientDestination(type, merged).test());
     } catch (err) {
@@ -102,7 +118,10 @@ async function checkTelegram(userId: string, data: z.infer<typeof checkSchema>):
     stored = destinationConfig(row);
   }
 
-  const loginId = data.config?.loginId;
+  // The update shape of the union: a local folder has no login.
+  const form = data.config && !("path" in data.config) ? data.config : {};
+  const loginId = "loginId" in form ? form.loginId : undefined;
+  const chat = "chat" in form ? form.chat : undefined;
   let config = stored;
   if (loginId) {
     const linked = linkedTelegramLogin(loginId, userId);
@@ -116,7 +135,7 @@ async function checkTelegram(userId: string, data: z.infer<typeof checkSchema>):
       } catch (err) {
         return NextResponse.json({ ok: false, message: err instanceof Error ? err.message : "Verifica non riuscita" });
       }
-    } else if ((data.config?.chat ?? "channel") === "channel") {
+    } else if ((chat ?? "channel") === "channel") {
       return NextResponse.json({
         ok: true,
         message:

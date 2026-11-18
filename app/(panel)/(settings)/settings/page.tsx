@@ -23,6 +23,7 @@ import {
 } from "@/lib/polling";
 import { useNode, useNodeApi } from "@/lib/hooks/useNode";
 import { PanelHttpsSection } from "./_components/PanelHttps";
+import { StatusPageSection } from "./_components/StatusPageSettings";
 
 /**
  * What the panel does for everyone, as opposed to Account, which is yours.
@@ -61,7 +62,8 @@ export default function PanelSettingsPage() {
   const me = useMe();
   const canNotify = useCan("notifications");
   const canRegistries = useCan("registries");
-  // `?open=notifications` comes from the bell's "Dove ricevere gli avvisi".
+  // `?open=notifications` comes from the bell's "Dove ricevere gli avvisi",
+  // `?open=status-page` from the uptime card and the page's own preview.
   const openSection = useSearchParams()?.get("open") ?? null;
 
   const [pollingInterval, setPollingInterval] = useState("5");
@@ -293,6 +295,9 @@ export default function PanelSettingsPage() {
             <NotificationSettings />
           </Section>
         )}
+
+        {/* The owner's: it decides what anyone on the internet reads about the projects. */}
+        {me.isOwner && <StatusPageSection defaultExpanded={openSection === "status-page"} />}
 
         {/* The owner's alone: the same server will carry password resets. */}
         {me.isOwner && (

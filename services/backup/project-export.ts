@@ -4,6 +4,9 @@ import { stripRemoteCredentials } from "@/lib/git-remote";
 import { projectBackupSummary } from "@/lib/project-redact";
 import { resolveInside } from "@/lib/fs-safe";
 import { isPanelEnvFile } from "../env-file";
+import { envFileEntry } from "@/lib/releases";
+import { currentRelease } from "../project-releases";
+import { unknownEntries } from "../releases-fs";
 import path from "path";
 import crypto from "crypto";
 import { decrypt, encrypt } from "@/lib/crypto";
@@ -217,7 +220,9 @@ export async function exportProjectRepo(
     throw new Error(`Nessuna copia locale del repository in ${root}`);
   }
 
-  const files: StagedFile[] = [];
+  // Keyed by entry path, so a file the running version holds can take the
+  // place of the project folder's copy at the same path (below).
+  const byEntry = new Map<string, StagedFile>();
   let skipped = 0;
 
   /*
@@ -255,22 +260,53 @@ export async function exportProjectRepo(
       if (entry.isDirectory()) {
         walk(absolute, rel);
       } else if (entry.isFile()) {
-        files.push({
-          absolutePath: absolute,
-          entryPath: `projects/${project.slug}/repo/${rel}`,
-          bytes: fs.statSync(absolute).size,
-          // A tree has no single digest; the archive's own checksum covers it.
-          sha256: null,
-          precompressed: false,
-        });
+        addFile(absolute, rel);
       }
       // Symlinks are deliberately not followed: a link out of the repository
       // would drag arbitrary host files into the archive.
     }
   };
 
+  const addFile = (absolute: string, rel: string) => {
+    const entryPath = `projects/${project.slug}/repo/${rel}`;
+    byEntry.set(entryPath, {
+      absolutePath: absolute,
+      entryPath,
+      bytes: fs.statSync(absolute).size,
+      // A tree has no single digest; the archive's own checksum covers it.
+      sha256: null,
+      precompressed: false,
+    });
+  };
+
   walk(root, "");
 
+  /*
+    A native project with version folders keeps its data in the project folder
+    — the version links to it, so the walk above already has it. Except what
+    the app created since its version started, in a path the project folder did
+    not have yet: that is handed over at the next deploy, and until then it
+    lives only in the version folder. A new project's SQLite file is exactly
+    that, so it goes into the archive from there, at the path it will have, and
+    a restore puts it back where the app looks for it.
+  */
+  let fromRelease: string[] = [];
+  const current = currentRelease(project.slug);
+  if (current) {
+    try {
+      fromRelease = await unknownEntries(current.dir, envFileEntry(contract.envFile));
+      for (const entry of fromRelease) {
+        const absolute = path.join(current.dir, ...entry.split("/"));
+        const stat = fs.lstatSync(absolute);
+        if (stat.isDirectory()) walk(absolute, entry);
+        else if (stat.isFile()) addFile(absolute, entry);
+      }
+    } catch (err) {
+      ctx.log(`  ${project.slug}: file della versione in uso non letti (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+
+  const files = [...byEntry.values()];
   const bytes = files.reduce((total, file) => total + file.bytes, 0);
   ctx.log(`→ ${project.slug}: repository, ${files.length} file (${formatBytes(bytes)})`);
 
@@ -281,6 +317,7 @@ export async function exportProjectRepo(
       excludedDirectories: skipped,
       excludes: [...REPO_EXCLUDES],
       prefix: `projects/${project.slug}/repo/`,
+      ...(current ? { release: current.id, fromRelease } : {}),
     },
   };
 }

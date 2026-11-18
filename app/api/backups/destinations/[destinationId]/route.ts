@@ -5,7 +5,13 @@ import { visiblePolicyIds } from "@/lib/backup-access";
 import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import { destinationUpdateSchema, s3ConfigSchema } from "@/lib/validation";
-import { buildDestination, destinationConfig, destinationUsage } from "@/services/backup/destinations";
+import { syncRunArchive } from "@/services/backup/copies";
+import {
+  buildDestination,
+  destinationConfig,
+  destinationDirectory,
+  destinationUsage,
+} from "@/services/backup/destinations";
 import { TelegramFailure, readTelegramChat } from "@/services/backup/destinations/telegram";
 import { linkedTelegramLogin, releaseTelegramLogin } from "@/services/backup/telegram-login";
 import { logOutTelegram, relinkTelegramConfig } from "@/services/backup/telegram-setup";
@@ -54,6 +60,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
     name: row.name,
     type: row.type,
     isDefault: row.is_default === 1,
+    // A local destination's folder of its own; null for the panel's own folder.
+    directory: destinationDirectory(row),
     config:
       row.type === "s3"
         ? {
@@ -139,7 +147,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       );
     }
     if (config && row.type === "local") {
-      return NextResponse.json({ error: "Il disco locale non ha impostazioni da cambiare" }, { status: 400 });
+      // A local destination's folder is where its archives are: changed, every
+      // copy it holds would be looked for somewhere else. A new destination
+      // is the honest way to write elsewhere.
+      return NextResponse.json(
+        { error: "La cartella di un disco locale non si cambia: aggiungi una nuova destinazione che scriva altrove" },
+        { status: 400 }
+      );
     }
     if (config && row.type === "telegram" && !config.loginId) {
       return NextResponse.json(
@@ -223,12 +237,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 /**
  * Remove a destination.
  *
- * Refused while a policy writes here: the foreign key would delete the policy
- * along with it, which is a surprising amount of configuration to lose to one
- * click. Refused for the last one, which the safety copy of every restore
- * needs. And when archives are stored here, it takes the owner and the typed
- * name: the files stay where they are, but nothing in the panel knows about
- * them any more — no restore, no download, no retention.
+ * Refused while a policy writes here, as its primary or as one of its copies:
+ * the foreign key would delete the policy along with it, or quietly take a
+ * copy out of every run to come — a surprising amount to lose to one click.
+ * Refused while a copy is on its way here, and for the last one, which the
+ * safety copy of every restore needs. And when archives are stored here, it
+ * takes the owner and the typed name: the files stay where they are, but
+ * nothing in the panel knows about them any more — no restore, no download, no
+ * retention. A run that has another copy elsewhere keeps it, and is read from
+ * there.
  */
 export async function DELETE(request: NextRequest, { params }: Params) {
   return withAudit(request, { category: "backup", action: "backup.destination.delete", scope: "permission", scopeId: "backup" }, async () => {
@@ -253,7 +270,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       const list = [...names.map((n) => `«${n}»`), ...(hidden > 0 ? [`${hidden} di un altro account`] : [])].join(", ");
       return NextResponse.json(
         {
-          error: `La usa${used.policies.length === 1 ? "" : "no"} ${list}: sposta prima ${used.policies.length === 1 ? "quella pianificazione" : "quelle pianificazioni"} su un'altra destinazione.`,
+          error: `La usa${used.policies.length === 1 ? "" : "no"} ${list}: togli prima questa destinazione da ${used.policies.length === 1 ? "quella pianificazione" : "quelle pianificazioni"}, o sostituiscila con un'altra.`,
           policies: used.policies.filter((policy) => visible === "all" || visible.has(policy.id)),
         },
         { status: 409 }
@@ -263,6 +280,19 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     if (Number(count?.n ?? 0) <= 1) {
       return NextResponse.json(
         { error: "È l'unica destinazione: serve per il backup di sicurezza di ogni ripristino. Aggiungine un'altra prima." },
+        { status: 409 }
+      );
+    }
+
+    const sending = await db
+      .selectFrom("backup_run_copies")
+      .select("id")
+      .where("destination_id", "=", destinationId)
+      .where("status", "in", ["pending", "uploading"])
+      .executeTakeFirst();
+    if (sending) {
+      return NextResponse.json(
+        { error: "Un backup sta scrivendo qui proprio ora: riprova quando ha finito." },
         { status: 409 }
       );
     }
@@ -285,6 +315,12 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       }
     }
 
+    // The runs that had a copy here: once it is out of reach, each points its
+    // own archive columns at the next copy it has, if it has one.
+    const affected = (
+      await db.selectFrom("backup_run_copies").select("run_id").where("destination_id", "=", destinationId).execute()
+    ).map((copy) => copy.run_id);
+
     let newDefault: string | null = null;
     await db.transaction().execute(async (trx) => {
       await trx.deleteFrom("backup_destinations").where("id", "=", destinationId).execute();
@@ -302,6 +338,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
         }
       }
     });
+
+    for (const runId of new Set(affected)) await syncRunArchive(runId).catch(() => {});
 
     // A Telegram session nothing uses any more is a door left open on the
     // whole account: closed at Telegram, the archives stay in the chat.

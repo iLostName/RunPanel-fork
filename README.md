@@ -56,7 +56,7 @@ PostgreSQL, MySQL, Redis and MongoDB provisioned as labelled containers with the
 <td valign="top">
 
 ### 💾 Backups that restore
-Scheduled dumps of the databases, of the panel's own store, and of project configuration and volumes, into a single verifiable zip, on local disk, an S3-compatible bucket or Telegram (through your own account, split into parts to fit), optionally encrypted with a password of your own.
+Scheduled dumps of the databases, of the panel's own store, and of project configuration and volumes, into a single verifiable zip, copied to as many destinations as you list — local disks, S3-compatible buckets, Telegram through your own account (split into parts to fit) — each with its own retention, optionally encrypted with a password of your own.
 
 </td>
 <td valign="top">
@@ -128,7 +128,7 @@ n8n, WordPress, Uptime Kuma, Umami, Ghost, Vaultwarden, Gitea and MinIO in one c
 <td valign="top">
 
 ### 📈 Metrics, alerts and uptime
-CPU, memory, disk and network history with 1-hour, 24-hour and 7-day charts, alerts when something stays at its limit, and a check every minute that apps answer, with incidents and an uptime figure.
+CPU, memory, disk and network history with 1-hour, 24-hour and 7-day charts, alerts when something stays at its limit, and a check every minute that apps answer, with incidents and an uptime figure — plus an optional public status page for the apps you choose.
 
 </td>
 <td valign="top">
@@ -215,7 +215,7 @@ System, Access and Settings group several pages as tabs, each with its own addre
 | **Monitor** | processes and containers with CPU, memory and uptime, plus a summary of the host (of every server, with several) |
 | **System** | *Diagnostics* (what is missing and what to press), *Autostart* (what comes back after a reboot), *Updates* (version, waiting commits, the button that applies them), *Domains* (the domains nginx serves and every project's subdomain), *Docker cleanup* (what is using the disk and what can be reclaimed), *Servers* (the linked installs: status, version, diagnosis, role, revocation) |
 | **Access** | *Users* (invitations with expiring links, per-account permissions) and *Activity log* (who did what) |
-| **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (refresh rate, timezone, public address, polling interval, accent colour, notification channels, mail server, private registries), *GitHub* (token, repositories, branches) |
+| **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (refresh rate, timezone, public address, polling interval, accent colour, notification channels, public status page, mail server, private registries), *GitHub* (token, repositories, branches) |
 
 </details>
 
@@ -389,7 +389,7 @@ For TLS and reverse proxies in front of the panel, see [Putting it on the intern
 <br>
 
 - One-time commands run **at least once**, not exactly once: a panel restart mid-execution puts the command back in the queue.
-- A failed health check **rolls back automatically only for Docker projects**: the previous image is put back online. Native and Compose projects build in place and stay in error until the next deploy.
+- A failed health check **rolls back automatically for Docker projects** (on by default): the previous image is put back online. **Native projects connected to GitHub, on Linux, can opt in** to version folders (off by default, marked new in the settings), and then the previous version's folder is put back online, from the second deploy after turning it on. Compose projects, native ones that have not opted in, and native ones on Windows or uploaded as a ZIP build in place and stay in error until the next deploy. With version folders, build output outside the usual build folders that an in-place deploy left in the project folder stays shared between versions, so going back does not restore it. See [Going back to the previous version](docs/en/deploy.md#going-back-to-the-previous-version).
 - Port restrictions are enforced by the panel process: with the panel stopped the port simply closes. A rule that has to hold with the panel down needs a host firewall as well.
 - **Restore** does not compare engine versions, and refuses RunPanel's own Postgres store (the `pg_restore` command is in the archive's manifest). See [Backups](docs/en/backups.md#restore).
 - Installing at boot is **Linux-only**; elsewhere the panel shows what to do by hand.

@@ -23,6 +23,8 @@ const INTERNAL = [
   /^mcp$/,
   /^api-tokens$/,
   /^cluster\/(join|directory|leave|ping|secret|folders\/sync)$/,
+  // Another panel asking for the public status of some projects: signed, never a user's.
+  /^cluster\/status-page$/,
   // The data browser: rows are not for an assistant's context (services/mcp/panel-api.ts).
   /^services\/\[serviceId\]\/browse$/,
 ];

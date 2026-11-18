@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { GLOBAL_PERMISSIONS, hasPermission, seesEverything } from "@/lib/authz";
@@ -7,6 +8,7 @@ import { NodeProvider, type NodeInfo } from "@/lib/hooks/useNode";
 import { clusterState, listMembers } from "@/services/cluster/state";
 import { AppSidebar } from "@/components/AppSidebar";
 import { MobileNav } from "@/components/MobileNav";
+import { NavigationProgress } from "@/components/NavigationProgress";
 import { PageAccess } from "@/components/PageAccess";
 import { CommandPalette } from "@/components/CommandPalette";
 import { TopBar } from "@/components/TopBar";
@@ -57,6 +59,11 @@ export default async function PanelLayout({
     <PollingProvider>
     <PanelUpdateProvider>
     <div className="min-h-dvh">
+      {/* In its own boundary because it reads the query string; it draws
+          nothing until a navigation takes long enough to need it. */}
+      <Suspense fallback={null}>
+        <NavigationProgress />
+      </Suspense>
       {/* First in the tab order and invisible until focused: whoever navigates
           by keyboard skips the sidebar instead of tabbing through it on every
           page. */}
