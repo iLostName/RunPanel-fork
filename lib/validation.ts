@@ -24,6 +24,7 @@ import {
 } from "./tasks-rules";
 import { hasRunnableLine } from "./tasks-shell";
 import { MAX_BACKUP_PASSWORD, backupPasswordProblem } from "./backup-password";
+import { MAX_COPIES } from "./backup-copies";
 
 
 
@@ -991,13 +992,41 @@ export const timeZoneSchema = z
   .max(64)
   .refine(isValidTimeZone, "Fuso orario sconosciuto");
 
+/**
+ * How many archives one destination of a policy keeps, in place of the
+ * policy's rule. Every field null or absent: all of them. The bounds are the
+ * policy's own.
+ */
+export const copyRetentionSchema = z
+  .object({
+    count: z.number().int().min(1).max(1000).nullable().optional(),
+    days: z.number().int().min(1).max(3650).nullable().optional(),
+    bytes: z.number().int().min(1024 * 1024).nullable().optional(),
+  })
+  .strict();
+
+/** One destination of a policy, in order: the first is the primary. */
+export const policyDestinationSchema = z
+  .object({
+    destinationId: z.string().min(1).max(32),
+    /** Null or absent: the policy's own rule. */
+    retention: copyRetentionSchema.nullable().optional(),
+  })
+  .strict();
+
 export const backupPolicySchema = z.object({
   name: z.string().min(1).max(80),
   enabled: z.boolean().optional(),
   /** Empty means the policy exists but only ever runs when someone asks. */
   cron: z.union([z.literal(""), cronExpressionSchema]),
   timezone: timeZoneSchema.nullable().optional(),
-  destinationId: z.string().min(1).max(32),
+  /**
+   * The primary destination. Required on create unless `destinations` is
+   * given (the route checks): with both, it has to be their first.
+   */
+  destinationId: z.string().min(1).max(32).optional(),
+  /** Every destination, in order: each receives a copy of the same archive. */
+  destinations: z.array(policyDestinationSchema).min(1).max(MAX_COPIES).optional(),
   targets: z.array(backupTargetSchema).min(1).max(200),
   retentionCount: z.number().int().min(1).max(1000).nullable().optional(),
   retentionDays: z.number().int().min(1).max(3650).nullable().optional(),
@@ -1114,6 +1143,27 @@ export const s3ConfigSchema = z.object({
   forcePathStyle: z.boolean().optional(),
 });
 
+/**
+ * A local destination's configuration: nothing, for the panel's own archive
+ * folder, or a folder of its own — a second disk, a mounted NAS — so two local
+ * destinations can be two copies. Absolute, since a relative path would be
+ * relative to wherever the panel happened to start; whether it is outside the
+ * panel's data directory, and writable, is checked on the server.
+ */
+export const LOCAL_PATH_RULE = "Scrivi il percorso completo di una cartella, per esempio /mnt/backup";
+
+export const localConfigSchema = z
+  .object({
+    path: z
+      .string()
+      .trim()
+      .max(1024)
+      .refine((value) => value === "" || /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(value), { message: LOCAL_PATH_RULE })
+      .refine((value) => !value.includes("\u0000"), { message: LOCAL_PATH_RULE })
+      .optional(),
+  })
+  .strict();
+
 export const destinationSchema = z
   .object({
     name: z.string().min(1).max(60),
@@ -1121,11 +1171,15 @@ export const destinationSchema = z
     config: z.record(z.string(), z.unknown()).optional(),
     isDefault: z.boolean().optional(),
   })
-  // `local` needs no configuration; `s3` needs all of it, and half a
-  // configuration is worse than none — it would be accepted, encrypted, and
-  // then fail on first use.
+  // `local` needs no configuration beyond an optional folder; `s3` needs all
+  // of it, and half a configuration is worse than none — it would be
+  // accepted, encrypted, and then fail on first use.
   .refine((value) => value.type !== "s3" || s3ConfigSchema.safeParse(value.config ?? {}).success, {
     message: "Configurazione S3 incompleta o non valida",
+    path: ["config"],
+  })
+  .refine((value) => value.type !== "local" || localConfigSchema.safeParse(value.config ?? {}).success, {
+    message: LOCAL_PATH_RULE,
     path: ["config"],
   });
 
@@ -1155,11 +1209,16 @@ export const destinationUpdateSchema = z
   })
   .strict();
 
-/** A backup now, outside any schedule: what to save, and optionally where and under what name. */
+/**
+ * A backup now, outside any schedule: what to save, and optionally where and
+ * under what name. `destinationIds` asks for a copy on each, in order; with
+ * neither field, the one default destination.
+ */
 export const manualBackupSchema = z
   .object({
     targets: z.array(backupTargetSchema).min(1).max(50),
     destinationId: z.string().min(1).max(32).optional(),
+    destinationIds: z.array(z.string().min(1).max(32)).min(1).max(MAX_COPIES).optional(),
     name: z.string().trim().min(1).max(80).optional(),
   })
   .strict();

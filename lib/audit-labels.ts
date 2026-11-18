@@ -101,6 +101,7 @@ export const ACTION_LABEL: Record<string, string> = {
   "backup.run": "Backup eseguito",
   "backup.run.delete": "Backup eliminato",
   "backup.run.verify": "Integrità di un backup verificata",
+  "backup.copy.retry": "Copia di un backup riprovata",
   "backup.restore": "Ripristino avviato",
   "backup.upload": "Archivio in caricamento",
   "backup.upload.finish": "Archivio caricato",
