@@ -24,7 +24,7 @@ export async function run({ repoRoot }) {
   const r = createReporter("proxy-unit");
   const names = await import(pathToFileURL(join(repoRoot, "lib", "proxy-names.ts")).href);
   const render = await import(pathToFileURL(join(repoRoot, "services", "proxy", "render.ts")).href);
-  const { normalizeDomain, normalizeSubdomain, hostnameFor, isHostname, zoneFor } = names;
+  const { normalizeDomain, normalizeSubdomain, hostnameFor, isHostname, zoneFor, wwwTwin } = names;
 
   const throws = (fn) => {
     try {
@@ -60,6 +60,12 @@ export async function run({ repoRoot }) {
   r.check("the closest zone wins", zoneFor("a.clienti.esempio.it", ["esempio.it", "clienti.esempio.it"]) === "clienti.esempio.it");
   r.check("a name that only ends the same way is not in the zone", zoneFor("altroesempio.it", ["esempio.it"]) === null);
   r.check("no zones, no zone", zoneFor("esempio.it", []) === null);
+
+  r.check("the domain's twin is its www", JSON.stringify(wwwTwin("", "esempio.it")) === JSON.stringify({ subdomain: "www", hostname: "www.esempio.it" }));
+  r.check("www's twin is the domain itself", JSON.stringify(wwwTwin("www", "esempio.it")) === JSON.stringify({ subdomain: "", hostname: "esempio.it" }));
+  r.check("a domain under another has its own www", wwwTwin("", "clienti.esempio.it")?.hostname === "www.clienti.esempio.it");
+  r.check("any other subdomain has no twin", wwwTwin("app", "esempio.it") === null);
+  r.check("a twin too long for DNS is none", wwwTwin("", `${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(63)}.${"e".repeat(60)}`) === null);
 
   // --- HTTP/2 syntax by nginx version ------------------------------------------------
   const { http2Syntax } = render;
@@ -158,6 +164,30 @@ export async function run({ repoRoot }) {
   for (const bad of ["plain-password", "$apr1$abc$def", `${hash}\nroot:${hash}`, "$2b$10$abcdefghijklmnopqrstuuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012"]) {
     r.check(`the hash ${JSON.stringify(bad.slice(0, 20))} is refused`, throws(() => render.renderSite({ ...base, auth: { user: "admin", hash: bad } })));
   }
+
+  // --- a twin that only redirects ------------------------------------------------------------
+  const twin = { ...base, hostname: "www.esempio.it", checkToken: "zyxwvutsrqponmlkjihgfedc" };
+  const toApex = render.renderSite({ ...twin, redirect: { hostname: "esempio.it", https: true } });
+  r.check("a twin sends visitors on, keeping the path", toApex.includes("return 301 https://esempio.it$request_uri;"));
+  r.check("a twin serves no app", !toApex.includes("proxy_pass"));
+  r.check("a twin still answers its own challenge and routing check", toApex.includes("/.well-known/acme-challenge/") && toApex.includes(`return 200 "${twin.checkToken}";`));
+  r.check("without its own certificate a twin has no 443", !toApex.includes("443"));
+  const toPlain = render.renderSite({ ...twin, redirect: { hostname: "esempio.it", https: false } });
+  r.check("a twin of a name without its certificate yet sends to http", toPlain.includes("return 301 http://esempio.it$request_uri;") && !toPlain.includes("https://esempio.it"));
+
+  const twinCertificate = render.certificatePaths("www.esempio.it");
+  const twinTls = render.renderSite({ ...twin, certificate: twinCertificate, redirect: { hostname: "esempio.it", https: true } });
+  const [twin80, twin443] = twinTls.split("\nserver {").slice(1);
+  r.check("with its certificate, port 80 goes straight to the other name", twin80.includes("return 301 https://esempio.it$request_uri;") && !twin80.includes("https://$host"));
+  r.check("and 443 too, with its own certificate", twin443?.includes(`ssl_certificate ${twinCertificate.fullchain};`) && twin443.includes("return 301 https://esempio.it$request_uri;"));
+  r.check("neither block of a twin proxies", !twinTls.includes("proxy_pass"));
+  const guardedTwin = render.renderSite({ ...twin, allow: [], auth: null, redirect: { hostname: "esempio.it", https: true } });
+  r.check("a twin given an allow list still only redirects", !guardedTwin.includes("proxy_pass") && guardedTwin.includes("return 301 https://esempio.it$request_uri;"));
+  const proxiedTwin = render.renderSite({ ...twin, cloudflare: true, redirect: { hostname: "esempio.it", https: true } });
+  r.check("a twin behind Cloudflare still reads the visitor's address", proxiedTwin.includes("real_ip_header CF-Connecting-IP;"));
+  r.check("a twin without redirect renders as before", render.renderSite({ ...base, redirect: null }) === plain && render.renderSite({ ...base, certificate, redirect: null }) === tls);
+  r.check("a redirect to an invalid name is refused", throws(() => render.renderSite({ ...twin, redirect: { hostname: "esempio.it; return 200", https: true } })));
+  r.check("a redirect to itself is refused", throws(() => render.renderSite({ ...twin, redirect: { hostname: "www.esempio.it", https: true } })));
 
   // --- refusals -------------------------------------------------------------------------
   r.check("a hostname with a semicolon is refused", throws(() => render.renderSite({ ...base, hostname: "app.esempio.it; include /etc/shadow" })));
