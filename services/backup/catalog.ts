@@ -1,5 +1,6 @@
 import { parseBackupSettings, type ProjectBackupSettings } from "@/lib/backup-settings";
 import { describeCron } from "@/lib/cron";
+import { describeCronFriendly } from "@/lib/schedule";
 import { getDb } from "@/lib/db";
 import { staleWhileRevalidate } from "@/lib/stale-cache";
 import type { BackupRunStatus, ProjectsTable } from "@/lib/db/schema";
@@ -30,6 +31,8 @@ export interface PolicyView {
   timezone: string | null;
   destinationId: string;
   destinationName: string | null;
+  /** `local` or `s3`: "sul disco di questo server" and "su <nome>" are different sentences. */
+  destinationType: string | null;
   targets: BackupTarget[];
   retentionCount: number | null;
   retentionDays: number | null;
@@ -45,10 +48,10 @@ export async function listPolicies(): Promise<PolicyView[]> {
 
   const [policies, destinations] = await Promise.all([
     db.selectFrom("backup_policies").selectAll().orderBy("created_at", "asc").execute(),
-    db.selectFrom("backup_destinations").select(["id", "name"]).execute(),
+    db.selectFrom("backup_destinations").select(["id", "name", "type"]).execute(),
   ]);
 
-  const names = new Map(destinations.map((d) => [d.id, d.name]));
+  const byId = new Map(destinations.map((d) => [d.id, d]));
 
   // One query for every policy's latest run rather than one per policy: the
   // list is rendered on every poll of the backups page.
@@ -77,10 +80,13 @@ export async function listPolicies(): Promise<PolicyView[]> {
     name: policy.name,
     enabled: policy.enabled === 1,
     cron: policy.cron,
-    schedule: policy.cron ? describeCron(policy.cron) : "solo su richiesta",
+    // The editor's own sentence when the expression is one of its shapes, the
+    // parser's otherwise: one wording for the same schedule on every screen.
+    schedule: describeCronFriendly(policy.cron, policy.cron ? describeCron(policy.cron) : undefined),
     timezone: policy.timezone,
     destinationId: policy.destination_id,
-    destinationName: names.get(policy.destination_id) ?? null,
+    destinationName: byId.get(policy.destination_id)?.name ?? null,
+    destinationType: byId.get(policy.destination_id)?.type ?? null,
     targets: parseTargets(policy.targets),
     retentionCount: policy.retention_count,
     retentionDays: policy.retention_days,

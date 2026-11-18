@@ -18,6 +18,7 @@ export interface PolicyView {
   timezone: string | null;
   destinationId: string;
   destinationName: string | null;
+  destinationType: string | null;
   targets: BackupTarget[];
   retentionCount: number | null;
   retentionDays: number | null;
@@ -88,6 +89,28 @@ export interface TargetCatalog {
   projects: { id: string; slug: string; name: string; sourceType: string; volumes: string[] }[];
 }
 
+/**
+ * Where a policy's archives go, as the end of a sentence: "Ogni giorno alle
+ * 03:00 · su Backblaze B2". Every local destination is the same folder on this
+ * server, whatever it is called, so it is named for what it is.
+ */
+export function destinationPhrase(type: string | null | undefined, name: string | null | undefined): string {
+  if (!type || !name) return "destinazione non più configurata";
+  return type === "local" ? "sul disco di questo server" : `su ${name}`;
+}
+
+const INCLUDE_WORDS: Record<ProjectInclude, string> = {
+  config: "configurazione",
+  volumes: "dati",
+  repo: "codice",
+};
+
+/** "configurazione e dati" rather than the wire names "config, volumes". */
+function includeWords(include: ProjectInclude[]): string {
+  const words = include.map((item) => INCLUDE_WORDS[item] ?? item);
+  return words.length > 1 ? `${words.slice(0, -1).join(", ")} e ${words[words.length - 1]}` : (words[0] ?? "");
+}
+
 /** How a target reads in a list, without the editor having to be open. */
 export function describeTarget(target: BackupTarget, catalog?: TargetCatalog | null): string {
   switch (target.kind) {
@@ -96,7 +119,7 @@ export function describeTarget(target: BackupTarget, catalog?: TargetCatalog | n
     case "all-services":
       return "Tutti i database";
     case "all-projects":
-      return `Tutti i progetti (${target.include.join(", ")})`;
+      return `Tutti i progetti (${includeWords(target.include)})`;
     case "service": {
       const service = catalog?.services.find((entry) => entry.id === target.id);
       const name = service?.name ?? "servizio rimosso";
@@ -104,7 +127,7 @@ export function describeTarget(target: BackupTarget, catalog?: TargetCatalog | n
     }
     case "project": {
       const project = catalog?.projects.find((entry) => entry.id === target.id);
-      return `${project?.slug ?? "progetto rimosso"} (${target.include.join(", ")})`;
+      return `${project?.slug ?? "progetto rimosso"} (${includeWords(target.include)})`;
     }
   }
 }

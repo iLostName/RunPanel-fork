@@ -26,6 +26,7 @@ import { onlyMember, type Located, type MemberStatus } from "@/lib/cluster-merge
 import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
 import {
   describeTarget,
+  destinationPhrase,
   type DestinationView,
   type PolicyView,
   type RunView,
@@ -354,11 +355,14 @@ export default function BackupsPage() {
                       {policy.lastStatus && <StatusBadge status={policy.lastStatus} />}
                       <ServerBadge memberId={policy.memberId} />
                     </div>
+                    {/* When and where first, in a sentence; what, on its own line. */}
                     <p className="text-muted mt-0.5 truncate text-xs">
                       {policy.schedule}
-                      {policy.timezone ? ` · ${policy.timezone}` : ""} ·{" "}
+                      {policy.cron && policy.timezone ? ` (ora di ${policy.timezone})` : ""} ·{" "}
+                      {destinationPhrase(policy.destinationType, policy.destinationName)}
+                    </p>
+                    <p className="text-muted/80 mt-0.5 truncate text-meta">
                       {policy.targets.map((t) => describeTarget(t, catalogFor(policy.memberId))).join(" · ")}
-                      {policy.destinationName ? ` → ${policy.destinationName}` : ""}
                     </p>
                   </div>
 
