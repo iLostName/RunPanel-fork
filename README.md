@@ -56,7 +56,7 @@ PostgreSQL, MySQL, Redis and MongoDB provisioned as labelled containers with the
 <td valign="top">
 
 ### 💾 Backups that restore
-Scheduled dumps of the databases, of the panel's own store, and of project configuration and volumes, into a single verifiable zip, on local disk or an S3-compatible bucket, optionally encrypted with a password of your own.
+Scheduled dumps of the databases, of the panel's own store, and of project configuration and volumes, into a single verifiable zip, copied to as many destinations as you list — local disks, S3-compatible buckets — each with its own retention, optionally encrypted with a password of your own.
 
 </td>
 <td valign="top">
