@@ -1,245 +1,124 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
-import { NAV_GROUPS, NAV_ITEMS, isActiveNav, type NavGroupId } from "@/lib/nav";
-import { openCommandPalette } from "@/components/CommandPalette";
+import { NAV_ITEMS, isActiveNav } from "@/lib/nav";
 import { useAllowedNav } from "@/lib/hooks/useMe";
 import { useServerHref } from "@/lib/hooks/useNode";
-import { ServerSelector } from "./ServerSelector";
-import logo from "./logo.svg";
+import { useShellInbox } from "@/components/notifications/InboxProvider";
+import { MoreSheet } from "./MoreSheet";
 
 /**
- * Navigation for a phone: four destinations under the thumb, the rest behind a
- * drawer that opens from the right.
+ * Navigation for a phone, the way an app does it: a tab bar along the bottom
+ * edge, under the thumb, and "Altro" for the rest.
  *
- * The panel is used from a phone routinely, and the only mobile affordance was
- * a hamburger pinned to the TOP LEFT — the far corner from where a thumb rests,
- * on every screen, for all ten destinations. Overview, Progetti, Servizi and
- * Monitor are the ones opened daily; the other six are configuration, visited
- * when something needs changing.
+ * Four destinations and "Altro". The four are the first of these the account
+ * may open, in the order they are used day to day: the overview, projects,
+ * databases, backups — then health and domains for an account without some
+ * of them, so the bar is never half empty. Everything else, together with the
+ * server selector, notifications and the account, is in the "Altro" sheet
+ * (components/MoreSheet.tsx), which replaced a drawer that slid in from the
+ * right edge with the navigation only.
  *
- * Both live here rather than inside the sidebar because the sidebar is a
- * desktop layout that happened to also render a drawer. Splitting them means
- * neither has to carry `md:hidden` on every line.
+ * Permissions are the sidebar's (`useAllowedNav`), on the sidebar's own list,
+ * so the bar cannot offer a page the rail would hide.
+ *
+ * "Altro" is lit on any page that is not one of the four, so the bar always
+ * says where you are; it carries a dot while there are unread notifications.
  */
 
-/** The four kept in the bar, in the order they are used. */
-const PRIMARY = ["/home", "/projects", "/services"];
+const CANDIDATES = ["/home", "/projects", "/services", "/backups", "/health", "/domains", "/team"];
+const TABS = 4;
 
-/** The drawer lists every group with its heading, like the desktop rail, settings last. */
-const DRAWER_GROUPS: { id: NavGroupId; label?: string }[] = [...NAV_GROUPS, { id: "footer" }];
+/** The tab bar's own items: a tap target the full height of the bar and a quarter-to-a-fifth of its width. */
+const TAB =
+  "touch-chrome group flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-[var(--radius)] text-meta font-medium transition-colors focus-visible:-outline-offset-2";
 
-export function MobileNav() {
+function TabIcon({ icon, active }: { icon: string; active: boolean }) {
+  return (
+    // The pill is the active marker and the press feedback at once: it fills
+    // under the selected icon, and shrinks a touch under any finger.
+    <span
+      className={cn(
+        "relative grid h-7 w-14 place-items-center rounded-full transition-[transform,background-color] duration-150 ease-out group-active:scale-90",
+        active ? "selected-quiet" : "group-active:bg-default"
+      )}
+    >
+      <Icon icon={icon} width={22} aria-hidden className={cn(active && "text-accent")} />
+    </span>
+  );
+}
+
+export function MobileNav({ version }: { version: string }) {
   const pathname = usePathname();
   const serverHref = useServerHref();
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const drawerRef = useRef<HTMLElement>(null);
-
-  // Escape closes it, and the page behind must not scroll while it is open.
-  //
-  // Focus moves into the drawer on open, Tab cycles inside it, and on close it
-  // goes back to the button that opened it. Without that a keyboard or a screen
-  // reader stayed on the page underneath — the drawer was open on screen and
-  // unreachable from the keys.
-  useEffect(() => {
-    if (!open) return;
-    const drawer = drawerRef.current;
-    const focusables = () =>
-      Array.from(drawer?.querySelectorAll<HTMLElement>("a[href], button:not([disabled])") ?? []);
-    focusables()[0]?.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setOpen(false);
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const items = focusables();
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    const trigger = triggerRef.current;
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-      trigger?.focus();
-    };
-  }, [open]);
-
   const allowed = useAllowedNav();
+  const [open, setOpen] = useState(false);
+  const unread = useShellInbox().data?.unread ?? 0;
+
+  // Closed when the page changes, whatever changed it: a row tapped in the
+  // sheet closes it itself, but a navigation held by the unsaved-changes
+  // guard and then confirmed arrives without that click.
+  const [seen, setSeen] = useState(pathname);
+  if (seen !== pathname) {
+    setSeen(pathname);
+    if (open) setOpen(false);
+  }
+
   const items = NAV_ITEMS.filter(allowed);
-  const primary = PRIMARY.map((href) => items.find((item) => item.href === href)).filter(
-    (item): item is (typeof items)[number] => Boolean(item)
-  );
+  const tabs = CANDIDATES.map((href) => items.find((item) => item.href === href))
+    .filter((item): item is (typeof items)[number] => Boolean(item))
+    .slice(0, TABS);
+  const rest = items.filter((item) => !tabs.includes(item));
+  const elsewhere = !tabs.some((item) => isActiveNav(pathname, item));
 
   return (
     <>
-      {/* Opens the rest of the navigation, top right — reachable, and out of the
-          way of the back gesture on the left edge. */}
-      <button
-        ref={triggerRef}
-        type="button"
-        className="border-border bg-surface text-foreground fixed top-3 right-3 z-50 flex size-9 items-center justify-center rounded-[var(--radius)] border md:hidden"
-        onClick={() => setOpen(true)}
-        aria-label="Apri il menu"
-        aria-expanded={open}
-        aria-controls="mobile-drawer"
-      >
-        <Icon icon="solar:hamburger-menu-linear" width={18} aria-hidden />
-      </button>
-
-      {open && (
-        <div
-          className="bg-backdrop fixed inset-0 z-40 md:hidden"
-          onClick={() => setOpen(false)}
-          aria-hidden
-        />
-      )}
-
-      <aside
-        ref={drawerRef}
-        id="mobile-drawer"
-        role="dialog"
-        aria-modal={open}
-        // Out of the tab order and the accessibility tree while it is off screen.
-        inert={!open}
-        aria-label="Tutte le sezioni"
-        aria-hidden={!open}
-        className={cn(
-          "border-border bg-surface fixed top-0 right-0 z-50 flex h-dvh w-72 max-w-[85vw] flex-col border-l md:hidden",
-          "transition-transform duration-200 ease-out",
-          open ? "translate-x-0" : "translate-x-full"
-        )}
-      >
-        <div className="border-border flex h-14 items-center gap-2.5 border-b px-4">
-          <Image src={logo} alt="" aria-hidden width={24} height={24} className="size-6" />
-          <span className="text-foreground text-sm font-semibold tracking-tight">RunPanel</span>
-          <button
-            type="button"
-            className="text-muted hover:text-foreground ml-auto"
-            onClick={() => setOpen(false)}
-            aria-label="Chiudi il menu"
-          >
-            <Icon icon="solar:close-circle-linear" width={20} aria-hidden />
-          </button>
-        </div>
-
-        {/* The server selector lives in the top bar on wide screens and here
-            on a phone, where the bar has no room for it. Renders nothing in
-            solo mode. */}
-        <ServerSelector className="mx-2 mt-2 w-auto" />
-
-        {/* Same recipe as the desktop rail, so the two do not drift into
-            separate visual languages. */}
-        <nav className="flex-1 overflow-y-auto p-2" aria-label="Tutte le sezioni">
-          {DRAWER_GROUPS.map((group) => {
-            const groupItems = items.filter((item) => item.group === group.id);
-            if (groupItems.length === 0) return null;
-            return (
-              <div key={group.id} className="space-y-0.5">
-                {group.label ? (
-                  <p className="text-muted/60 text-meta px-3 pt-4 pb-1.5 tracking-wider uppercase">{group.label}</p>
-                ) : (
-                  group.id === "footer" && <div className="border-separator mx-3 my-2 border-t" />
-                )}
-                {groupItems.map((item) => {
-            const active = isActiveNav(pathname, item);
-            return (
-              <Link
-                key={item.href}
-                href={serverHref(item.href)}
-                // Closed on the click rather than in an effect on `pathname`:
-                // the click is the event.
-                onClick={() => setOpen(false)}
-                aria-current={active ? "page" : undefined}
-                tabIndex={open ? undefined : -1}
-                className={cn(
-                  "relative flex items-center gap-3 rounded-[var(--radius)] px-3 py-2.5 text-sm transition-colors",
-                  active
-                    ? "selected text-foreground font-medium"
-                    : "text-muted hover:bg-surface-hover hover:text-foreground"
-                )}
-              >
-                {active && (
-                  <span
-                    aria-hidden
-                    className="bg-accent absolute top-1/2 left-0 h-5 w-[3px] -translate-y-1/2 rounded-r-full"
-                  />
-                )}
-                <Icon
-                  icon={active ? item.iconActive : item.icon}
-                  width={18}
-                  aria-hidden
-                  className={cn("shrink-0", active && "text-accent")}
-                />
-                <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              </Link>
-            );
-                })}
-              </div>
-            );
-          })}
-        </nav>
-      </aside>
-
-      {/*
-        The bar itself. `pb-[env(safe-area-inset-bottom)]` keeps it clear of the
-        home indicator on a modern phone, where a fixed bar otherwise sits under
-        the gesture area and swallows the last few pixels of every tap.
-      */}
       <nav
         aria-label="Navigazione principale"
-        className="border-border bg-surface/95 fixed inset-x-0 bottom-0 z-30 flex border-t pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+        className="border-border bg-surface/90 fixed inset-x-0 bottom-0 z-30 border-t pr-[var(--safe-right)] pb-[var(--safe-bottom)] pl-[var(--safe-left)] backdrop-blur-xl md:hidden"
       >
-        {primary.map((item) => {
-          const active = isActiveNav(pathname, item);
-          return (
-            <Link
-              key={item.href}
-              href={serverHref(item.href)}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "text-meta flex flex-1 flex-col items-center gap-0.5 py-2 transition-colors",
-                active ? "text-foreground" : "text-muted"
-              )}
+        <ul className="flex h-[var(--tab-bar-height)] items-stretch">
+          {tabs.map((item) => {
+            const active = isActiveNav(pathname, item);
+            return (
+              <li key={item.href} className="flex min-w-0 flex-1">
+                <Link
+                  href={serverHref(item.href)}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(TAB, active ? "text-foreground" : "text-muted")}
+                >
+                  <TabIcon icon={active ? item.iconActive : item.icon} active={active} />
+                  <span className="max-w-full truncate px-1">{item.label}</span>
+                </Link>
+              </li>
+            );
+          })}
+          <li className="flex min-w-0 flex-1">
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              aria-haspopup="dialog"
+              aria-expanded={open}
+              aria-label={unread > 0 ? `Altro, ${unread} notifiche da leggere` : "Altro"}
+              className={cn(TAB, elsewhere || open ? "text-foreground" : "text-muted")}
             >
-              <Icon
-                icon={active ? item.iconActive : item.icon}
-                width={20}
-                aria-hidden
-                className={cn(active && "text-accent")}
-              />
-              <span className="truncate px-1">{item.label}</span>
-              {active && <span className="bg-accent h-0.5 w-6 rounded-full" />}
-            </Link>
-          );
-        })}
-        {/* Search, which on a phone has no keyboard shortcut to fall back on. */}
-        <button
-          type="button"
-          onClick={openCommandPalette}
-          className="text-meta text-muted flex flex-1 flex-col items-center gap-0.5 py-2 transition-colors"
-        >
-          <Icon icon="solar:magnifier-linear" width={20} aria-hidden />
-          <span className="truncate px-1">Cerca</span>
-        </button>
+              <span className="relative">
+                <TabIcon icon={elsewhere ? "solar:menu-dots-circle-bold-duotone" : "solar:menu-dots-circle-linear"} active={elsewhere} />
+                {unread > 0 && (
+                  <span aria-hidden className="bg-danger ring-surface absolute top-0.5 right-3 size-2.5 rounded-full ring-2" />
+                )}
+              </span>
+              <span className="max-w-full truncate px-1">Altro</span>
+            </button>
+          </li>
+        </ul>
       </nav>
+
+      <MoreSheet isOpen={open} onOpenChange={setOpen} items={rest} version={version} />
     </>
   );
 }

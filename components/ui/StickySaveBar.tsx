@@ -45,7 +45,7 @@ export function StickySaveBar({
         <div
           role="region"
           aria-label="Modifiche non salvate"
-          className="sticky bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-20 -mx-4 mt-2 sm:-mx-5 md:bottom-3"
+          className="sticky bottom-[calc(var(--tab-bar-height)+var(--safe-bottom)+0.75rem)] z-20 -mx-4 mt-2 sm:-mx-5 md:bottom-3"
         >
           <div className="border-border bg-overlay/95 shadow-overlay mx-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--radius)] border px-4 py-3 backdrop-blur sm:mx-5">
             <span className="bg-warning size-2 shrink-0 rounded-full" aria-hidden />

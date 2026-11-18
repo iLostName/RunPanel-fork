@@ -15,10 +15,10 @@ import { useMemberApi, useServerHref } from "@/lib/hooks/useNode";
 /**
  * "There is a new version", on every screen.
  *
- * Below the TopBar and in normal flow, not above it and not fixed. The mobile
- * menu button is `fixed top-3 right-3 z-50` and the TopBar carries a `pr-14`
- * below `md` to clear it — a strip placed above the bar would slide underneath
- * that button on every phone.
+ * Below the TopBar and in normal flow, not above it and not fixed. On a phone
+ * the bar sits under the status bar and the notch (`--safe-top`); a strip
+ * placed above it would have to clear them itself, and would push the bar
+ * down on every page.
  *
  * The button starts the update rather than merely linking to the page, because
  * that is what a notification with a button on it promises. It still confirms

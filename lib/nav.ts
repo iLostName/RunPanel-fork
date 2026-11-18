@@ -291,6 +291,11 @@ export const SEGMENT_LABELS: Record<string, string> = {
   runs: "Esecuzioni",
   restore: "Ripristino",
   new: "Nuovo",
+  // The pages' own titles. Raw, these were the phone's title and its back
+  // button ("‹ catalog") as well as a crumb.
+  catalog: "App pronte",
+  upload: "Ripristina da un archivio",
+  api: "Riferimento API",
   // Reached from the bell, not the sidebar: every account has one.
   notifications: "Notifiche",
 };

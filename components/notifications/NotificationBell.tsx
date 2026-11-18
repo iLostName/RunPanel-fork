@@ -10,7 +10,8 @@ import { useCan } from "@/lib/hooks/useMe";
 import { useServerHref } from "@/lib/hooks/useNode";
 import { SkeletonText } from "@/components/ui/Skeletons";
 import { NotificationItem } from "./NotificationItem";
-import { useInbox, type InboxItem } from "./useInbox";
+import { useShellInbox } from "./InboxProvider";
+import type { InboxItem } from "./useInbox";
 
 /**
  * The bell in the top bar: how many notifications are unread, and the latest.
@@ -24,7 +25,7 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const href = useServerHref();
   const canManage = useCan("notifications");
-  const { data, loading, error, markRead, markAll } = useInbox({ limit: 8 });
+  const { data, loading, error, markRead, markAll } = useShellInbox();
 
   const unread = data?.unread ?? 0;
   const items = data?.items ?? [];

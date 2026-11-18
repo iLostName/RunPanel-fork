@@ -131,9 +131,15 @@ export function Providers({
           sonner's own palette, so they follow the active accent preset and do
           not reintroduce a second set of colours. `richColors` is off for that
           reason.
+
+          The offsets come from globals.css: sonner's own 24px on a desktop,
+          and on a phone above the tab bar and the home indicator, where they
+          used to land underneath both.
         */}
         <Toaster
           position="bottom-right"
+          offset={{ bottom: "var(--toast-offset-bottom)" }}
+          mobileOffset={{ bottom: "var(--toast-offset-bottom)" }}
           toastOptions={{
             classNames: {
               toast:

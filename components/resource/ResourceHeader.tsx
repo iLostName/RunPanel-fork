@@ -88,10 +88,12 @@ export function ResourceHeader({
   return (
     <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div className="flex min-w-0 items-start gap-3">
+        {/* On a phone the top bar carries the way back, next to the status bar
+            where an app keeps it; a second arrow here would be the same link. */}
         <Link
           href={backHref}
           aria-label={backLabel}
-          className="text-muted hover:text-foreground hover:bg-surface-hover mt-0.5 rounded-[var(--radius)] p-1.5 transition-colors"
+          className="text-muted hover:text-foreground hover:bg-surface-hover mt-0.5 rounded-[var(--radius)] p-1.5 transition-colors max-md:hidden"
         >
           <Icon icon="solar:arrow-left-linear" width={18} aria-hidden />
         </Link>
