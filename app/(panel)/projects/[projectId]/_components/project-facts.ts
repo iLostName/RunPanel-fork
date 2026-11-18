@@ -1,4 +1,4 @@
-import { parseContractJson } from "@/lib/deploy-contract";
+import { buildConfigFile } from "@/lib/project-config-file";
 import type { Project } from "./types";
 
 /**
@@ -13,11 +13,6 @@ export function projectHasSource(project: Project): boolean {
   return project.deploy_count > 0 || Boolean(project.repo_location?.real);
 }
 
-/** Build-time values can be tokens (`NPM_TOKEN`): the names travel, the values do not. */
-function withoutBuildValues<T extends { buildEnv: Record<string, string> }>(contract: T): T {
-  return { ...contract, buildEnv: Object.fromEntries(Object.keys(contract.buildEnv).map((key) => [key, ""])) };
-}
-
 /**
  * Download the project's configuration as JSON: what it runs and how, never
  * its secrets.
@@ -26,22 +21,8 @@ function withoutBuildValues<T extends { buildEnv: Record<string, string> }>(cont
  * a file people attach to an issue or keep next to the repository.
  */
 export function exportProjectConfig(project: Project): void {
-  const config = {
-    $schema: "runpanel-project-config/1",
-    exportedAt: new Date().toISOString(),
-    name: project.name,
-    source: {
-      type: project.source_type,
-      url: project.source_type === "github" ? project.source_url : null,
-      branch: project.source_branch,
-    },
-    runtime: project.runtime_type,
-    port: project.port,
-    autoDeploy: Boolean(project.auto_deploy),
-    restartCron: project.restart_cron || null,
-    contract: withoutBuildValues(parseContractJson(project.builder_config)),
-    hosts: (project.hosts ?? []).map((host) => host.hostname),
-  };
+  // The format, and what it leaves out, is lib/project-config-file.ts.
+  const config = buildConfigFile(project);
   const blob = new Blob([JSON.stringify(config, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

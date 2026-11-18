@@ -19,6 +19,7 @@ import { SourceStep } from "./_components/SourceStep";
 import { ReviewStep, type LaunchRequest } from "./_components/ReviewStep";
 import { LaunchView } from "./_components/LaunchView";
 import { useLaunch } from "./_components/useLaunch";
+import { ImportConfig } from "./_components/ImportConfig";
 import type { DetectState, PickedSource } from "./_components/types";
 
 type Step = "source" | "review" | "launch";
@@ -210,11 +211,12 @@ function EmptyProjectLink() {
   }
 
   return (
-    <div className="mt-6 max-w-2xl">
+    <div className="mt-6 flex max-w-2xl flex-wrap gap-2">
       <Button variant="ghost" size="sm" onPress={() => setOpen(true)}>
         <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
         Crea un progetto vuoto e configuralo a mano
       </Button>
+      <ImportConfig />
       <FormDialog
         isOpen={open}
         onOpenChange={setOpen}
