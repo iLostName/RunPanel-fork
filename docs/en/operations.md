@@ -73,36 +73,6 @@ The update is refused if the panel is not a git clone with an https or ssh `orig
 
 If the panel did not come back, the commands to restore the previous version are in `<dataDir>/panel-update.json` and in the supervisor's log (systemd's journal, or `logs/autostart.log` with the script).
 
-## Telegram notifications
+## Notifications
 
-Set up in **Impostazioni › Pannello**, **Notifiche Telegram** section (needs the Notifications permission): create a bot with `@BotFather`, paste the token, send the bot a message and press **Rileva** (detect) to pick the chat. The panel only talks outbound, so it need not be reachable; in exchange the bot takes no commands. The token is encrypted and the page only knows whether there is one.
-
-In a [cluster](multi-server.md) bot and chat are shared by every server; which events to send stays per server.
-
-### What is notified
-
-| Event | When |
-|---|---|
-| **Un progetto si è fermato da solo**, **Un servizio si è fermato da solo** | The process is gone and the panel did not stop it (two separate switches, confirmed over two readings) |
-| **Riavvio programmato** | A scheduled restart performed, or the attempt after a crash failed |
-| **Docker non risponde** | The daemon becomes unreachable, and when it is back (not if it was already down when the panel started) |
-| **Deploy concluso** | Always for automatic deploys; for manual ones only when they fail |
-| **Backup concluso** | Succeeded, partial or failed, with artifacts, size and duration |
-| **Aggiornamento del pannello disponibile** | The check found new commits |
-| **Il pannello è ripartito** | After a restart or an update; off by default |
-| **Spazio su disco in esaurimento** | See below |
-
-Each has its own switch; all are on by default except the panel restart.
-
-What is notified is the moment a threshold is crossed, not the state. Crashes, Docker and disk also get a fifteen-minute silence per event and per subject, so a project that keeps falling does not hide another. The update is announced when the target commit changes.
-
-### Disk space
-
-- **Low**: under 10% or 4 GB free, or under 5% of inodes. Everything still works, but the next build or a large volume copy can fill the rest.
-- **Critical**: under 2 GB (the reserve below which a backup does not start), under 3%, or under 2% of inodes. Backups refused, builds failing, databases unable to write.
-
-The check runs every five minutes, the first 90 seconds after start, on the data disk and, if different, Docker's. Every scheduled backup policy is compared with the space it will need (twice the last archive plus the reserve): if it will not fit, the warning arrives before the run. Thresholds have a margin before counting as recovered, and recovery is notified.
-
-### If a notification does not go out
-
-Nothing is blocked: a deploy does not fail because Telegram does not answer. The error goes to the panel's log, explained where Telegram is cryptic: `chat not found` usually means you have not written to the bot yet.
+The bell in the top bar collects everything that happens on the server, for every account and only about what it may see. Sending the same events outside the panel — email, Telegram, Discord, Slack, ntfy or a signed webhook — is set up in **Impostazioni › Generale › Notifiche**: what is notified, the channels, the webhook signature and how bursts are kept from becoming noise are in [Notifications](notifications.md).

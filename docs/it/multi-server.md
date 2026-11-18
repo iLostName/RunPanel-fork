@@ -37,7 +37,7 @@ Il server di una pagina sta nel suo indirizzo (`?server=…`): un link a un prog
 - **Azioni.** Avviare un servizio, eseguire un backup, scaricare un archivio, applicare una correzione della diagnostica o aggiornare un server partono sempre dal server della riga.
 - **Creare.** Nuovo progetto, nuovo database e nuova pianificazione di backup chiedono su quale server.
 - **Pagine di un server.** La pagina di un progetto o di un servizio, Avvio automatico, Pulizia Docker, Impostazioni e Registro attività riguardano un server alla volta: il nome del server compare nel percorso in alto. Un link a un progetto che sta su un altro server porta lì da solo.
-- **Palette dei comandi** (Ctrl+K) cerca progetti e servizi su tutti i server, **Notifiche Telegram** iniziano con il nome del server che le manda, e il banner degli aggiornamenti dice su quale server ce n'è uno.
+- **Palette dei comandi** (Ctrl+K) cerca progetti e servizi su tutti i server, le **notifiche** inviate a un canale iniziano con il nome del server che le manda, e il banner degli aggiornamenti dice su quale server ce n'è uno.
 
 I permessi sono quelli dell'account anche sull'altro server: chi può leggere un progetto lo legge ovunque esso stia.
 
@@ -47,9 +47,9 @@ Restano del pannello che stai usando, qualunque server sia selezionato: **Access
 
 Utenti, permessi, accessi e cartelle sono replicati su tutti i server e si modificano da qualunque pannello. Ogni modifica viene spinta subito agli altri, nodi compresi, e un controllo al minuto ripara quello che non è arrivato (un server spento, per esempio). Se due server modificano lo stesso account o la stessa cartella, vince la modifica più recente; l'eliminazione di una cartella vince sempre, anche su una rinomina fatta dopo. Un account o una cartella cancellati lasciano una traccia per 30 giorni, perché una copia vecchia non li faccia tornare.
 
-Si condividono anche il token GitHub e il bot Telegram (token e chat): ogni server clona e notifica con le stesse credenziali, e le cifra con la propria chiave.
+Si condivide anche il token GitHub: ogni server clona con le stesse credenziali, e le cifra con la propria chiave. I canali di notifica no: ogni server ha i suoi, da configurare con quel server selezionato (un bot Telegram configurato prima che esistessero i canali è stato copiato nell'elenco di ogni server con l'aggiornamento).
 
-Restano di ogni server: le sessioni (si entra su ogni pannello separatamente), i link di invito (si aprono sul pannello che li ha generati), il registro attività, backup e destinazioni, registry, indirizzo pubblico, intervallo del controllo periodico, impostazioni di aggiornamento e quali notifiche inviare.
+Restano di ogni server: le sessioni (si entra su ogni pannello separatamente), i link di invito (si aprono sul pannello che li ha generati), il registro attività, backup e destinazioni, registry, indirizzo pubblico, intervallo del controllo periodico, impostazioni di aggiornamento, i canali di notifica e le notifiche della campanella.
 
 ## Diagnostica
 

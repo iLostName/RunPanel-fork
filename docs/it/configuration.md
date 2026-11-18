@@ -22,7 +22,7 @@ Tutto sta in `.env` nella cartella del pannello; `.env.example` è la versione c
 | `RUNPANEL_SETUP_TOKEN` | generato a ogni avvio | Fissa il token del primo avvio, che serve anche a [collegare il server a un cluster](multi-server.md). Non validato |
 | `RUNPANEL_DEV_ORIGINS` | — | Solo `next dev`: host aggiuntivi, separati da virgola, con `*` e `**` come jolly (niente CIDR). Non validato |
 
-**La chiave segreta.** Cifra le variabili dei progetti, le credenziali dei servizi, i registry, le destinazioni di backup, il token GitHub e il bot Telegram. Se cambia o va persa, tutti questi valori diventano illeggibili: salvala insieme ai backup. Con [più server](multi-server.md) ogni installazione ha la propria; i valori condivisi (token GitHub, bot Telegram) vengono cifrati di nuovo da ciascun server.
+**La chiave segreta.** Cifra le variabili dei progetti, le credenziali dei servizi, i registry, le destinazioni di backup, il token GitHub, i segreti dei canali di notifica e la password del server di posta. Se cambia o va persa, tutti questi valori diventano illeggibili: salvala insieme ai backup. Con [più server](multi-server.md) ogni installazione ha la propria; il token GitHub condiviso viene cifrato di nuovo da ciascun server.
 
 **I timer di fondo.** `RUNPANEL_DISABLE_SCHEDULERS` serve per un'istanza di prova accanto a quella vera. Spegne pulizia Docker, backup e riavvii pianificati, deploy automatico, controllo degli aggiornamenti, sincronizzazione del cluster, controlli di stato con le relative notifiche e la ripartenza di progetti e servizi dopo un riavvio della macchina. Spegne anche i gate d'accesso: le porte limitate restano chiuse. E tiene il pannello lontano dall'nginx dell'host: i [domini](domains.md) vengono salvati ma mai applicati.
 
