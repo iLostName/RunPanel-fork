@@ -560,14 +560,15 @@ export function createPeerHost(options: PeerHostOptions) {
           throw new PeerHostError(422, "HASH_MISMATCH", "Lo sha256 di quello che è arrivato non è quello annunciato");
         }
 
-        const handle = fs.openSync(file, "r+");
+        // On the disk before it has a name: a power cut must not leave a named file that is not whole.
+        const handle = await fs.promises.open(file, "r+");
         try {
-          fs.fsyncSync(handle);
+          await handle.sync();
         } finally {
-          fs.closeSync(handle);
+          await handle.close();
         }
 
-        const ref = publish(memberId, file, record);
+        const ref = await publish(memberId, file, record);
         record.status = "done";
         record.ref = ref;
         record.updatedAt = now();
@@ -672,7 +673,7 @@ export function createPeerHost(options: PeerHostOptions) {
    * there and is not stored twice; a different file under a taken name gets
    * a few characters more.
    */
-  function publish(memberId: string, file: string, record: UploadRecord): string {
+  async function publish(memberId: string, file: string, record: UploadRecord): Promise<string> {
     const at = new Date(now());
     let name = record.fileName;
     for (let attempt = 0; attempt < 6; attempt++) {
@@ -690,28 +691,19 @@ export function createPeerHost(options: PeerHostOptions) {
           fs.renameSync(file, target);
           return ref;
         }
-        if (sameArchive(target, record)) return ref;
+        if (await sameArchive(target, record)) return ref;
         name = peerAlternativeName(record.fileName, crypto.randomBytes(2).toString("hex"));
       }
     }
     throw new PeerHostError(409, "NAME_TAKEN", "Non trovo un nome libero per l'archivio");
   }
 
-  function sameArchive(target: string, record: UploadRecord): boolean {
+  /** Read as a stream: an archive of many gigabytes must not hold the process while it is hashed. */
+  async function sameArchive(target: string, record: UploadRecord): Promise<boolean> {
     const stat = fs.statSync(target, { throwIfNoEntry: false });
     if (!stat?.isFile() || stat.size !== record.bytes) return false;
     const hash = crypto.createHash("sha256");
-    const fd = fs.openSync(target, "r");
-    try {
-      const buffer = Buffer.allocUnsafe(1024 * 1024);
-      for (;;) {
-        const read = fs.readSync(fd, buffer, 0, buffer.length, null);
-        if (read === 0) break;
-        hash.update(buffer.subarray(0, read));
-      }
-    } finally {
-      fs.closeSync(fd);
-    }
+    for await (const chunk of fs.createReadStream(target)) hash.update(chunk as Buffer);
     return hash.digest("hex") === record.sha256;
   }
 }
