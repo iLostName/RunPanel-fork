@@ -326,17 +326,33 @@ export interface PanelSiteInput {
   /** The name is on the Cloudflare account: the visitor is read from `CF-Connecting-IP`. */
   cloudflare: boolean;
   /**
-   * The owner made this the panel's public address: from then on browsers are
-   * told to use HTTPS only (HSTS). Until then turning the name off must leave
-   * every browser exactly as it was, so no HSTS at all.
+   * HSTS, in seconds, or null for none: see `panelHstsMaxAge`. Until the owner
+   * makes this the panel's public address there is none, so trying the name
+   * out and turning it off leaves every browser as it was.
    */
-  hsts: boolean;
+  hstsMaxAge: number | null;
 }
 
 /** Between two reads of a long-lived answer: the project page's events, a terminal, a log that is followed. */
 export const PANEL_READ_TIMEOUT = "3600s";
-/** The panel's own two years, without `includeSubDomains` — see `renderPanelSite`. */
-export const PANEL_HSTS = "max-age=63072000";
+/** HSTS for the first week after the name is adopted: a name turned off soon after frees browsers within a day. */
+export const PANEL_HSTS_FIRST = 86_400;
+/** After that, the panel's own two years — never with `includeSubDomains`, see `renderPanelSite`. */
+export const PANEL_HSTS_FULL = 63_072_000;
+const PANEL_HSTS_RAMP_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * How long browsers are told to use HTTPS only for the panel's name. None
+ * until it is the public address, a day for the week after, two years from
+ * then. The step up happens at whichever apply comes next — the renewals run
+ * one twice a day. A name adopted with no date (typed into the setting by
+ * hand) counts as adopted now.
+ */
+export function panelHstsMaxAge(adopted: boolean, adoptedAt: string | null, now = Date.now()): number | null {
+  if (!adopted) return null;
+  const since = adoptedAt ? Date.parse(adoptedAt) : Number.NaN;
+  return !Number.isNaN(since) && now - since >= PANEL_HSTS_RAMP_MS ? PANEL_HSTS_FULL : PANEL_HSTS_FIRST;
+}
 /** What port 80 answers before the certificate exists. ASCII and no `$`: nginx would read one as a variable. */
 const PANEL_WAITING = "RunPanel: il certificato HTTPS di questo indirizzo sta arrivando. Nel frattempo apri il pannello dal suo solito indirizzo.";
 
@@ -367,7 +383,10 @@ const PANEL_WAITING = "RunPanel: il certificato HTTPS di questo indirizzo sta ar
  *     `includeSubDomains`, which on a name like `esempio.it` would pin every
  *     project of the domain — some of them still waiting for a certificate —
  *     to HTTPS for two years. And it is only sent once the owner adopted the
- *     name (`hsts`).
+ *     name, ramping up (`hstsMaxAge`).
+ *   - Only this name on 443. When no other block claims to be nginx's default
+ *     server for 443, the first one read is — possibly this — and every name
+ *     that reaches the machine would land on the panel: anything else gets 421.
  *   - The check answers on 443 too, readable from any origin: the browser of
  *     whoever is setting it up proves the name reaches this server with a valid
  *     certificate before the panel offers to make it its address. The token is
@@ -375,6 +394,12 @@ const PANEL_WAITING = "RunPanel: il certificato HTTPS di questo indirizzo sta ar
  */
 export function renderPanelSite(input: PanelSiteInput): string {
   assertSite({ ...input, allow: null, auth: null, redirect: null });
+  if (
+    input.hstsMaxAge !== null &&
+    (!Number.isInteger(input.hstsMaxAge) || input.hstsMaxAge < 0 || input.hstsMaxAge > PANEL_HSTS_FULL)
+  ) {
+    throw new Error(`Durata HSTS non valida: ${input.hstsMaxAge}`);
+  }
   const v6 = (line: string) => (input.ipv6 ? [line] : []);
   const http2Listen = input.http2 === "listen" ? " http2" : "";
   const realIp = input.cloudflare
@@ -427,6 +452,10 @@ export function renderPanelSite(input: PanelSiteInput): string {
         `    ssl_certificate_key ${input.certificate.privkey};`,
         "    ssl_protocols TLSv1.2 TLSv1.3;",
         "",
+        `    if ($host != "${input.hostname}") {`,
+        "        return 421;",
+        "    }",
+        "",
         ...check(true),
         "",
         "    location / {",
@@ -446,7 +475,9 @@ export function renderPanelSite(input: PanelSiteInput): string {
         `        proxy_send_timeout ${PANEL_READ_TIMEOUT};`,
         "        client_max_body_size 0;",
         "        proxy_hide_header Strict-Transport-Security;",
-        ...(input.hsts ? [`        add_header Strict-Transport-Security "${PANEL_HSTS}" always;`] : []),
+        ...(input.hstsMaxAge !== null
+          ? [`        add_header Strict-Transport-Security "max-age=${input.hstsMaxAge}" always;`]
+          : []),
         "    }",
         "}",
       ]

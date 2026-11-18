@@ -17,6 +17,9 @@ import { Kysely } from "kysely";
  *                        before the owner adopted this name, so turning it off
  *                        puts that back. Null: never adopted. '': adopted over
  *                        an empty setting.
+ *   adopted_at           when it was adopted: HSTS starts at one day and only
+ *                        reaches two years a week later, so a name turned off
+ *                        soon after leaves browsers free again within a day.
  *
  * No domain column: whether the name is on a domain of the panel — and so on
  * Cloudflare — is read at use time, so removing or linking a domain needs
@@ -37,9 +40,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("apply_error", "text")
     .addColumn("cert_expires_at", "text")
     .addColumn("previous_public_url", "text")
+    .addColumn("adopted_at", "text")
     .addColumn("created_at", "text", (col) => col.notNull())
     .addColumn("updated_at", "text", (col) => col.notNull())
     .execute();
+
+  // A store that ran an earlier draft of this migration has the table without it.
+  const tables = await db.introspection.getTables();
+  const existing = new Set(tables.find((t) => t.name === "panel_hosts")?.columns.map((c) => c.name) ?? []);
+  if (!existing.has("adopted_at")) {
+    await db.schema.alterTable("panel_hosts").addColumn("adopted_at", "text").execute();
+  }
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {

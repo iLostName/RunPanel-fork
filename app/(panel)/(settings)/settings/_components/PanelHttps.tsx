@@ -131,9 +131,9 @@ export function PanelHttpsSection({ onPublicUrlChange }: { onPublicUrlChange: (u
     intervalMs: settledPoll ? steady : busy,
     refreshUrl: api("/api/panel-https?fresh=1"),
   });
-  // Quick while something is on its way, slow once it is all in place. Derived while rendering.
+  // Quick while the DNS record or the certificate is on its way, slow otherwise. Derived while rendering.
   const host = data?.panelHost ?? null;
-  const nowSettled = !host || (host.certificate === "active" && data?.adopted === true) || host.certificate === "error";
+  const nowSettled = !host || (host.certificate !== "missing" && host.certificate !== "issuing");
   if (data && nowSettled !== settledPoll) setSettledPoll(nowSettled);
 
   if (!data) {
@@ -465,10 +465,11 @@ function Progress({
 
   // What keeps working whatever happens to the name: the address in use now, unless it is the name itself.
   const wayIn = hereUrl && !onTheName && !isRemote ? here : (data.direct[0] ?? null);
-  const plainSameName = [here, data.publicUrl].some((raw) => {
-    const url = urlOf(raw);
-    return url !== null && url.protocol === "http:" && url.hostname === host.hostname;
-  });
+  // The same name over plain http, with the panel's port: what a browser that saw the HTTPS name may stop opening.
+  const plainSameName =
+    [isRemote ? null : here, data.publicUrl]
+      .map(urlOf)
+      .find((url) => url !== null && url.protocol === "http:" && url.hostname === host.hostname) ?? null;
 
   async function adopt(): Promise<boolean> {
     const body = await send(api("/api/panel-https/public-url"), { method: "POST" });
@@ -523,6 +524,20 @@ function Progress({
           </Hint>
           <ProxySetup proxy={data.proxy} onChanged={onChanged} />
         </div>
+      )}
+
+      {/*
+        The same host over plain http: browsers keep one cookie jar per host,
+        whatever the port, and refuse a plain-http cookie that would replace a
+        Secure one of the same name — so after a sign-in on the HTTPS name the
+        old address cannot sign in until that session ends.
+      */}
+      {plainSameName && (
+        <Hint tone="warn" title={`Usi anche ${plainSameName.origin}`}>
+          È lo stesso nome, senza lucchetto. Dopo il primo accesso su {httpsUrl}, quel browser non accetta più
+          l&apos;accesso da {plainSameName.origin} finché non esci da {httpsUrl} (o per 7 giorni); e quando {httpsUrl} è
+          l&apos;indirizzo pubblico, apre quel nome solo in HTTPS. Da lì in poi usa {httpsUrl}, o l&apos;IP del server.
+        </Hint>
       )}
 
       <Step title="Il record DNS" tone={dnsTone}>
@@ -663,7 +678,9 @@ function Progress({
                 <Icon icon="solar:square-arrow-right-up-linear" width={14} aria-hidden />
               </a>
             )}
-            {!onTheName && <FieldHint>Lì si accede di nuovo: ogni indirizzo ha le sue sessioni.</FieldHint>}
+            {!onTheName && !isRemote && hereUrl && hereUrl.hostname !== host.hostname && (
+              <FieldHint>Lì si accede di nuovo: le sessioni non passano da un nome all&apos;altro.</FieldHint>
+            )}
           </div>
         ) : proven ? (
           <div className="space-y-2">
@@ -701,7 +718,15 @@ function Progress({
                   ? `letto dal pannello (RUNPANEL_TRUSTED_PROXY_HOPS=${data.trustedProxyHops}): tienilo così solo se la porta ${data.port} non è raggiungibile da fuori, o chi la usa direttamente sceglie il proprio indirizzo`
                   : `ignorato (RUNPANEL_TRUSTED_PROXY_HOPS=0): la porta ${data.port} resta aperta, e lì l'header lo scrive il client`,
             },
-            { label: "HSTS", value: data.adopted ? "max-age=63072000, senza includeSubDomains" : "non inviato finché non è l'indirizzo pubblico" },
+            {
+              label: "HSTS",
+              value:
+                data.hstsMaxAge === null
+                  ? "non inviato finché non è l'indirizzo pubblico"
+                  : data.hstsMaxAge >= 63_072_000
+                    ? "max-age=63072000, senza includeSubDomains"
+                    : `max-age=${data.hstsMaxAge} nella prima settimana da indirizzo pubblico, poi due anni; mai includeSubDomains`,
+            },
             ...(verify.data?.certificate.issuer ? [{ label: "Emesso da", value: verify.data.certificate.issuer }] : []),
           ]}
         />
@@ -737,11 +762,12 @@ function Progress({
               registrati restano lì finché non premi Riallinea nella sezione Webhook di un progetto.
             </p>
             <p>
-              I browser che aprono {httpsUrl} ricorderanno di usare sempre HTTPS per questo nome
+              I browser che aprono {httpsUrl} ricorderanno di usare solo HTTPS per questo nome: per un giorno nella prima
+              settimana, poi per due anni
               {plainSameName ? (
                 <>
-                  : <strong className="text-foreground">http://{host.hostname} con la porta non si aprirà più da lì</strong>, usa
-                  il nuovo indirizzo o l&apos;IP del server
+                  . <strong className="text-foreground">{plainSameName.origin} non si aprirà più da lì</strong>: usa il nuovo
+                  indirizzo o l&apos;IP del server
                 </>
               ) : null}
               .
@@ -768,7 +794,8 @@ function Progress({
                 L&apos;indirizzo pubblico torna a{" "}
                 {data.previousPublicUrl ? <Code>{data.previousPublicUrl}</Code> : "quello dedotto dalla richiesta"}. I webhook
                 registrati su {httpsUrl} smettono di arrivare finché non li riallinei dai progetti. I browser che l&apos;hanno
-                aperto continueranno a chiedere https:// per questo nome.
+                aperto continueranno a chiedere https:// per questo nome
+                {data.hstsMaxAge !== null && data.hstsMaxAge >= 63_072_000 ? " per due anni" : " ancora per un giorno"}.
               </p>
             )}
             {onTheName && (

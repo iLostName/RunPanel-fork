@@ -762,6 +762,8 @@ export interface PanelHostsTable {
    * name, put back when it is turned off. Null: never adopted. '': it was empty.
    */
   previous_public_url: string | null;
+  /** When the owner adopted it as the public address: how long HSTS has been ramping up. */
+  adopted_at: string | null;
   created_at: string;
   updated_at: string;
 }

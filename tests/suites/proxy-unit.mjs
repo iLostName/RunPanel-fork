@@ -217,7 +217,7 @@ export async function run({ repoRoot }) {
     ipv6: true,
     http2: "directive",
     cloudflare: false,
-    hsts: false,
+    hstsMaxAge: null,
   };
   const panelWaiting = render.renderPanelSite(panelBase);
   r.check("the panel's block names the host on 80, both families", panelWaiting.includes("server_name pannello.esempio.it;") && panelWaiting.includes("    listen 80;") && panelWaiting.includes("    listen [::]:80;"));
@@ -242,9 +242,18 @@ export async function run({ repoRoot }) {
   r.check("X-Forwarded-For is set to the peer, never appended to what the visitor sent", panelApp.includes("proxy_set_header X-Forwarded-For $remote_addr;") && !panelTls.includes("$proxy_add_x_forwarded_for"));
   r.check("the panel's own HSTS is never passed on", panelApp.includes("proxy_hide_header Strict-Transport-Security;"));
   r.check("HSTS stays off until the name is the public address", !panelTls.includes("add_header Strict-Transport-Security"));
-  const panelAdopted = render.renderPanelSite({ ...panelBase, certificate: panelCertificate, hsts: true });
-  r.check("once adopted, HSTS goes on", panelAdopted.includes(`add_header Strict-Transport-Security "${render.PANEL_HSTS}" always;`));
-  r.check("and never for the domain's other names", !panelAdopted.includes("includeSubDomains") && !render.PANEL_HSTS.includes("includeSubDomains"));
+  const panelAdopted = render.renderPanelSite({ ...panelBase, certificate: panelCertificate, hstsMaxAge: render.PANEL_HSTS_FIRST });
+  r.check("once adopted, HSTS goes on", panelAdopted.includes(`add_header Strict-Transport-Security "max-age=${render.PANEL_HSTS_FIRST}" always;`));
+  r.check("and never for the domain's other names", !panelAdopted.includes("includeSubDomains"));
+  r.check("an HSTS past two years, or not a whole number, is refused", throws(() => render.renderPanelSite({ ...panelBase, hstsMaxAge: render.PANEL_HSTS_FULL + 1 })) && throws(() => render.renderPanelSite({ ...panelBase, hstsMaxAge: 1.5 })));
+  const day = 24 * 60 * 60 * 1000;
+  const adoptedAt = "2026-11-01T00:00:00.000Z";
+  r.check("no HSTS while the name is not the public address", render.panelHstsMaxAge(false, adoptedAt) === null);
+  r.check("a day of HSTS in the first week after adoption", render.panelHstsMaxAge(true, adoptedAt, Date.parse(adoptedAt) + 6 * day) === 86_400 && render.PANEL_HSTS_FIRST === 86_400);
+  r.check("two years once the week is over", render.panelHstsMaxAge(true, adoptedAt, Date.parse(adoptedAt) + 7 * day) === 63_072_000 && render.PANEL_HSTS_FULL === 63_072_000);
+  r.check("adopted with no date counts as adopted now", render.panelHstsMaxAge(true, null) === render.PANEL_HSTS_FIRST && render.panelHstsMaxAge(true, "boh") === render.PANEL_HSTS_FIRST);
+  r.check("443 answers only for the panel's own name", panel443?.includes('if ($host != "pannello.esempio.it") {') && panel443.includes("return 421;") && panel443.indexOf("return 421;") < panel443.indexOf("    location / {"));
+  r.check("port 80 keeps answering the challenge for anyone", !panel80.includes("return 421;"));
   r.check("the check answers on 443 too, readable by the owner's browser", panel443?.includes(`return 200 "${token}";`) && panel443.includes('add_header Access-Control-Allow-Origin "*" always;'));
   r.check("CORS is opened on the check alone, never on the panel", !panelApp.includes("Access-Control-Allow-Origin"));
   r.check("the panel's name has no allow list and no password", !panelTls.includes("deny all") && !panelTls.includes("auth_basic"));

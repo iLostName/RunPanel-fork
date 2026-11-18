@@ -10,7 +10,7 @@ import { isInstantHostname, isPanelAddress, panelHttpsUrl } from "@/lib/proxy-na
 import { isBlockedRepoHost, panelPublicUrlSchema } from "@/lib/validation";
 import type { PanelHostsTable } from "@/lib/db/schema";
 import { clusterState, getMember } from "@/services/cluster/state";
-import { CHECK_PATH, SITES_DIR, siteFileName } from "./render";
+import { CHECK_PATH, SITES_DIR, panelHstsMaxAge, siteFileName } from "./render";
 import { loadPanelHost, panelDomain, setPanelHost } from "./panel-store";
 import { explainProxiedAnswer, explainTlsFailure, isPanelCheckAnswer } from "./panel-checks";
 import {
@@ -93,6 +93,7 @@ export async function panelHttpsState(fresh = false) {
   const [domain, clusterUsesName] = row
     ? await Promise.all([panelDomain(row.hostname), clusterReachesThroughName(row.hostname)])
     : [null, false];
+  const adopted = row ? isPanelAddress(publicUrl, row.hostname) : false;
   return {
     proxy,
     panelHost: row ? panelHostView(row) : null,
@@ -108,8 +109,10 @@ export async function panelHttpsState(fresh = false) {
     /** The panel's own port on each public address: the way in that never goes away. */
     direct: [...server.v4.map((address) => `http://${address}:${port}`), ...server.v6.map((address) => `http://[${address}]:${port}`)],
     publicUrl: publicUrl?.trim() || null,
-    adopted: row ? isPanelAddress(publicUrl, row.hostname) : false,
+    adopted,
     previousPublicUrl: row?.previous_public_url ?? null,
+    /** The HSTS the name's block sends once it has its certificate, in seconds; null for none. */
+    hstsMaxAge: row ? panelHstsMaxAge(adopted, row.adopted_at) : null,
     /** Whether the panel reads the visitor's address from `X-Forwarded-For` — never from nginx alone. */
     trustedProxyHops: getEnv().trustedProxyHops,
     blockFile: row ? `${SITES_DIR}/${siteFileName(row.hostname)}` : null,
@@ -323,6 +326,7 @@ export function choosePanelHostname(hostname: string): Promise<PanelOutcome<Pane
       apply_error: null,
       cert_expires_at: null,
       previous_public_url: null,
+      adopted_at: null,
       created_at: now,
       updated_at: now,
     };
@@ -358,8 +362,12 @@ export function adoptPanelHttps(): Promise<PanelOutcome<{ publicUrl: string; pre
     let previous = row.previous_public_url ?? "";
     if (!isPanelAddress(current, row.hostname)) {
       previous = current;
-      await setPanelHost(row.id, { previous_public_url: current });
+      // From now: HSTS starts at a day and steps up a week later.
+      await setPanelHost(row.id, { previous_public_url: current, adopted_at: nowIso() });
       await setSetting(PANEL_PUBLIC_URL_SETTING, url);
+    } else if (!row.adopted_at) {
+      // Typed into the setting by hand earlier: the ramp starts with this press.
+      await setPanelHost(row.id, { adopted_at: nowIso() });
     }
     applyProxySoon();
     return { ok: true, value: { publicUrl: url, previousPublicUrl: previous } };
@@ -383,12 +391,13 @@ export function turnOffPanelHttps(): Promise<PanelOutcome<{ removed: string; pub
       await setSetting(PANEL_PUBLIC_URL_SETTING, publicUrl);
     }
     await db.deleteFrom("panel_hosts").where("id", "=", row.id).execute();
-    // The block first, the certificate only once nothing refers to it. In the
+    // The block first, the certificate only once nothing refers to it — and
+    // not at all if nginx refused the apply and still serves the block. In the
     // background: the request that asked may have come through this very name,
     // and its answer has to leave before nginx lets the name go.
     void applyProxy().then((result) => {
-      if (!result.ok) console.warn(`[proxy] ${result.message}`);
-      forgetCertificate(row.hostname);
+      if (result.ok) forgetCertificate(row.hostname);
+      else console.warn(`[proxy] ${result.message}`);
     });
     return { ok: true, value: { removed: row.hostname, publicUrl: publicUrl || null } };
   });

@@ -40,6 +40,7 @@ import {
   certificatePaths,
   conflictingNames,
   htpasswdFileName,
+  panelHstsMaxAge,
   renderCloudflareHook,
   renderHtpasswd,
   renderPanelSite,
@@ -76,6 +77,8 @@ interface DnsSeen {
 
 const globalRef = globalThis as typeof globalThis & {
   __runpanelProxyChain?: Promise<unknown>;
+  /** The panel's name and HSTS as the last apply tried to write them — see `sweepWaiting`. */
+  __runpanelPanelHstsTried?: { hostname: string; maxAge: number | null } | null;
   __runpanelProxyIssuing?: Set<string>;
   __runpanelProxyDnsSeen?: Map<string, DnsSeen>;
   __runpanelProxyDnsChecks?: Map<string, Promise<HostDnsReport>>;
@@ -479,7 +482,7 @@ function panelSiteFor(found: ProxyProbe, panel: PanelSite, withoutCertificate: b
     ipv6: found.ipv6,
     http2: found.nginx.http2,
     cloudflare: panel.cloudflare,
-    hsts: panel.adopted,
+    hstsMaxAge: panelHstsMaxAge(panel.adopted, panel.row.adopted_at),
   };
 }
 
@@ -488,6 +491,7 @@ const PANEL_TAKEN = "È l'indirizzo HTTPS del pannello: scegline un altro per il
 async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
   const [allRows, claimed, panel] = await Promise.all([loadHosts(), claimedPorts(), loadPanelSite()]);
   const panelName = panel?.row.hostname ?? null;
+  if (!panel) globalRef.__runpanelPanelHstsTried = null;
   // A project's name that is also the panel's — a restored backup, two
   // requests that crossed — is the project's to give up: the panel's block is
   // a way in, and both would be one file.
@@ -512,7 +516,9 @@ async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
     const written = new Map<string, SiteInput>();
     if (panel && panelName && !left.has(panelName)) {
       try {
-        files.set(siteFileName(panelName), renderPanelSite(panelSiteFor(found, panel, httpOnly.has(panelName))));
+        const site = panelSiteFor(found, panel, httpOnly.has(panelName));
+        globalRef.__runpanelPanelHstsTried = { hostname: panelName, maxAge: site.certificate ? site.hstsMaxAge : null };
+        files.set(siteFileName(panelName), renderPanelSite(site));
       } catch (err) {
         // A row the renderer refuses must not take every project's name down with it.
         left.set(panelName, `Il blocco del pannello non è valido: ${err instanceof Error ? err.message : String(err)}`);
@@ -887,9 +893,28 @@ async function lookAgain(subject: DnsSubject, createdAt: string, found: ProxyPro
   return (await hostDnsReport(subject, found)).check.ready;
 }
 
+/**
+ * The panel's HSTS follows its public address setting, which can also change
+ * from the settings form or the API without anything here being told — and
+ * steps up a week after adoption. Whenever what the block would say now is
+ * not what the last apply tried to write, apply again: within one sweep.
+ * Compared with what was tried rather than what succeeded, so an nginx that
+ * refuses every apply is not asked again every two minutes.
+ */
+async function syncPanelHsts(found: ProxyProbe): Promise<void> {
+  const panel = await loadPanelSite();
+  // Set aside by the last apply — its certificate unreadable, its name served elsewhere: another changes nothing.
+  if (!panel || panel.row.apply_error) return;
+  const site = panelSiteFor(found, panel, false);
+  const want = site.certificate ? site.hstsMaxAge : null;
+  const tried = globalRef.__runpanelPanelHstsTried;
+  if (!tried || tried.hostname !== panel.row.hostname || tried.maxAge !== want) applyProxySoon();
+}
+
 /** Every name waiting for its first certificate, looked at when it is due. */
 async function sweepWaiting(): Promise<void> {
   const found = await proxyProbe();
+  if (canApply(found)) await syncPanelHsts(found).catch(() => undefined);
   if (found.state !== "ready") return;
   const now = Date.now();
   for (const [id, seen] of dnsSeen) {
@@ -1032,8 +1057,8 @@ async function issue(target: IssueTarget): Promise<void> {
   // Gone, or the panel's name turned off and another chosen, while certbot was working.
   const still = await target.load();
   if (!still || still.hostname !== row.hostname) {
-    // Nothing is left to use what it issued.
-    if (result.ok) await certbot(found, certbotDeleteArgs(row.hostname));
+    // Nothing is left to use what it issued — unless the same name was given back meanwhile, which this checks.
+    if (result.ok) forgetCertificate(row.hostname);
     return;
   }
   if (!result.ok) {
@@ -1134,14 +1159,34 @@ export async function syncCloudflare(fresh = false): Promise<CloudflareStatus> {
   return { connected: true, zones: outcome.zones, error: null };
 }
 
-/** After a name is deleted: its certificate is of no use to anything else. */
+/** Whether a name is still given to a project or to the panel. */
+async function hostnameInUse(hostname: string): Promise<boolean> {
+  const db = await getDb();
+  const [project, panel] = await Promise.all([
+    db.selectFrom("project_hosts").select("id").where("hostname", "=", hostname).executeTakeFirst(),
+    db.selectFrom("panel_hosts").select("id").where("hostname", "=", hostname).executeTakeFirst(),
+  ]);
+  return project !== undefined || panel !== undefined;
+}
+
+/**
+ * After a name is deleted: its certificate is of no use to anything else —
+ * unless the name was given back meanwhile (turned off and on again, or moved
+ * to another project), or its block is still the one nginx loads because the
+ * apply that should have removed it was refused. Deleting it then would leave
+ * nginx pointing at files that are gone, and the next restart of nginx would
+ * fail for every name on the server.
+ *
+ * In the apply chain, so neither can change while it looks.
+ */
 export function forgetCertificate(hostname: string): void {
-  void (async () => {
+  void serialised(async () => {
     const found = await proxyProbe();
-    if (found.state === "ready" && certificateOnDisk(hostname)) {
-      await certbot(found, certbotDeleteArgs(hostname));
-    }
-  })().catch(() => undefined);
+    if (found.state !== "ready" || !certificateOnDisk(hostname)) return;
+    if (await hostnameInUse(hostname)) return;
+    if (fs.existsSync(path.join(SITES_DIR, siteFileName(hostname)))) return;
+    await certbot(found, certbotDeleteArgs(hostname));
+  }).catch(() => undefined);
 }
 
 export interface SetupResult {
