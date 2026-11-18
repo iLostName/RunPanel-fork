@@ -11,6 +11,7 @@ import { ErrorDetail } from "@/components/ui/LoadError";
 import { Segmented } from "@/components/ui/Segmented";
 import { MSG } from "@/lib/copy";
 import { outsideToasts } from "@/lib/toast";
+import { SheetGrip } from "@/components/ui/SheetGrip";
 import { cn } from "@/lib/utils";
 import type { BrowseCell, BrowseColumn } from "@/lib/db-browser/types";
 
@@ -273,6 +274,7 @@ export function ValueDialog({
     >
       <Modal.Container>
         <Modal.Dialog className="max-w-3xl">
+          <SheetGrip />
           <Modal.Header>
             <Modal.Heading className="font-mono">{title}</Modal.Heading>
           </Modal.Header>

@@ -33,13 +33,31 @@ export function serverPalette(mode: ThemeMode): "light" | "dark" {
 }
 
 /**
+ * Each palette's `--background` (globals.css), written out in sRGB.
+ *
+ * For the places that cannot read a CSS variable: the browser's `theme-color`,
+ * which tints the status bar and the task switcher, the web app manifest, the
+ * offline page and the launch screens. Kept here, next to the palettes they
+ * copy, so a change to the page colour has one other line to update.
+ */
+export const THEME_COLORS = { light: "#f8f9fb", dark: "#07080b" } as const;
+
+/**
  * Sets `data-theme` and the `dark` class on <html>. HeroUI reads both: the class
  * drives its `dark:` variant, the attribute selects the token block.
+ *
+ * The `theme-color` follows too. The server renders it from the cookie, with a
+ * pair split by `prefers-color-scheme` for "Sistema"; a switch made here would
+ * otherwise leave the phone's status bar in the old palette until a reload.
  */
 export function applyPalette(palette: "light" | "dark"): void {
   const root = document.documentElement;
   root.setAttribute("data-theme", palette);
   root.classList.toggle("dark", palette === "dark");
+  for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+    meta.setAttribute("content", THEME_COLORS[palette]);
+    meta.removeAttribute("media");
+  }
 }
 
 export function systemPalette(): "light" | "dark" {

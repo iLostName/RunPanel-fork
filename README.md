@@ -322,7 +322,7 @@ Everything lives in `.env` (see `.env.example` for the annotated version) and is
 <td valign="top">
 
 **[🔧 Operations](docs/en/operations.md)**<br>
-<sub>Starting at boot, scheduled restarts, freeing space, updating the panel, notifications</sub>
+<sub>Starting at boot, scheduled restarts, freeing space, updating the panel, installing it as an app, notifications</sub>
 
 </td>
 <td valign="top">

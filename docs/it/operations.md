@@ -73,6 +73,18 @@ L'aggiornamento viene rifiutato se il pannello non è un clone git con un remote
 
 Se il pannello non tornasse su, i comandi per rimettere la versione precedente sono in `<dataDir>/panel-update.json` e nel log del supervisore (journal di systemd, o `logs/autostart.log` con lo script).
 
+## Installare il pannello come app
+
+Il pannello si installa sul telefono e sul computer come un'app: si apre dalla sua icona, a tutto schermo e senza la barra del browser. Sul telefono le sezioni principali sono nella barra in basso, il resto (server, notifiche, account) in **Altro**.
+
+- **Android, e Chrome o Edge sul computer**: **Installa l'app** nel menu dell'account (sul telefono in **Altro**), oppure l'icona di installazione nella barra degli indirizzi. Sul telefono la Panoramica lo propone anche una volta sola, con una scheda in basso.
+- **iPhone e iPad**: in Safari tocca **Condividi**, poi **Aggiungi alla schermata Home**. **Installa l'app** mostra i passi.
+- **Serve HTTPS.** Nessun browser installa un'app da un indirizzo senza lucchetto (l'eccezione è `localhost`). Aperto su `http://<ip>:3000`, **Installa l'app** spiega perché e porta a **Impostazioni › Generale › Metti il pannello su HTTPS**.
+
+Tenendo premuta l'icona (su Android) o con il tasto destro (sul computer) ci sono le scorciatoie **Progetti**, **Backup** e **Nuovo progetto**.
+
+L'app mostra sempre dati dal vivo: pagine e API arrivano ogni volta dal server, e restano in memoria solo i file del pannello, che cambiano nome a ogni versione, e le icone, perché si apra in fretta. Senza rete, o con il server che non risponde (per esempio mentre si riavvia dopo un aggiornamento), compare una pagina che lo dice e che si ricarica da sola appena il server torna. Quando il pannello viene aggiornato, l'app aperta mostra **Nuova versione del pannello** con **Aggiorna**: ricarica solo quando lo premi, così un modulo compilato a metà non si perde. I link ad altri siti si aprono nel browser.
+
 ## Notifiche
 
 La campanella nella barra in alto raccoglie tutto quello che succede sul server, per ogni account e solo su quello che può vedere. Mandare gli stessi eventi fuori dal pannello — email, Telegram, Discord, Slack, ntfy o un webhook firmato — si imposta in **Impostazioni › Generale › Notifiche**: cosa viene notificato, i canali, la firma dei webhook e come gli avvisi ravvicinati non diventano rumore sono in [Notifiche](notifications.md).

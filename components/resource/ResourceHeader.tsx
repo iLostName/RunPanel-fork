@@ -5,7 +5,9 @@ import Link from "next/link";
 import { Button, Dropdown, Input } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ActionSheet } from "@/components/ui/ActionSheet";
 import { cn } from "@/lib/utils";
+import { useIsPhone } from "@/lib/hooks/useMediaQuery";
 
 export interface ResourceMenuItem {
   id: string;
@@ -57,6 +59,9 @@ export function ResourceHeader({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   const [saving, setSaving] = useState(false);
+  // On a phone "Altro" opens an action sheet rather than a dropdown.
+  const phone = useIsPhone();
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   function startEditing() {
     setDraft(name);
@@ -83,10 +88,12 @@ export function ResourceHeader({
   return (
     <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div className="flex min-w-0 items-start gap-3">
+        {/* On a phone the top bar carries the way back, next to the status bar
+            where an app keeps it; a second arrow here would be the same link. */}
         <Link
           href={backHref}
           aria-label={backLabel}
-          className="text-muted hover:text-foreground hover:bg-surface-hover mt-0.5 rounded-[var(--radius)] p-1.5 transition-colors"
+          className="text-muted hover:text-foreground hover:bg-surface-hover mt-0.5 rounded-[var(--radius)] p-1.5 transition-colors max-md:hidden"
         >
           <Icon icon="solar:arrow-left-linear" width={18} aria-hidden />
         </Link>
@@ -148,7 +155,16 @@ export function ResourceHeader({
       {(actions || ordered.length > 0) && (
         <div className="flex flex-wrap items-center gap-2">
           {actions}
-          {ordered.length > 0 && (
+          {ordered.length > 0 && phone && (
+            <>
+              <Button variant="outline" size="sm" aria-label={menuLabel} onPress={() => setSheetOpen(true)}>
+                <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />
+                <span className="hidden sm:inline">Altro</span>
+              </Button>
+              <ActionSheet isOpen={sheetOpen} onOpenChange={setSheetOpen} title={`${menuLabel}: ${name}`} actions={ordered} />
+            </>
+          )}
+          {ordered.length > 0 && !phone && (
             <Dropdown>
               <Button variant="outline" size="sm" aria-label={menuLabel}>
                 <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />

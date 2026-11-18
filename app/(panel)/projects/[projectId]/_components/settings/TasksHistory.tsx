@@ -6,6 +6,7 @@ import { formatDuration, formatWhen } from "@/lib/format";
 import { useResource } from "@/lib/hooks/useResource";
 import { useNodeApi } from "@/lib/hooks/useNode";
 import { outsideToasts } from "@/lib/toast";
+import { SheetGrip } from "@/components/ui/SheetGrip";
 import {
   STATUS_LABEL,
   STATUS_TONE,
@@ -87,6 +88,7 @@ export function TasksHistory({
     <Modal.Backdrop isOpen onOpenChange={(open) => !open && onClose()} shouldCloseOnInteractOutside={outsideToasts}>
       <Modal.Container>
         <Modal.Dialog className="max-w-3xl">
+          <SheetGrip />
           <Modal.Header>
             <Modal.Heading>Cronologia di «{task.name}»</Modal.Heading>
           </Modal.Header>

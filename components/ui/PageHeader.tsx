@@ -24,12 +24,13 @@ export function PageHeader({
   return (
     <header className={cn("mb-6 flex flex-wrap items-end justify-between gap-3", className)}>
       <div className="flex min-w-0 items-start gap-3">
+        {/* On a phone the top bar carries the way back (components/TopBar.tsx). */}
         {back && (
           <Link
             href={back.href}
             aria-label={back.label}
             title={back.label}
-            className="text-muted hover:text-foreground hover:bg-surface-hover mt-1 shrink-0 rounded-[var(--radius)] p-1.5 transition-colors"
+            className="text-muted hover:text-foreground hover:bg-surface-hover mt-1 shrink-0 rounded-[var(--radius)] p-1.5 transition-colors max-md:hidden"
           >
             <Icon icon="solar:arrow-left-linear" width={18} aria-hidden />
           </Link>

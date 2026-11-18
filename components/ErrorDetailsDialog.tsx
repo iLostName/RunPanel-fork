@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import { useClipboard } from "@/lib/hooks/useClipboard";
 import { closeErrorDetails, trackReturnFocus, useErrorDetails } from "@/lib/error-details";
 import { outsideToasts } from "@/lib/toast";
+import { SheetGrip } from "@/components/ui/SheetGrip";
 
 /** The whole text of a toast that showed only its first line. Mounted once, next to the Toaster. */
 export function ErrorDetailsDialog() {
@@ -23,6 +24,7 @@ export function ErrorDetailsDialog() {
     >
       <Modal.Container>
         <Modal.Dialog className="max-w-3xl" data-error-details="">
+          <SheetGrip />
           <Modal.Header>
             <Modal.Heading>Messaggio completo</Modal.Heading>
           </Modal.Header>

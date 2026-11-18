@@ -1,10 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { allowsIndexing, pageAccess, type PageAccess, type StatusPageConfig } from "@/lib/status-page";
-import { THEME_COOKIE } from "@/lib/theme-mode";
+import { THEME_COLORS, THEME_COOKIE } from "@/lib/theme-mode";
 import { readStatusPageConfig } from "@/services/status-page/store";
 import { panelTimeZone, statusSnapshot } from "@/services/status-page/snapshot";
 import { AutoRefresh } from "./_components/AutoRefresh";
@@ -64,6 +64,26 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: { absolute: page.config.title },
     description: "Lo stato dei servizi in questo momento, l'uptime degli ultimi 30 giorni e le interruzioni recenti.",
     robots: index ? { index: true, follow: false } : { index: false, follow: false, nocache: true },
+    // The panel's installable app is not for the page's visitors: added to a
+    // home screen from here it would open the panel's login.
+    manifest: null,
+    appleWebApp: null,
+    other: { "apple-mobile-web-app-capable": "" },
+  };
+}
+
+/**
+ * The browser's bar in the page's colours. With no theme cookie the page
+ * follows the system (below), so the `theme-color` does too; with one, the
+ * root layout's choice from that cookie already matches.
+ */
+export async function generateViewport(): Promise<Viewport> {
+  if ((await cookies()).get(THEME_COOKIE)?.value) return {};
+  return {
+    themeColor: [
+      { media: "(prefers-color-scheme: light)", color: THEME_COLORS.light },
+      { media: "(prefers-color-scheme: dark)", color: THEME_COLORS.dark },
+    ],
   };
 }
 

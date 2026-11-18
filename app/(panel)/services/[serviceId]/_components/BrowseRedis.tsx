@@ -12,6 +12,7 @@ import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { Technical } from "@/components/ui/Technical";
 import { formatBytes } from "@/lib/format";
 import { outsideToasts } from "@/lib/toast";
+import { SheetGrip } from "@/components/ui/SheetGrip";
 import type { BrowseBytes, RedisKeyDetail, RedisKeyItem, RedisKeyPage, RedisKeyspaceEntry } from "@/lib/db-browser/types";
 import { BrowseFailureView, formatCount, useBrowseFetch, type BrowseCall, type BrowseFailure } from "./BrowseKit";
 
@@ -216,6 +217,7 @@ function RedisKeyDialog({ call, database, item, onClose }: { call: BrowseCall; d
     <Modal.Backdrop isOpen onOpenChange={(open) => !open && onClose()} shouldCloseOnInteractOutside={outsideToasts}>
       <Modal.Container>
         <Modal.Dialog className="max-w-3xl">
+          <SheetGrip />
           <Modal.Header>
             <Modal.Heading className="font-mono break-all">{item.key.text}</Modal.Heading>
           </Modal.Header>

@@ -6,6 +6,7 @@ import { addCollection } from "@iconify/react";
 import { useRouter } from "next/navigation";
 import { Toaster } from "sonner";
 import { ErrorDetailsDialog } from "@/components/ErrorDetailsDialog";
+import { PwaRuntime } from "@/components/pwa/PwaRuntime";
 import { solarSubset } from "@/lib/icons.generated";
 import { DEFAULT_ACCENT, type AccentPreset } from "@/lib/themes";
 import { expertCookie } from "@/lib/expert-mode";
@@ -130,9 +131,15 @@ export function Providers({
           sonner's own palette, so they follow the active accent preset and do
           not reintroduce a second set of colours. `richColors` is off for that
           reason.
+
+          The offsets come from globals.css: sonner's own 24px on a desktop,
+          and on a phone above the tab bar and the home indicator, where they
+          used to land underneath both.
         */}
         <Toaster
           position="bottom-right"
+          offset={{ bottom: "var(--toast-offset-bottom)" }}
+          mobileOffset={{ bottom: "var(--toast-offset-bottom)" }}
           toastOptions={{
             classNames: {
               toast:
@@ -147,6 +154,8 @@ export function Providers({
         />
         {/* What a long error's "Dettagli" opens: see lib/toast.ts. */}
         <ErrorDetailsDialog />
+        {/* The service worker and the installed app's behaviour. */}
+        <PwaRuntime />
       </RouterProvider>
     </AccentContext.Provider>
     </ExpertModeContext.Provider>

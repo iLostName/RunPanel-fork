@@ -319,7 +319,7 @@ Tutto sta in `.env` (vedi `.env.example` per la versione commentata) ed è contr
 <td valign="top">
 
 **[🔧 Operatività](docs/it/operations.md)**<br>
-<sub>Avvio automatico, riavvii programmati, liberare spazio, aggiornamento del pannello, notifiche</sub>
+<sub>Avvio automatico, riavvii programmati, liberare spazio, aggiornamento del pannello, installarlo come app, notifiche</sub>
 
 </td>
 <td valign="top">

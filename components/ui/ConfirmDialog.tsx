@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
+import { SheetGrip } from "./SheetGrip";
 
 /**
  * Confirmation for destructive actions.
@@ -20,6 +21,8 @@ import { MSG } from "@/lib/copy";
  * says what will happen and asks. Something that cannot be undone and loses
  * data passes `confirmText`: the button stays disabled until that name is
  * typed, so the dialog cannot be dismissed with a reflexive Enter.
+ *
+ * On a phone it is a bottom sheet; swiping it down is Annulla (`SheetGrip`).
  */
 export function ConfirmDialog({
   isOpen,
@@ -89,6 +92,7 @@ export function ConfirmDialog({
     >
       <AlertDialog.Container>
         <AlertDialog.Dialog>
+          <SheetGrip disabled={pending} />
           <AlertDialog.Header>
             <AlertDialog.Heading>{title}</AlertDialog.Heading>
           </AlertDialog.Header>

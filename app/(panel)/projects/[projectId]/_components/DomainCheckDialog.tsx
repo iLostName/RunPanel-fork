@@ -9,6 +9,7 @@ import { Advanced, Technical } from "@/components/ui/Technical";
 import { LoadError } from "@/components/ui/LoadError";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { outsideToasts, toast } from "@/lib/toast";
+import { SheetGrip } from "@/components/ui/SheetGrip";
 import { MSG } from "@/lib/copy";
 import { formatWhen } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -94,6 +95,7 @@ export function DomainCheckDialog({
     >
       <Modal.Container>
         <Modal.Dialog className="max-w-2xl">
+          <SheetGrip />
           {host && (
             <CheckBody
               projectId={projectId}

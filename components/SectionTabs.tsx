@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { NAV_SECTIONS, isActiveNav, type NavSectionId } from "@/lib/nav";
 import { useAllowedNav } from "@/lib/hooks/useMe";
 import { useServerHref } from "@/lib/hooks/useNode";
+import { useTabStrip } from "@/lib/hooks/useTabStrip";
 
 /**
  * The tabs of a sidebar entry that stands for several pages.
@@ -24,6 +25,8 @@ export function SectionTabs({ section }: { section: NavSectionId }) {
   const allowed = useAllowedNav();
   const { label, tabs } = NAV_SECTIONS[section];
   const visible = tabs.filter(allowed);
+  // Scrolls on a phone and keeps the page you are on in view: see `useTabStrip`.
+  const strip = useTabStrip<HTMLElement>(pathname);
 
   if (visible.length < 2) return null;
 
@@ -32,8 +35,9 @@ export function SectionTabs({ section }: { section: NavSectionId }) {
     // strip also scrolls vertically, so a tab pulled 1px over a border with
     // -mb-px drew a stray vertical scrollbar. The tab's own border covers it.
     <nav
+      ref={strip}
       aria-label={label}
-      className="mb-6 flex gap-1 overflow-x-auto overflow-y-hidden shadow-[inset_0_-1px_0_var(--color-border)]"
+      className="tab-strip mb-6 flex gap-1 overflow-x-auto overflow-y-hidden shadow-[inset_0_-1px_0_var(--color-border)]"
     >
       {visible.map((tab) => {
         const active = isActiveNav(pathname, tab);
@@ -43,7 +47,7 @@ export function SectionTabs({ section }: { section: NavSectionId }) {
             href={href(tab.href)}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors",
+              "max-md:touch-chrome flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors max-md:min-h-11",
               active
                 ? "border-accent text-foreground font-medium"
                 : "text-muted hover:text-foreground border-transparent"
