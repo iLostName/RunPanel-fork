@@ -1063,8 +1063,8 @@ export const taskSchema = z.object({
 
 export const taskUpdateSchema = taskSchema.partial();
 
-/** Only `local` is implemented; adding a transport means adding it here too. */
-export const destinationTypes = ["local", "s3"] as const;
+/** The transports there are; adding one means adding it here too. */
+export const destinationTypes = ["local", "s3", "telegram"] as const;
 
 /**
  * An S3-compatible destination's configuration.
@@ -1114,6 +1114,71 @@ export const s3ConfigSchema = z.object({
   forcePathStyle: z.boolean().optional(),
 });
 
+/**
+ * Logging in to Telegram for a backup destination: the account's own api_id
+ * and api_hash from my.telegram.org — Telegram's terms want every app to use
+ * its own, so the panel ships none — and how: a QR code to scan from the app,
+ * or the phone number. Re-linking a destination (owner only) may leave the
+ * keys out to keep the stored ones.
+ */
+export const telegramLoginStartSchema = z
+  .object({
+    apiId: z.coerce
+      .number({ message: "L'api_id è un numero" })
+      .int("L'api_id è un numero intero")
+      .min(1, "L'api_id è un numero")
+      .max(2_147_483_647, "L'api_id non è valido")
+      .optional(),
+    apiHash: z
+      .string()
+      .trim()
+      .regex(/^[0-9a-fA-F]{32}$/, "L'api_hash è lungo 32 caratteri: cifre e lettere da a a f")
+      .optional(),
+    method: z.enum(["qr", "phone"]),
+    phone: z
+      .string()
+      .trim()
+      .max(32)
+      .regex(/^\+?[0-9][0-9 ()-]{5,30}$/, "Scrivi il numero con il prefisso internazionale, per esempio +39 333 123 4567")
+      .optional(),
+    destinationId: z.string().min(1).max(32).optional(),
+  })
+  .strict()
+  .refine((value) => value.method !== "phone" || Boolean(value.phone), {
+    message: "Scrivi il numero di telefono",
+    path: ["phone"],
+  })
+  .refine((value) => Boolean(value.destinationId) || (value.apiId !== undefined && value.apiHash !== undefined), {
+    message: "Servono api_id e api_hash",
+    path: ["apiId"],
+  });
+
+/** One step of a Telegram login: the code from the phone, or the account's two-step password. */
+export const telegramLoginStepSchema = z
+  .object({
+    code: z.string().trim().regex(/^[0-9]{4,10}$/, "Il codice è fatto di sole cifre").optional(),
+    password: z.string().min(1, "Scrivi la password").max(256).optional(),
+  })
+  .strict()
+  .refine((value) => (value.code === undefined) !== (value.password === undefined), {
+    message: "Manda il codice oppure la password",
+    path: ["code"],
+  });
+
+/**
+ * A Telegram destination as the form creates it. No session here: `loginId`
+ * names a finished login, whose session the server reads from its own memory
+ * into the encrypted config, so it never passes through the browser.
+ */
+export const telegramDestinationConfigSchema = z
+  .object({
+    loginId: z.string().min(16).max(64),
+    /** A private channel the panel creates, or the account's Saved Messages. */
+    chat: z.enum(["channel", "saved"]),
+    channelTitle: z.string().trim().min(1).max(128).optional(),
+  })
+  .strict();
+
 export const destinationSchema = z
   .object({
     name: z.string().min(1).max(60),
@@ -1126,6 +1191,10 @@ export const destinationSchema = z
   // then fail on first use.
   .refine((value) => value.type !== "s3" || s3ConfigSchema.safeParse(value.config ?? {}).success, {
     message: "Configurazione S3 incompleta o non valida",
+    path: ["config"],
+  })
+  .refine((value) => value.type !== "telegram" || telegramDestinationConfigSchema.safeParse(value.config ?? {}).success, {
+    message: "Collega l'account Telegram e scegli dove salvare",
     path: ["config"],
   });
 
@@ -1149,6 +1218,10 @@ export const destinationUpdateSchema = z
         secretAccessKey: z.string().max(255).optional(),
         prefix: z.string().max(255).optional(),
         forcePathStyle: z.boolean().optional(),
+        /** Telegram: a finished login whose account replaces the linked one. */
+        loginId: z.string().min(16).max(64).optional(),
+        /** Telegram, only to try a destination before creating it: where it would save. */
+        chat: z.enum(["channel", "saved"]).optional(),
       })
       .strict()
       .optional(),
