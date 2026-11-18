@@ -5,7 +5,7 @@ import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { runVisible } from "@/lib/backup-access";
 import { getDb } from "@/lib/db";
 import { buildDestination } from "@/services/backup/destinations";
-import { assertBackupId } from "@/services/backup/paths";
+import { archiveContentType, assertBackupId } from "@/services/backup/paths";
 
 type Params = { params: Promise<{ runId: string }> };
 
@@ -57,9 +57,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const stream = await destination.open(run.archive_path);
     const fileName = path.basename(run.archive_path);
 
+    // Served as stored: an encrypted archive leaves encrypted, a copy kept
+    // elsewhere is exactly what the password is for.
     return new Response(Readable.toWeb(stream) as ReadableStream, {
       headers: {
-        "Content-Type": "application/zip",
+        "Content-Type": archiveContentType(fileName),
         "Content-Length": String(run.archive_bytes ?? 0),
         "Content-Disposition": `attachment; filename="${fileName}"`,
         "Cache-Control": "no-store",

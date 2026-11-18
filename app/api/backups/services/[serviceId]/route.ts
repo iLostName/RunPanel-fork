@@ -3,7 +3,8 @@ import { isDenied, requirePermission, requireService } from "@/lib/auth-guard";
 import { visiblePolicyIds } from "@/lib/backup-access";
 import { getDb } from "@/lib/db";
 import { serviceDisplayName } from "@/lib/service-name";
-import { listPolicies } from "@/services/backup/catalog";
+import { listPolicies, runEncryption, type RunEncryption } from "@/services/backup/catalog";
+import { keyAvailability } from "@/services/backup/keyring";
 
 type Params = { params: Promise<{ serviceId: string }> };
 
@@ -79,6 +80,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       "backup_runs.archive_path as archivePath",
       "backup_runs.destination_id as destinationId",
       "backup_runs.started_at as startedAt",
+      "backup_runs.encryption_key_id as encryptionKeyId",
     ])
     .where("backup_artifacts.kind", "=", "service-db")
     .where("backup_artifacts.ref_id", "=", serviceId)
@@ -91,7 +93,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     denied.principal.isOwner || (row.policyId !== null && visible !== "all" && visible.has(row.policyId))
   );
 
-  const [destinations, verifications] = await Promise.all([
+  const [destinations, verifications, keys] = await Promise.all([
     db.selectFrom("backup_destinations").select(["id", "name", "type"]).execute(),
     shown.length > 0
       ? db
@@ -100,6 +102,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
           .where("run_id", "in", [...new Set(shown.map((row) => row.runId))])
           .execute()
       : Promise.resolve([]),
+    keyAvailability(),
   ]);
   const destinationById = new Map(destinations.map((d) => [d.id, d]));
   const verificationByRun = new Map(verifications.map((v) => [v.run_id, v]));
@@ -114,6 +117,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     destinationName: string | null;
     destinationType: string | null;
     verification: { status: "ok" | "failed"; checkedAt: string } | null;
+    encryption: RunEncryption | null;
     artifacts: {
       id: string;
       kind: "service-db";
@@ -144,6 +148,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
         destinationName: destination?.name ?? null,
         destinationType: destination?.type ?? null,
         verification: check ? { status: check.status === "ok" ? "ok" : "failed", checkedAt: check.checked_at } : null,
+        encryption: runEncryption(row.encryptionKeyId, keys),
         artifacts: [],
       };
       runs.push(run);
