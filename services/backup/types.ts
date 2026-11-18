@@ -125,7 +125,8 @@ export interface Destination {
    * the runner removes it once they have all finished.
    *
    * `options.signal` stops an upload in flight, and the same option on `open`
-   * a download: the remote drivers (SFTP, WebDAV, rclone) honour it.
+   * a download: the remote drivers (SFTP, WebDAV, rclone, a linked server)
+   * honour it.
    */
   put(localPath: string, fileName: string, options?: PutOptions): Promise<{ ref: string; bytes: number }>;
   remove(ref: string): Promise<void>;
