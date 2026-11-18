@@ -18,6 +18,7 @@ import { docker, dockerFromFile, dockerTry } from "../docker/cli";
 import { opsEvents } from "../events";
 import { processManager } from "../process-manager";
 import { appIsUp } from "../project-restart";
+import { projectFileRoots } from "../project-releases";
 import { sealContract } from "../build-env";
 import {
   busyMessage,
@@ -1038,7 +1039,14 @@ async function restoreRepo(
 
   if (entries.length === 0) throw new Error("Nessun file di repository nell'archivio");
 
-  const destination = path.join(config.reposDir, project.slug);
+  /*
+    Into the folder the app runs from. For a native project with version
+    folders that is the current version: its data links lead into the project
+    folder, so the data lands there as before, while a file the version holds
+    itself — one the app created since it started — is replaced where the app
+    reads it, rather than beside it in a project folder the app does not look in.
+  */
+  const { root: destination, also } = projectFileRoots(project.slug);
   fs.mkdirSync(destination, { recursive: true });
 
   let written = 0;
@@ -1047,8 +1055,9 @@ async function restoreRepo(
     const relative = entry.entryPath.slice(prefix.length);
     if (!relative || !isSafeEntryPath(relative)) continue;
     // The live checkout may hold links committed after the backup was taken;
-    // resolved for real, so a restored file is never written through one.
-    const target = resolveInside(destination, relative);
+    // resolved for real, so a restored file is never written through one —
+    // except a version folder's own links into the project folder.
+    const target = resolveInside(destination, relative, also);
     if (!target) {
       skipped++;
       continue;

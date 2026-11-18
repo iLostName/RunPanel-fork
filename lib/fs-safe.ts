@@ -68,8 +68,13 @@ function lexists(target: string): boolean {
  * that follows would not be seen. Closing that needs `O_NOFOLLOW` on every
  * call site, which is not worth it against an attacker who must already be
  * authenticated to reach any of them.
+ *
+ * `alsoInside` names other folders a path may resolve into: a native project's
+ * version folder links the data the app keeps into the project folder, which
+ * is the project's own and was always open to the file manager. Resolved for
+ * real like `base`.
  */
-export function resolveInside(base: string, relative: string): string | null {
+export function resolveInside(base: string, relative: string, alsoInside: string[] = []): string | null {
   if (relative.includes("\0")) return null;
 
   // A leading slash means "root of the project", not "root of the disk".
@@ -104,7 +109,8 @@ export function resolveInside(base: string, relative: string): string | null {
   }
 
   const resolved = path.join(real, ...missing);
-  return isInside(root, resolved) ? resolved : null;
+  if (isInside(root, resolved)) return resolved;
+  return alsoInside.some((other) => isInside(realpathOrSelf(path.resolve(other)), resolved)) ? resolved : null;
 }
 
 /**
