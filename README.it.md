@@ -341,7 +341,7 @@ Per il TLS e i reverse proxy davanti al pannello, vedi [Metterlo su internet](do
 <br>
 
 - I comandi una tantum girano **almeno una volta**, non esattamente una volta: un riavvio del pannello a metà esecuzione rimette il comando in coda.
-- Un health check fallito lascia il progetto in errore: **non c'è un ritorno automatico** alla versione precedente.
+- Un health check fallito **torna da solo alla versione precedente solo per i progetti Docker**: l'immagine di prima viene rimessa online. I progetti nativi e Compose compilano nella stessa cartella e restano in errore fino al deploy successivo.
 - Le restrizioni sulle porte le applica il processo del pannello: a pannello fermo la porta semplicemente si chiude. Una regola che deve valere anche a pannello spento richiede in più un firewall sull'host.
 - Il **ripristino** non confronta le versioni dei motori, e rifiuta lo store Postgres di RunPanel (il comando `pg_restore` è nel manifest dell'archivio). Vedi [Backup](docs/it/backups.md#ripristino).
 - L'installazione automatica all'avvio è **solo per Linux**; altrove il pannello mostra cosa fare a mano.

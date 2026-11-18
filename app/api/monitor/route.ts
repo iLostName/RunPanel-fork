@@ -3,14 +3,18 @@ import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { processManager } from "@/services/process-manager";
 import { containerStats, dockerSnapshot, type DockerSnapshot } from "@/services/docker/stats";
+import { isDockerAvailable } from "@/services/docker/cli";
 import { composeProjectName } from "@/services/docker/compose";
-import { appContainerName, foreignOwner } from "@/services/docker/labels";
+import { LABEL_MANAGED, appContainerName, foreignOwner, type ContainerRow } from "@/services/docker/labels";
 import { hostMetrics } from "@/services/host-metrics";
 import { serviceDisplayName } from "@/lib/service-name";
 import { appProcessInfo, stackProcessInfo } from "@/lib/docker-snapshot";
 import { isReservedSlug } from "@/lib/project-slug";
 
 const NO_CONTAINERS: DockerSnapshot = { rows: [], facts: new Map() };
+
+/** Stamped by compose on every container of a stack: the service it runs. */
+const COMPOSE_SERVICE = "com.docker.compose.service";
 
 /**
  * A Docker project, answered from the snapshot.
@@ -29,12 +33,61 @@ function dockerProject(slug: string, { rows, facts }: DockerSnapshot) {
   return appProcessInfo(facts.get(name), containerStats.get(name));
 }
 
-function composeProject(slug: string, { rows }: DockerSnapshot) {
+function stackRows(slug: string, { rows }: DockerSnapshot): ContainerRow[] {
   const stack = composeProjectName(slug);
-  return stackProcessInfo(
-    rows.filter((row) => row.composeProject === stack && !row.oneOff),
-    containerStats.get
-  );
+  return rows.filter((row) => row.composeProject === stack && !row.oneOff);
+}
+
+function composeProject(slug: string, snapshot: DockerSnapshot) {
+  return stackProcessInfo(stackRows(slug, snapshot), containerStats.get);
+}
+
+/**
+ * Each container of a stack on its own row: a stack of five that uses 2 GB
+ * says nothing about which of the five to look at.
+ */
+function stackContainers(slug: string, snapshot: DockerSnapshot) {
+  return stackRows(slug, snapshot).map((row) => {
+    const name = row.names[0] ?? "";
+    const stats = row.state === "running" ? containerStats.get(name) : null;
+    return {
+      name,
+      service: row.labels[COMPOSE_SERVICE] ?? name,
+      state: row.state,
+      cpu: stats?.cpu,
+      memory: stats?.memory,
+    };
+  });
+}
+
+/**
+ * Containers on this host that are not the panel's: started by hand, by
+ * another tool, by a compose file the panel never saw. Shown so the Monitor
+ * accounts for the whole machine — a Monitor that adds up to 40% of the RAM on
+ * a host at 95% leaves the operator guessing where the rest went.
+ *
+ * Not the panel's means: no ownership label, no `runpanel-` name and no stack
+ * of a project. A leftover of a deleted project carries the label and is the
+ * cleanup's business, not an "other" container.
+ */
+function otherContainers(snapshot: DockerSnapshot, known: ReadonlySet<string>, stacks: ReadonlySet<string>) {
+  return snapshot.rows
+    .filter((row) => {
+      if (row.labels[LABEL_MANAGED]) return false;
+      if (row.composeProject && (stacks.has(row.composeProject) || row.composeProject.startsWith("runpanel-"))) return false;
+      return !row.names.some((name) => known.has(name) || name.startsWith("runpanel-"));
+    })
+    .map((row) => {
+      const name = row.names[0] ?? "";
+      const stats = row.state === "running" ? containerStats.get(name) : null;
+      return {
+        name,
+        state: row.state,
+        stack: row.composeProject || null,
+        cpu: stats?.cpu,
+        memory: stats?.memory,
+      };
+    });
 }
 
 export async function GET() {
@@ -59,10 +112,12 @@ export async function GET() {
     ...services.filter((s) => s.status === "running").map((s) => s.container_name),
     ...projects.filter((p) => isActive(p) && p.runtime_type === "docker").map((p) => appContainerName(p.slug)),
   ];
-  // Nothing to ask on a panel that runs only native processes, which may well
-  // be a machine with no Docker at all.
+  // Nothing of the panel's to ask about on a host that runs only native
+  // processes — but its Docker may still run containers of its own, and the
+  // Monitor lists those too. `isDockerAvailable` is cached, so a machine with
+  // no Docker at all pays one failed call every thirty seconds, not one per poll.
   const needsDocker = names.length > 0 || projects.some((p) => isActive(p) && p.runtime_type === "compose");
-  const snapshot = needsDocker ? await dockerSnapshot(names) : NO_CONTAINERS;
+  const snapshot = needsDocker || (await isDockerAvailable()) ? await dockerSnapshot(names) : NO_CONTAINERS;
 
   /** Resource usage for one service, whether or not it belongs to a project. */
   function enrich(s: (typeof services)[number]) {
@@ -105,6 +160,8 @@ export async function GET() {
         port: p.port,
         process: processInfo,
         services: enrichedServices,
+        // Compose only, and only while it is up: a stopped stack has no usage to split.
+        ...(p.runtime_type === "compose" && isActive(p) ? { containers: stackContainers(p.slug, snapshot) } : {}),
       };
     })
   );
@@ -113,8 +170,16 @@ export async function GET() {
   // a standalone database had no CPU or memory row anywhere in the panel.
   const standaloneServices = services.filter((s) => !s.project_id).map(enrich);
 
+  const known = new Set([...services.map((s) => s.container_name), ...projects.map((p) => appContainerName(p.slug))]);
+  const stacks = new Set(projects.map((p) => composeProjectName(p.slug)));
+
   return NextResponse.json(
-    { server, projects: projectStats, services: standaloneServices },
+    {
+      server,
+      projects: projectStats,
+      services: standaloneServices,
+      others: otherContainers(snapshot, known, stacks),
+    },
     { headers: { "Cache-Control": "no-store" } }
   );
 }

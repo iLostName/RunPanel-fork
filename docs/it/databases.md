@@ -15,9 +15,13 @@ Un *servizio* è un database gestito dal pannello: un container etichettato, con
 
 Le versioni sono le major supportate dall'immagine ufficiale. La versione è salvata per servizio: quando l'elenco cambia, un servizio esistente non viene toccato.
 
-Alla creazione utente e database sono `runpanel` e `runpanel_db`, con una password casuale; si possono cambiare. Redis ha solo una password. Vedere le credenziali richiede il livello Gestione sul servizio.
+Alla creazione il nome viene proposto dal progetto (`mio-sito-db`, `mio-sito-cache` per Redis) e la porta è la prima libera sul server, già verificata; porta, utente, password e reti stanno in **Avanzate**. Utente e database sono `runpanel` e `runpanel_db`, con una password casuale; si possono cambiare. Redis ha solo una password. Vedere le credenziali richiede il livello Gestione sul servizio.
 
 La porta viene pubblicata su tutte le interfacce. Per limitarla a certi indirizzi, già alla creazione o dopo, vedi [Accesso di rete](network.md).
+
+## La pagina del database
+
+Stesso header della pagina progetto (nome rinominabile sul posto, stato, Avvia/Riavvia/Ferma con conferma) e schede: **Panoramica** (stato, chi lo usa e quale variabile riceve), **Connessione**, **Console**, **Database interni**, **Backup**, **Impostazioni** (riavvio pianificato, cartelle montate, permessi ed eliminazione, che chiede di scrivere il nome quando cancella anche i dati).
 
 ## La console
 
@@ -30,7 +34,7 @@ Tre modalità: **Motore** (il client già autenticato: `psql`, `mysql`, `redis-c
 
 ## I database dentro un servizio
 
-Nella scheda **Database** un server ne ospita più d'uno: si creano e si eliminano, ognuno con la sua connection URL. L'elenco unisce quello che riporta il motore con quello che conosce il pannello, e segnala i database creati fuori dal pannello e quelli che il motore non ha più.
+Nella scheda **Database interni** un server ne ospita più d'uno: si creano e si eliminano, ognuno con la sua connection URL. L'elenco unisce quello che riporta il motore con quello che conosce il pannello, e segnala i database creati fuori dal pannello e quelli che il motore non ha più.
 
 - Nomi in minuscolo, cifre e trattino basso, al massimo 63 caratteri.
 - I database di sistema non si eliminano; quello principale se ne va solo eliminando il servizio. Un database Postgres con connessioni aperte viene rifiutato invece di essere chiuso a forza.

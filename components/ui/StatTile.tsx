@@ -67,7 +67,14 @@ export function StatTile({
       </div>
 
       {trend && trend.length > 1 && (
-        <Sparkline values={trend} tone={clamped === undefined ? "accent" : tone === "success" ? "accent" : tone} className="mt-2" height={28} />
+        <Sparkline
+          values={trend}
+          tone={clamped === undefined ? "accent" : tone === "success" ? "accent" : tone}
+          // A tile with a usage bar is a percentage: its line keeps the 0–100 scale.
+          ceiling={clamped === undefined ? undefined : 100}
+          className="mt-2"
+          height={28}
+        />
       )}
 
       {clamped !== undefined && (

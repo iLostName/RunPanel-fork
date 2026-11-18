@@ -44,6 +44,7 @@ export type OneTimeCommandStatus = "queued" | "claimed" | "done" | "failed";
 // Declared where the column semantics live, so the two cannot disagree.
 export type { AccessMode } from "../access-columns";
 import type { AccessMode } from "../access-columns";
+import type { ColumnType } from "kysely";
 
 export type BackupDestinationType = "local" | "telegram" | "s3" | "webdav";
 export type BackupTrigger = "schedule" | "manual" | "pre-restore";
@@ -746,8 +747,61 @@ export interface ProjectHostsTable {
   auth_user: string | null;
   /** SHA-512 crypt of the password — never the password itself. */
   auth_hash: string | null;
+  /**
+   * The id of another of the project's names this one only redirects to: the
+   * `www.` twin of the domain itself, or the reverse. Null: it serves the app.
+   * Removing that name removes this one with it.
+   */
+  redirect_to: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * One reading of a host, project or service over time, or the average of
+ * several — see migration 033 and `lib/metrics-math.ts`. Uptime checks live
+ * here too, under the scope `'uptime'` (migration 034).
+ */
+export interface MetricSamplesTable {
+  /** `'host'` | `'project'` | `'service'` | `'uptime'` */
+  scope: string;
+  /** The project or service id; `'host'` for the machine itself. */
+  subject_id: string;
+  /** Bucket width in ms; 0 for a raw sample. */
+  tier: number;
+  /**
+   * Epoch milliseconds, the one non-ISO time in the store. `bigint`, which
+   * `pg` returns as a string: read it through `Number()`.
+   */
+  ts: ColumnType<number | string, number, number>;
+  /** How many raw samples this row stands for. */
+  n: number;
+  /** Percent of the whole host, 0–100. */
+  cpu: number | null;
+  mem: number | null;
+  mem_pct: number | null;
+  disk: number | null;
+  disk_pct: number | null;
+  /** Bytes per second. */
+  net_rx: number | null;
+  net_tx: number | null;
+  /** Uptime only: share of checks that got an answer, 0–1. */
+  up: number | null;
+  /** Uptime only: milliseconds to the first byte. */
+  latency: number | null;
+}
+
+/** An app that stopped answering its uptime check — see migration 034. */
+export interface UptimeIncidentsTable {
+  id: string;
+  project_id: string;
+  started_at: string;
+  /** Null while it is still going on. */
+  ended_at: string | null;
+  /** `timeout` | `refused` | `reset` | `status:<code>` | … — see `lib/uptime-math.ts`. */
+  cause: string | null;
+  /** `recovered`, or `paused` when the project stopped being checked. */
+  resolution: string | null;
 }
 
 export interface Database {
@@ -783,4 +837,6 @@ export interface Database {
   restore_runs: RestoreRunsTable;
   domains: DomainsTable;
   project_hosts: ProjectHostsTable;
+  metric_samples: MetricSamplesTable;
+  uptime_incidents: UptimeIncidentsTable;
 }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
 import { useResource } from "@/lib/hooks/useResource";
@@ -14,44 +14,43 @@ import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
 import { useServiceStream, type ConsoleMode, type MountApply } from "@/lib/hooks/useServiceStream";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadError } from "@/components/ui/LoadError";
-import { FormDialog } from "@/components/ui/FormDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
-import { Panel } from "@/components/ui/Panel";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import type { LogLine } from "@/components/ui/LogViewer";
-import { StatusBadge } from "@/components/StatusBadge";
-import { ScheduledRestart } from "@/components/ScheduledRestart";
+import { ResourceHeader } from "@/components/resource/ResourceHeader";
 import { serviceLabel } from "@/lib/service-env";
-import { MAX_DISPLAY_NAME } from "@/lib/service-name";
-import { cn } from "@/lib/utils";
 import { ConnectionPanel } from "./_components/ConnectionPanel";
 import { ConsolePanel } from "./_components/ConsolePanel";
-import { DataSection } from "./_components/DataSection";
-import { AccessPanel } from "@/components/users/AccessPanel";
+import { DatabasesPanel } from "./_components/DatabasesPanel";
+import { ServiceOverview } from "./_components/ServiceOverview";
+import { ServiceSettings } from "./_components/ServiceSettings";
 import type { Credentials, From, Service, ServiceTabId } from "./_components/types";
 import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { serviceControlText } from "@/lib/status";
 import { locateMember } from "@/lib/locate-member";
 
 /**
- * A provisioned service.
+ * A database: the same header as a project, and the same order of tabs —
+ * Panoramica first, the settings and the delete last.
  *
- * The page used to be one component in one `max-w-2xl` column: on a phone a
- * very long scroll, on a wide screen half an empty window. It is three sections
- * now — how you reach it, how you talk to it, what it holds — laid out as two
- * columns where there is room and as tabs where there is not.
- *
- * Each section is mounted **once** and re-flowed by CSS. Two sibling trees, one
- * per breakpoint, would mean two consoles: two event streams, two transcripts,
- * and two live `docker exec` sessions on the same container.
+ * Every tab stays mounted and is only hidden. The console holds a live
+ * `docker exec` session whose server side outlives the component by ten
+ * minutes; unmounting it on a tab switch would lose its transcript, and two
+ * mounted copies would be two sessions.
  */
 
 const TABS: readonly TabItem<ServiceTabId>[] = [
-  { id: "connection", label: "Collegamento", icon: "solar:link-circle-linear" },
+  { id: "overview", label: "Panoramica", icon: "solar:widget-2-linear" },
+  { id: "connection", label: "Connessione", icon: "solar:link-circle-linear" },
   { id: "console", label: "Console", icon: "solar:monitor-linear" },
-  { id: "data", label: "Database", icon: "solar:database-linear" },
+  { id: "databases", label: "Database interni", icon: "solar:database-linear" },
+  { id: "backup", label: "Backup", icon: "solar:safe-square-linear" },
+  { id: "settings", label: "Impostazioni", icon: "solar:settings-linear" },
 ];
 
 const TAB_IDS = TABS.map((tab) => tab.id);
@@ -71,10 +70,9 @@ export default function ServiceDetailPage() {
   const router = useRouter();
   const serviceId = params.serviceId as string;
 
-  const { data: service, loading, error: loadError, refresh } = useResource<Service>(
-    api(`/api/services/${serviceId}`),
-    { intervalMs: poll5000 }
-  );
+  const { data: service, loading, error: loadError, refresh } = useResource<Service>(api(`/api/services/${serviceId}`), {
+    intervalMs: poll5000,
+  });
   useCrumbLabel(serviceId, service?.display_name || service?.name);
 
   // In a cluster a 404 may only mean the link was made on another server:
@@ -95,17 +93,13 @@ export default function ServiceDetailPage() {
   }, [isSolo, notFound, serviceId, selected, href, router]);
 
   const [creds, setCreds] = useState<Credentials | null>(null);
-  // Null until chosen, so the sensible default can depend on data that has not
-  // loaded yet when the hook runs.
+  // Null until chosen, so the default can depend on data not loaded yet.
   const [fromChoice, setFromChoice] = useState<From | null>(null);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [renameValue, setRenameValue] = useState("");
+  const [stopOpen, setStopOpen] = useState(false);
+  const [activeTab, setActiveTab] = useUrlTab(TAB_IDS, "overview");
 
-  const [activeTab, setActiveTab] = useUrlTab(TAB_IDS, "connection");
-
-  // The project the service belongs to, if any: without one nothing is injected
-  // anywhere, and that is worth saying out loud rather than leaving to be
-  // discovered after a deploy.
+  // The project the service belongs to, if any: without one nothing is
+  // injected anywhere, and that is worth saying.
   const { data: project } = useResource<{ id: string; name: string }>(
     service?.project_id ? api(`/api/projects/${service.project_id}`) : null
   );
@@ -115,16 +109,10 @@ export default function ServiceDetailPage() {
   const consoleLines = useLineBuffer<LogLine>(MAX_CONSOLE_LINES);
 
   /**
-   * What is left of a chunk that did not end on a newline.
-   *
-   * `proc.stdout` delivers whatever the pipe had, which is not line-aligned,
-   * and `LogViewer` renders one row per line. Splitting here — the same way
-   * `dockerStream` does on the server — is what lets the console reuse the
-   * viewer with its "you scrolled up, stop following" behaviour instead of
-   * hand-rolling a scroller the way the project terminal had to.
+   * What is left of a chunk that did not end on a newline: `proc.stdout` is
+   * not line-aligned and `LogViewer` renders one row per line.
    */
   const carry = useRef("");
-
   const pushOutput = useCallback(
     (text: string) => {
       carry.current += text;
@@ -134,7 +122,6 @@ export default function ServiceDetailPage() {
     },
     [consoleLines]
   );
-
   const flushCarry = useCallback(() => {
     if (!carry.current) return;
     consoleLines.push(toLine(carry.current));
@@ -143,10 +130,7 @@ export default function ServiceDetailPage() {
 
   const applyLines = useLineBuffer<LogLine>(MAX_CONSOLE_LINES);
   const [apply, setApply] = useState<MountApply | null>(null);
-  const [applyProgress, setApplyProgress] = useState<{
-    copiedKb: number;
-    totalKb: number | null;
-  } | null>(null);
+  const [applyProgress, setApplyProgress] = useState<{ copiedKb: number; totalKb: number | null } | null>(null);
 
   useServiceStream(serviceId, (event) => {
     switch (event.type) {
@@ -167,8 +151,6 @@ export default function ServiceDetailPage() {
         break;
       case "mount:phase":
         setApply((prev) => (prev ? { ...prev, phase: event.phase, error: event.error } : prev));
-        // The row carries the journal and the list that was actually applied, and
-        // a finished application changes both. Re-read rather than reconstruct.
         if (event.phase === "done" || event.phase === "failed") {
           setApplyProgress(null);
           refresh();
@@ -182,9 +164,7 @@ export default function ServiceDetailPage() {
 
   const handleModeChange = useCallback(
     (next: ConsoleMode) => {
-      // One session at a time, and its transcript belongs to the mode that
-      // produced it: leaving `psql` output above a shell would read as one
-      // conversation.
+      // One session at a time, and its transcript belongs to the mode that made it.
       if (consoleActive) {
         void fetch(api(`/api/services/${serviceId}/console`), {
           method: "POST",
@@ -235,6 +215,23 @@ export default function ServiceDetailPage() {
     }
   }
 
+  /** The name the panel shows. The technical one is in the volume's name and never changes. */
+  async function rename(next: string): Promise<boolean> {
+    const res = await fetch(api(`/api/services/${serviceId}`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayName: next }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast.error(data.details?.[0]?.message ?? data.error ?? "Rinomina non riuscita");
+      return false;
+    }
+    toast.success("Database rinominato");
+    await refresh();
+    return true;
+  }
+
   if (loading && !service) return <PageSkeleton />;
 
   // Only a 404 means it is gone. Anything else must not invite the operator
@@ -242,8 +239,8 @@ export default function ServiceDetailPage() {
   if (!service && loadError && !loadError.includes("404")) {
     return (
       <>
-        <PageHeader title="Servizio" back={{ href: href("/services"), label: "Torna ai servizi" }} />
-        <LoadError what="il servizio" error={loadError} onRetry={() => void refresh()} />
+        <PageHeader title="Database" back={{ href: href("/services"), label: "Torna ai database" }} />
+        <LoadError what="il database" error={loadError} onRetry={() => void refresh()} />
       </>
     );
   }
@@ -251,15 +248,15 @@ export default function ServiceDetailPage() {
   if (!service) {
     return (
       <>
-        <PageHeader title="Servizio" back={{ href: href("/services"), label: "Torna ai servizi" }} />
+        <PageHeader title="Database" back={{ href: href("/services"), label: "Torna ai database" }} />
         <Panel>
           <EmptyState
             icon="solar:danger-triangle-linear"
-            title="Servizio non trovato"
+            title="Database non trovato"
             description="È stato eliminato, oppure il link non è più valido."
             action={
               <Link href={href("/services")} className="text-accent text-sm hover:underline">
-                Torna ai servizi
+                Torna ai database
               </Link>
             }
           />
@@ -270,55 +267,49 @@ export default function ServiceDetailPage() {
 
   const running = service.status === "running";
   const label = serviceLabel(service.type);
-  // Il default è la riga che serve davvero: il nome del container solo se
-  // l'app del progetto ci arriva così, altrimenti l'host — che è anche quello
-  // che il deploy inietta per un progetto nativo.
+  // The line that is actually needed by default: the container name only if
+  // the project's app reaches it that way, otherwise the host.
   const from: From =
-    fromChoice ??
-    (service.injection?.from === "container" ? "network" : service.project_id ? "host" : "container");
-
-  /**
-   * Visible in both columns on the wide layout, one at a time on the narrow
-   * one. `hidden` rather than a conditional mount: a section that unmounts on
-   * every tab switch loses what it was holding, and this one holds a live
-   * shell whose server-side session outlives the component by ten minutes.
-   */
-  const section = (id: ServiceTabId) => cn("lg:block", activeTab === id ? "block" : "hidden");
-
-  // Controls follow the account's level; the server enforces it regardless.
+    fromChoice ?? (service.injection?.from === "container" ? "network" : service.project_id ? "host" : "container");
   const canManage = (service.permission?.level ?? "manage") === "manage";
   const canOperate = service.permission?.level !== "read";
+  const shown = (id: ServiceTabId) => ({ hidden: activeTab !== id });
 
   return (
     <>
-      <PageHeader
-        back={{ href: href("/services"), label: "Torna ai servizi" }}
-        title={service.displayName}
-        description={`${label} ${service.version} · porta ${service.port} sull'host`}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={service.status} />
-            {canManage && (
-              <Button
-                variant="outline"
-                size="sm"
-                onPress={() => {
-                  setRenameValue(service.displayName);
-                  setRenameOpen(true);
-                }}
-              >
-                <Icon icon="solar:pen-linear" width={16} aria-hidden />
-                Rinomina
-              </Button>
+      <ResourceHeader
+        backHref={href("/services")}
+        backLabel="Torna ai database"
+        name={service.displayName}
+        onRename={canManage ? rename : undefined}
+        status={service.status}
+        meta={
+          <>
+            <span>
+              {label} {service.version}
+            </span>
+            <span aria-hidden>·</span>
+            <span>porta {service.port}</span>
+            {project && (
+              <>
+                <span aria-hidden>·</span>
+                <Link href={href(`/projects/${project.id}`)} className="text-accent hover:underline">
+                  {project.name}
+                </Link>
+              </>
             )}
-            {!canOperate ? null : running ? (
+          </>
+        }
+        actions={
+          canOperate ? (
+            running ? (
               <>
                 <Button variant="outline" size="sm" onPress={() => handleControl("restart")}>
                   <Icon icon="solar:refresh-linear" width={16} aria-hidden />
                   Riavvia
                 </Button>
-                <Button variant="outline" size="sm" onPress={() => handleControl("stop")}>
-                  <Icon icon="solar:stop-linear" width={16} className="text-danger" aria-hidden />
+                <Button variant="outline" size="sm" onPress={() => setStopOpen(true)}>
+                  <Icon icon="solar:stop-linear" width={16} aria-hidden />
                   Ferma
                 </Button>
               </>
@@ -327,96 +318,49 @@ export default function ServiceDetailPage() {
                 <Icon icon="solar:play-linear" width={16} aria-hidden />
                 Avvia
               </Button>
-            )}
-          </div>
+            )
+          ) : undefined
         }
+        menu={
+          canManage
+            ? [{ id: "delete", label: "Elimina il database", icon: "solar:trash-bin-minimalistic-linear", danger: true, onAction: () => setActiveTab("settings") }]
+            : []
+        }
+        menuLabel="Altre azioni sul database"
       />
 
       {service.pendingContainerName && (
         <Hint tone="info" title="Nome del container in attesa del prossimo deploy" className="mb-4">
-          Al prossimo deploy di <Code>{service.projectSlug}</Code> il container{" "}
-          <Code>{service.containerName}</Code> diventa <Code>{service.pendingContainerName}</Code>, e
-          l&apos;app riceve il nuovo host. Il database si riavvia per qualche secondo; i dati restano nel
-          volume che hanno ora, e il vecchio nome continua a funzionare come alias.
+          Al prossimo deploy di <Code>{service.projectSlug}</Code> il container <Code>{service.containerName}</Code> diventa{" "}
+          <Code>{service.pendingContainerName}</Code>, e l&apos;app riceve il nuovo host. Il database si riavvia per qualche
+          secondo; i dati restano nel volume, e il vecchio nome continua a funzionare come alias.
         </Hint>
       )}
       {service.display_name && !service.projectSlug && service.display_name !== service.name && (
         <FieldHint className="mb-4">
-          Il container resta <Code>{service.containerName}</Code>: prende il nome nuovo al deploy del
-          progetto a cui è collegato, e questo servizio non è collegato a nessuno.
+          Il container resta <Code>{service.containerName}</Code>: prende il nome nuovo al deploy del progetto a cui è
+          collegato, e questo database non è collegato a nessuno.
         </FieldHint>
       )}
 
-      <Tabs
-        tabs={TABS}
-        value={activeTab}
-        onChange={setActiveTab}
-        label="Sezioni del servizio"
-        className="lg:hidden"
-      />
+      <Tabs tabs={TABS} value={activeTab} onChange={setActiveTab} label="Sezioni del database" />
 
-      {/*
-        Two columns, and two grid *items* — not three.
-
-        Three items in a two-column grid put the databases on the second row,
-        and a row is as tall as its tallest item: with the console on the right
-        of row one, the left column ended at the connection panel and picked up
-        again below the console, with the rest of row one as a hole in the
-        middle. Wrapping the left-hand sections in their own column makes the
-        column a single flow again, which is what it always read as.
-
-        `gap` rather than `space-y`: a section hidden by the tab switch below
-        `lg` is `display: none`, which a flex gap skips and a sibling margin
-        does not.
-      */}
-      <div className="flex max-w-2xl flex-col gap-4 lg:grid lg:max-w-none lg:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] lg:items-start">
-        <div className="flex flex-col gap-4">
-          <div className={section("connection")}>
-            <ConnectionPanel
-              service={service}
-              project={project ?? null}
-              creds={creds}
-              from={from}
-              onFromChange={setFromChoice}
-              onReveal={revealCredentials}
-              onSaved={refresh}
-            />
-            <div className="mt-4">
-              <ScheduledRestart
-                kind="service"
-                id={service.id}
-                cron={service.restart_cron ?? ""}
-                nextAt={service.restart_next_at}
-                lastAt={service.restart_last_at}
-                lastResult={service.restart_last_result}
-                onSaved={() => void refresh()}
-              />
-            </div>
-          </div>
-
-          <div className={section("data")}>
-            <DataSection
-              service={service}
-              from={from}
-              creds={creds}
-              apply={apply ?? service.mountApply}
-              applyLines={applyLines.lines}
-              applyProgress={applyProgress}
-              onDeleted={() => router.push(href("/services"))}
-              onChanged={refresh}
-            />
-            <div className="mt-4">
-              <AccessPanel kind="service" id={service.id} />
-            </div>
-          </div>
+      <div className="max-w-4xl">
+        <div {...shown("overview")}>
+          <ServiceOverview service={service} project={project ?? null} onControl={(a) => void handleControl(a)} onGoTo={setActiveTab} />
         </div>
-
-        {/*
-          Sticky within its grid area, which `items-start` leaves as tall as the
-          left column — so the transcript stays in front of you while the
-          databases and the danger zone scroll past it.
-        */}
-        <div className={cn(section("console"), "lg:sticky lg:top-[4.5rem]")}>
+        <div {...shown("connection")}>
+          <ConnectionPanel
+            service={service}
+            project={project ?? null}
+            creds={creds}
+            from={from}
+            onFromChange={setFromChoice}
+            onReveal={revealCredentials}
+            onSaved={refresh}
+          />
+        </div>
+        <div {...shown("console")}>
           <ConsolePanel
             serviceId={serviceId}
             running={running}
@@ -428,47 +372,50 @@ export default function ServiceDetailPage() {
             onLocalEcho={echo}
           />
         </div>
+        <div {...shown("databases")}>
+          <DatabasesPanel
+            serviceId={service.id}
+            type={service.type}
+            // The same host the paste-ready line uses, following the chosen viewpoint.
+            host={from === "network" ? service.containerName : from === "container" ? "host.docker.internal" : "localhost"}
+            port={from === "network" ? service.internalPort : service.port}
+            envKey={service.envKey}
+            credentials={creds}
+          />
+        </div>
+        <div {...shown("backup")}>
+          <Panel className="space-y-3">
+            <PanelHeader title="Backup" description="Copie dei dati, pianificate o al volo" />
+            <p className="text-muted text-sm">
+              I backup si pianificano in Backup: il preset notturno include già tutti i database, e puoi farne uno subito
+              quando vuoi.
+            </p>
+            <LinkButton href={href("/backups")} variant="secondary">
+              Apri i backup
+            </LinkButton>
+          </Panel>
+        </div>
+        <div {...shown("settings")}>
+          <ServiceSettings
+            service={service}
+            apply={apply ?? service.mountApply}
+            applyLines={applyLines.lines}
+            applyProgress={applyProgress}
+            onChanged={() => void refresh()}
+            onDeleted={() => router.push(href("/services"))}
+          />
+        </div>
       </div>
 
-      {/*
-        The name the panel shows, and only that at first. The technical name is
-        part of the volume names and never changes; the container takes the new
-        one at the next deploy of the project it belongs to.
-      */}
-      <FormDialog
-        isOpen={renameOpen}
-        onOpenChange={setRenameOpen}
-        title="Rinomina servizio"
-        submitLabel="Salva"
-        isSubmitDisabled={!renameValue.trim() || renameValue.trim() === service.displayName}
-        onSubmit={async () => {
-          const res = await fetch(api(`/api/services/${serviceId}`), {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ displayName: renameValue.trim() }),
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            toast.error(data.details?.[0]?.message ?? data.error ?? "Rinomina non riuscita");
-            // Thrown so the dialog stays open on what was typed.
-            throw new Error("rename failed");
-          }
-          toast.success("Servizio rinominato");
-          await refresh();
-        }}
-      >
-        <TextField value={renameValue} onChange={setRenameValue} maxLength={MAX_DISPLAY_NAME} autoFocus>
-          <Label>Nome</Label>
-          <Input />
-        </TextField>
-        <FieldHint>
-          Cambia subito ovunque nel pannello. Il nome tecnico <Code>{service.name}</Code> resta, perché
-          è nel nome del volume dei dati.{" "}
-          {service.projectSlug
-            ? `Il container prende il nome nuovo al prossimo deploy di ${service.projectSlug}, con un breve riavvio del database.`
-            : "Il container tiene il nome che ha: prende quello nuovo solo al deploy di un progetto collegato."}
-        </FieldHint>
-      </FormDialog>
+      <ConfirmDialog
+        isOpen={stopOpen}
+        onOpenChange={setStopOpen}
+        title={`Fermare ${service.displayName}?`}
+        description={project ? `${project.name} non lo raggiunge più finché non lo riavvii. I dati restano.` : "Le app che lo usano non lo raggiungono più finché non lo riavvii. I dati restano."}
+        confirmLabel="Ferma"
+        destructive
+        onConfirm={() => handleControl("stop")}
+      />
     </>
   );
 }

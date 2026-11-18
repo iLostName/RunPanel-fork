@@ -31,6 +31,9 @@ import * as sourceUrlCredentials from "./029-source-url-credentials";
 import * as hostPassword from "./030-host-password";
 import * as apiTokens from "./031-api-tokens";
 import * as notifications from "./032-notifications";
+import * as metricSamples from "./033-metric-samples";
+import * as uptime from "./034-uptime";
+import * as hostRedirect from "./037-host-redirect";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -72,6 +75,9 @@ export const migrations: Record<string, Migration> = {
   "030-host-password": hostPassword,
   "031-api-tokens": apiTokens,
   "032-notifications": notifications,
+  "033-metric-samples": metricSamples,
+  "034-uptime": uptime,
+  "037-host-redirect": hostRedirect,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

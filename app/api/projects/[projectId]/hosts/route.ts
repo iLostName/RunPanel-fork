@@ -1,50 +1,64 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireProject } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
-import { hasPermission } from "@/lib/authz";
-import { getDb, nowIso } from "@/lib/db";
+import { PROJECT_ACTIONS, hasPermission, satisfies } from "@/lib/authz";
+import { getDb } from "@/lib/db";
 import { getSetting } from "@/lib/settings";
-import { generateId } from "@/lib/utils";
-import { hostnameFor } from "@/lib/proxy-names";
+import { hostnameFor, wwwTwin } from "@/lib/proxy-names";
 import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
 import { listenPort, readAccess } from "@/lib/access-columns";
 import { createHostSchema } from "@/lib/validation";
 import {
-  applyProxySoon,
-  canApply,
+  addressProblem,
   claimedPorts,
   hostView,
-  issueCertificate,
-  newCheckToken,
+  newHostRow,
   proxyProbe,
+  serveNewHosts,
   upstreamConflict,
 } from "@/services/proxy";
 
 type Params = { params: Promise<{ projectId: string }> };
 
-/** The project's names, plus what the section needs to offer a new one. */
+/** The project's addresses, plus what the section needs to offer a new one. */
 export async function GET(_request: NextRequest, { params }: Params) {
   const { projectId } = await params;
   const denied = await requireProject(projectId, "view");
   if (isDenied(denied)) return denied;
 
   const db = await getDb();
-  const [project, hosts, domains, proxy] = await Promise.all([
+  const [project, hosts, domains, proxy, panelUrl] = await Promise.all([
     db.selectFrom("projects").selectAll().where("id", "=", projectId).executeTakeFirst(),
     db.selectFrom("project_hosts").selectAll().where("project_id", "=", projectId).orderBy("hostname", "asc").execute(),
-    db.selectFrom("domains").select(["id", "name"]).orderBy("name", "asc").execute(),
+    db.selectFrom("domains").select(["id", "name", "cloudflare"]).orderBy("name", "asc").execute(),
     proxyProbe(),
+    getSetting(PANEL_PUBLIC_URL_SETTING),
   ]);
   if (!project) return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+  const canManageDomains = hasPermission(denied.principal, "host");
 
   return NextResponse.json({
     hosts: hosts.map(hostView),
-    domains,
-    proxy: { state: proxy.state, detail: proxy.detail },
+    domains: domains.map((domain) => ({ id: domain.id, name: domain.name, cloudflare: domain.cloudflare === 1 })),
+    // What it takes to set nginx up — the commands carry the panel's user and
+    // paths — only for who may run that setup, as on the Domains page.
+    proxy: canManageDomains
+      ? {
+          state: proxy.state,
+          detail: proxy.detail,
+          root: proxy.root,
+          reload: proxy.reload,
+          commands: proxy.commands,
+        }
+      : { state: proxy.state, detail: proxy.detail },
     hasPort: project.port !== null,
     restricted: readAccess(project).mode === "restricted",
+    // Whether the section offers to change its names at all, or only shows them.
+    canEdit: satisfies(denied.access, PROJECT_ACTIONS.settings),
     // Whether to point at the Domains page or only say who can add a domain.
-    canManageDomains: hasPermission(denied.principal, "host"),
+    canManageDomains,
+    // So the form can say so while the name is typed, not only once it is sent.
+    panelHostname: canManageDomains && panelUrl && URL.canParse(panelUrl) ? new URL(panelUrl).hostname.toLowerCase() : null,
   });
 }
 
@@ -53,10 +67,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     const { projectId } = await params;
     const denied = await requireProject(projectId, "settings");
     if (isDenied(denied)) return denied;
-    // A new name takes a label on a domain other projects share and spends its
+    // A new address takes a label on a domain other projects share and spends its
     // Let's Encrypt quota, so it is the Domains page's permission, not only the project's.
     if (!hasPermission(denied.principal, "host")) {
-      return NextResponse.json({ error: "Per assegnare un nome serve il permesso Accesso all'host" }, { status: 403 });
+      return NextResponse.json({ error: "Per aggiungere un indirizzo serve il permesso Accesso all'host" }, { status: 403 });
     }
 
     // A malformed body is a bad request, not a 500.
@@ -80,7 +94,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!project) return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
     if (!project.port) {
       return NextResponse.json(
-        { error: "Il progetto non ha una porta: dagliene una prima di assegnargli un nome." },
+        { error: "Il progetto non ha una porta: impostala prima di dargli un indirizzo." },
         { status: 409 }
       );
     }
@@ -89,51 +103,51 @@ export async function POST(request: NextRequest, { params }: Params) {
     const conflict = upstreamConflict(await claimedPorts(), projectId, listenPort(project, project.port));
     if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
 
-    const { domainId, subdomain, publicAccess } = parsed.data;
+    const { domainId, subdomain, publicAccess, www } = parsed.data;
     const domain = await db.selectFrom("domains").select(["id", "name"]).where("id", "=", domainId).executeTakeFirst();
     if (!domain) return NextResponse.json({ error: "Dominio non trovato" }, { status: 404 });
 
     const hostname = hostnameFor(subdomain, domain.name);
     if (!hostname) {
-      return NextResponse.json({ error: "Il nome completo supera la lunghezza che il DNS consente." }, { status: 400 });
+      return NextResponse.json({ error: "L'indirizzo completo supera la lunghezza che il DNS consente." }, { status: 400 });
+    }
+    const twin = www ? wwwTwin(subdomain, domain.name) : null;
+    if (www && !twin) {
+      return NextResponse.json(
+        { error: `Il rimando da www vale solo per ${domain.name} e per www.${domain.name}.` },
+        { status: 400 }
+      );
     }
 
-    // Which project holds it is not said: it may be one this account cannot see.
-    if (await db.selectFrom("project_hosts").select("id").where("hostname", "=", hostname).executeTakeFirst()) {
-      return NextResponse.json({ error: `${hostname} è già assegnato.` }, { status: 409 });
-    }
-    const panelUrl = await getSetting(PANEL_PUBLIC_URL_SETTING);
-    if (panelUrl && URL.canParse(panelUrl) && new URL(panelUrl).hostname.toLowerCase() === hostname) {
-      return NextResponse.json({ error: `${hostname} è l'indirizzo del pannello.` }, { status: 409 });
+    // Both names or neither: half of the pair would leave a twin nobody asked for.
+    for (const name of twin ? [hostname, twin.hostname] : [hostname]) {
+      const problem = await addressProblem(name);
+      if (problem) return NextResponse.json({ error: problem }, { status: 409 });
     }
 
-    const now = nowIso();
-    const row = {
-      id: generateId(),
-      project_id: projectId,
-      domain_id: domain.id,
-      subdomain,
-      hostname,
-      public_access: publicAccess ? 1 : 0,
-      check_token: newCheckToken(),
-      status: "pending" as const,
-      last_error: null,
-      apply_error: null,
-      cert_expires_at: null,
-      auth_user: null,
-      auth_hash: null,
-      created_at: now,
-      updated_at: now,
-    };
-    await db.insertInto("project_hosts").values(row).execute();
+    const row = newHostRow({ projectId, domainId: domain.id, subdomain, hostname, publicAccess: publicAccess === true });
+    const twinRow = twin
+      ? newHostRow({
+          projectId,
+          domainId: domain.id,
+          subdomain: twin.subdomain,
+          hostname: twin.hostname,
+          publicAccess: publicAccess === true,
+          redirectTo: row.id,
+        })
+      : null;
+    await db.transaction().execute(async (trx) => {
+      await trx.insertInto("project_hosts").values(row).execute();
+      if (twinRow) await trx.insertInto("project_hosts").values(twinRow).execute();
+    });
 
-    // The certificate takes seconds to a minute: asked for in the background,
-    // and the section follows `status`. Without certbot the name is at least
-    // served over HTTP; without nginx it waits until the Domains page is done.
-    const found = await proxyProbe();
-    if (found.state === "ready") issueCertificate(row.id);
-    else if (canApply(found)) applyProxySoon();
+    // The certificate is asked for once the DNS record leads here — seconds
+    // after, when it already does — and the section follows `status`.
+    const found = await serveNewHosts(twinRow ? [row.id, twinRow.id] : [row.id]);
 
-    return NextResponse.json({ host: hostView(row), proxy: { state: found.state, detail: found.detail } }, { status: 201 });
+    return NextResponse.json(
+      { host: hostView(row), twin: twinRow ? hostView(twinRow) : null, proxy: { state: found.state, detail: found.detail } },
+      { status: 201 }
+    );
   });
 }

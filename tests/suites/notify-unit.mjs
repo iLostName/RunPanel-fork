@@ -167,6 +167,13 @@ export async function run({ repoRoot }) {
     },
     { key: "panel.update", behind: 2, from: p, to: p, branch: p },
     { key: "panel.restarted", version: p, sha: p, afterUpdate: true },
+    // Every branch: the host and a project, both metrics, both directions.
+    { key: "metrics.high", up: false, scope: "host", name: null, metric: "cpu", percent: 95, peak: 97, durationMs: null },
+    { key: "metrics.high", up: false, scope: "project", name: p, metric: "cpu", percent: 95, peak: 95, durationMs: null },
+    { key: "metrics.high", up: false, scope: "project", name: p, metric: "memory", percent: 93, peak: 93, durationMs: null },
+    { key: "metrics.high", up: true, scope: "project", name: p, metric: "memory", percent: 70, peak: 99, durationMs: 600_000 },
+    { key: "uptime.down", up: false, name: p, cause: p, target: p, durationMs: null },
+    { key: "uptime.down", up: true, name: p, cause: null, target: p, durationMs: 120_000 },
   ];
 
   const balanced = (s) => {

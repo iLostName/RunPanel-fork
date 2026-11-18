@@ -6,7 +6,7 @@ import { getSetting } from "@/lib/settings";
 import { generateId } from "@/lib/utils";
 import { createDomainSchema } from "@/lib/validation";
 import { isVisible, visibleProjectIds } from "@/lib/principal";
-import { ACME_EMAIL_SETTING, hostView, proxyProbe, publicAddresses, syncCloudflare } from "@/services/proxy";
+import { ACME_EMAIL_SETTING, hostView, proxyProbe, serverAddresses, syncCloudflare } from "@/services/proxy";
 
 /**
  * The Domains page: what this server's nginx can do, the domains it answers
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   // First, because it may link or unlink a domain, and the list below should say so.
   const cloudflare = await syncCloudflare(fresh);
   const db = await getDb();
-  const [proxy, acmeEmail, domains, hosts, visible] = await Promise.all([
+  const [proxy, acmeEmail, domains, hosts, visible, server] = await Promise.all([
     proxyProbe(fresh),
     getSetting(ACME_EMAIL_SETTING),
     db.selectFrom("domains").selectAll().orderBy("name", "asc").execute(),
@@ -36,12 +36,16 @@ export async function GET(request: NextRequest) {
       .orderBy("project_hosts.hostname", "asc")
       .execute(),
     visibleProjectIds(denied.principal),
+    serverAddresses(fresh),
   ]);
 
   return NextResponse.json({
     proxy,
     acmeEmail: acmeEmail ?? "",
-    addresses: publicAddresses(),
+    // What a record should point at: the interfaces' public addresses, or the
+    // one the outside sees when there are none (NAT, a cloud's 1:1 address).
+    addresses: [...server.v4, ...server.v6],
+    addressesDetected: server.detected,
     cloudflare: {
       ...cloudflare,
       zones: cloudflare.zones.map((zone) => ({

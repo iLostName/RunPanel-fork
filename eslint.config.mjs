@@ -14,6 +14,8 @@ const config = [
       // Test harness and codegen are plain Node scripts, not app code.
       "tests/**",
       "scripts/**",
+      // Claude Code's agent worktrees: full checkouts of other branches.
+      ".claude/**",
     ],
   },
   ...nextCoreWebVitals,

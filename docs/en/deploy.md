@@ -8,6 +8,23 @@ A project lives on the server it was created on: with [several servers](multi-se
 
 The interface is in Italian; labels are quoted as they appear, with a translation where it helps.
 
+## Creating a project
+
+**Nuovo progetto** (new project) takes three steps and creates the project only at the last one: an abandoned wizard leaves nothing behind.
+
+1. **Sorgente** (source): a GitHub repository (from the list when GitHub is connected, or by pasting a public one's address) or a ZIP archive dropped on the page. GitHub can be connected from a dialog without leaving the wizard.
+2. **Rivedi** (review): the panel reads the code without cloning it (GitHub's API, or the ZIP's index in the browser) and says what it found, for example *Next.js · porta 3000 · npm*. The name comes from the repository. The remaining questions are already answered: what the app does (a website or a background service, which turns the health check off), whether it needs a database (offered when the code uses one: it is created and linked), variables (by pasting a `.env`), an address on a domain already set up, and updates on every push. Runtime, port and commands are under **Personalizza** (customise). The proposed port is already free: for native apps, when the detected one is taken, the app receives the next one in `PORT`.
+3. **Online**: creates the project, database, variables and address, then starts the first deploy and shows its phases and log. If a step before the deploy fails, whatever had been created is removed again. Automatic updates use the webhook when GitHub can reach the panel, polling otherwise.
+
+An empty project, configured by hand, is created from the same wizard in expert mode.
+
+## The project page
+
+- **Panoramica** (overview, the default): the state in one sentence with the next thing to do (choose a source, run the first deploy, fix a failed deploy, start it again), the last deploy, resources, addresses, linked databases and what is missing for a dependable project.
+- **Deploy**: the history, the deploy in progress followed live (with **Annulla**, cancel), and **Ripristina** (restore) on earlier successful versions of a GitHub repository. A failed deploy states its cause in words (wrong port, out of memory during the build, dependencies not installed, repository not readable…) with the original message under **Dettagli**.
+- **Log**, **Variabili** (variables), **File** (with a warning that the next deploy puts the files back as the source has them), **Terminale** (Docker only).
+- **Impostazioni** (settings), with a side menu: Generale, Sorgente, Build e avvio, Indirizzi, Rete, Risorse, Automazioni, Backup, Avanzate, Permessi, Zona pericolosa. One bar saves every section with edits, and the menu marks the ones with unsaved changes. Only what changed is sent.
+
 ## Sources
 
 - **GitHub**: connect a token on the **GitHub** page and pick the repository from a list, with branches read from the API. Or paste a public `https://` URL. In a cluster the token is shared by every server.

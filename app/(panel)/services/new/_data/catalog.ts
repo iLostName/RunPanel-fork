@@ -28,50 +28,6 @@ export const DATABASE_OPTIONS: DatabaseOption[] = [
   { type: "mongodb", label: "MongoDB", icon: "solar:database-linear", defaultPort: 27017, versions: SERVICE_VERSIONS.mongodb.available, credentialled: true },
 ];
 
-export interface DockerTemplate {
-  id: string;
-  label: string;
-  icon: string;
-  description: string;
-  image: string;
-  versions: string[];
-  defaultPort: string;
-}
-
-export const DOCKER_TEMPLATES: DockerTemplate[] = [
-  {
-    id: "nginx",
-    label: "Nginx",
-    icon: "solar:server-2-linear",
-    description: "Web server e reverse proxy",
-    image: "nginx",
-    versions: ["1.27", "1.26", "1.25"],
-    defaultPort: "80",
-  },
-  {
-    id: "apache",
-    label: "Apache",
-    icon: "solar:server-2-linear",
-    description: "HTTP server",
-    image: "httpd",
-    versions: ["2.4"],
-    defaultPort: "80",
-  },
-  {
-    id: "caddy",
-    label: "Caddy",
-    icon: "solar:shield-check-linear",
-    description: "Web server con HTTPS automatico",
-    image: "caddy",
-    versions: ["2.9", "2.8", "2.7"],
-    defaultPort: "80",
-  },
-];
-
 export function databaseOption(type: ServiceType): DatabaseOption {
   return DATABASE_OPTIONS.find((o) => o.type === type) ?? DATABASE_OPTIONS[0];
-}
-
-export function dockerTemplate(id: string): DockerTemplate | undefined {
-  return DOCKER_TEMPLATES.find((t) => t.id === id);
 }

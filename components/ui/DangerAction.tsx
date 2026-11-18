@@ -36,6 +36,8 @@ interface Confirmation {
   title: string;
   description?: React.ReactNode;
   confirmLabel?: string;
+  /** Text to type before the button arms (see ConfirmDialog), for the actions that cannot be undone. */
+  confirmText?: string;
 }
 
 /**
@@ -84,6 +86,7 @@ export function DangerZone({
         title={confirm.title}
         description={confirm.description}
         confirmLabel={confirm.confirmLabel ?? actionLabel}
+        confirmText={confirm.confirmText}
         destructive
         onConfirm={onConfirm}
       />
@@ -140,6 +143,7 @@ export function DeleteButton({
         title={confirm.title}
         description={confirm.description}
         confirmLabel={confirm.confirmLabel ?? "Elimina"}
+        confirmText={confirm.confirmText}
         destructive
         onConfirm={onConfirm}
       />

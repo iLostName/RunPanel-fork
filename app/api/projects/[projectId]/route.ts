@@ -61,11 +61,30 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
-  const stats = await db
-    .selectFrom("deployments")
-    .select((eb) => [eb.fn.count("id").as("deploy_count"), eb.fn.max("started_at").as("last_deploy_at")])
-    .where("project_id", "=", projectId)
-    .executeTakeFirst();
+  const [stats, lastDeployment, lastSuccess] = await Promise.all([
+    db
+      .selectFrom("deployments")
+      .select((eb) => [eb.fn.count("id").as("deploy_count"), eb.fn.max("started_at").as("last_deploy_at")])
+      .where("project_id", "=", projectId)
+      .executeTakeFirst(),
+    // The overview leads with the last deploy, and the header only offers
+    // "Avvia" once one has worked: restarting needs a successful one to go back to.
+    db
+      .selectFrom("deployments")
+      .select(["id", "status", "trigger_type", "commit_sha", "commit_message", "started_at", "finished_at", "error_message"])
+      .where("project_id", "=", projectId)
+      .orderBy("started_at", "desc")
+      .limit(1)
+      .executeTakeFirst(),
+    db
+      .selectFrom("deployments")
+      .select((eb) => eb.fn.max("finished_at").as("at"))
+      .where("project_id", "=", projectId)
+      // A deploy that worked is "running" while it is the live one and
+      // "superseded" once a newer one took over; there is no "success".
+      .where("status", "in", ["running", "superseded"])
+      .executeTakeFirst(),
+  ]);
 
   return NextResponse.json({
     ...redactProject(project, satisfies(denied.access, PROJECT_ACTIONS.settings)),
@@ -74,6 +93,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
     permission: denied.access,
     deploy_count: Number(stats?.deploy_count ?? 0),
     last_deploy_at: stats?.last_deploy_at ?? null,
+    last_deployment: lastDeployment ?? null,
+    last_success_at: lastSuccess?.at ?? null,
     // The row says what was asked for; the gate says what is actually holding
     // the port. They differ whenever the panel restarted and could not bind.
     access: readAccess(project),
@@ -105,6 +126,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
         .select(["hostname", "status", "auth_hash"])
         .where("project_id", "=", projectId)
         .where("apply_error", "is", null)
+        // A www twin only redirects to its main name: the header opens the app.
+        .where("redirect_to", "is", null)
         .orderBy("hostname", "asc")
         .execute()
     ).map((host) => ({

@@ -86,6 +86,35 @@ export async function run({ base }) {
     show(res)
   );
   r.check("the owner may manage domains", res.body.canManageDomains === true && res.body.restricted === false, show(res));
+  r.check(
+    "a name waiting for nginx reads as without a certificate, serving the app",
+    res.body.hosts?.[0]?.certificate === "missing" && res.body.hosts[0].redirectTo === null,
+    show(res)
+  );
+  r.check("the owner gets what the setup needs", typeof res.body.proxy?.state === "string" && "commands" in (res.body.proxy ?? {}), show(res));
+
+  // --- its DNS, as public resolvers see it ----------------------------------------------
+  // Only the contract: whether esempio.it resolves from the machine running the
+  // suite is not this suite's business, and offline the verdict is an error.
+  res = await owner.call(`/api/projects/${projectId}/hosts/${hostId}/dns`);
+  const verdict = res.body.names?.[0];
+  r.check(
+    "the DNS check answers for the name",
+    res.status === 200 && verdict?.hostname === "app.esempio.it" && verdict.hostId === hostId && verdict.subdomain === "app",
+    show(res)
+  );
+  r.check(
+    "with a verdict the page knows",
+    ["ok", "missing", "elsewhere", "cloudflare", "unknown", "error"].includes(verdict?.check?.state) && typeof verdict.check.ready === "boolean",
+    show(res)
+  );
+  r.check(
+    "and what the records should hold",
+    Array.isArray(verdict?.check?.families?.A?.expected) && Array.isArray(verdict.server?.v4) && Array.isArray(verdict.resolvers),
+    show(res)
+  );
+  res = await owner.call(`/api/projects/${projectId}/hosts/nope/dns`);
+  r.check("the DNS check of an unknown name is a 404", res.status === 404, show(res));
 
   res = await owner.call("/api/domains");
   r.check(
@@ -152,6 +181,43 @@ export async function run({ base }) {
   res = await owner.call(`/api/projects/${otherId}/hosts/${apexId}`, { method: "DELETE" });
   r.check("and is removed like any name", res.status === 200, show(res));
 
+  // --- the www twin ------------------------------------------------------------------------------
+  res = await owner.call(`/api/projects/${otherId}/hosts`, json("POST", { domainId, subdomain: "", www: true }));
+  const withTwin = res.body;
+  r.check(
+    "the domain itself can come with its www, redirecting to it",
+    res.status === 201 && withTwin.host?.hostname === "esempio.it" && withTwin.twin?.hostname === "www.esempio.it" && withTwin.twin.redirectTo === withTwin.host.id,
+    show(res)
+  );
+  res = await owner.call(`/api/projects/${projectId}/hosts`, json("POST", { domainId, subdomain: "www" }));
+  r.check("the twin's name is taken like any other", res.status === 409, show(res));
+  res = await owner.call(`/api/projects/${projectId}/hosts`, json("POST", { domainId, subdomain: "shop", www: true }));
+  r.check("a www twin for any other subdomain is a 400", res.status === 400, show(res));
+  res = await owner.call(`/api/projects/${otherId}/hosts/${withTwin.twin?.id}`, json("PATCH", { publicAccess: true }));
+  r.check("a twin's own access is refused: it only redirects", res.status === 400, show(res));
+  res = await owner.call(`/api/projects/${otherId}/hosts/${withTwin.host?.id}/dns`);
+  r.check(
+    "the DNS check covers the twin too",
+    res.status === 200 && res.body.names?.length === 2 && res.body.names[1].hostname === "www.esempio.it",
+    show(res)
+  );
+
+  res = await owner.call(`/api/projects/${otherId}/hosts/${withTwin.host?.id}`, json("PATCH", { www: false }));
+  r.check("the twin can be taken away", res.status === 200 && res.body.twin === null, show(res));
+  res = await owner.call(`/api/projects/${otherId}/hosts`);
+  r.check("and is gone", res.body.hosts?.length === 1 && res.body.hosts[0].hostname === "esempio.it", show(res));
+  res = await owner.call(`/api/projects/${otherId}/hosts/${withTwin.host?.id}`, json("PATCH", { www: true }));
+  r.check("and given back", res.status === 200 && res.body.twin?.hostname === "www.esempio.it", show(res));
+
+  res = await owner.call(`/api/projects/${otherId}/hosts/${withTwin.host?.id}`, { method: "DELETE" });
+  r.check(
+    "removing the name takes its twin with it",
+    res.status === 200 && res.body.removed?.includes("www.esempio.it") && res.body.removed.includes("esempio.it"),
+    show(res)
+  );
+  res = await owner.call(`/api/projects/${otherId}/hosts`);
+  r.check("so nothing is left redirecting into nothing", res.body.hosts?.length === 0, show(res));
+
   // --- the Let's Encrypt email ------------------------------------------------------------------
   res = await owner.call("/api/domains/settings", json("PUT", { acmeEmail: "op@esempio.it" }));
   r.check("the email is saved", res.status === 200, show(res));
@@ -202,6 +268,11 @@ export async function run({ base }) {
   r.check("and disconnecting it", res.status === 403, show(res));
   res = await dev.call(`/api/projects/${projectId}/hosts`);
   r.check("reading a project shows its names", res.status === 200 && res.body.canManageDomains === false, show(res));
+  r.check("but not the commands of the setup", res.body.proxy && !("commands" in res.body.proxy) && res.body.panelHostname === null, show(res));
+  res = await dev.call(`/api/projects/${projectId}/hosts/${hostId}/dns`);
+  r.check("reading a project can check its names' DNS", res.status === 200 && res.body.names?.[0]?.hostname === "app.esempio.it", show(res));
+  res = await dev.call(`/api/projects/${otherId}/hosts/${hostId}/dns`);
+  r.check("not through a project it cannot see", res.status === 404, show(res));
   res = await dev.call(`/api/projects/${projectId}/hosts`, json("POST", { domainId, subdomain: "dev" }));
   r.check("read access cannot assign a name", res.status === 403, show(res));
   res = await dev.call(`/api/projects/${otherId}/hosts`);

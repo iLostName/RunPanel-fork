@@ -67,12 +67,31 @@ export async function GET() {
 
     // `permission` as on the single project, so a list can hide what its rows
     // cannot do; each server answers for its own rows.
+    // Where each app answers, for the cards: an address says more than
+    // "Node.js · :3000" to whoever just wants to open it. Applied names only,
+    // and no www twins, which only redirect.
+    const hostRows = await db
+      .selectFrom("project_hosts")
+      .select(["project_id", "hostname", "status"])
+      .where("apply_error", "is", null)
+      .where("redirect_to", "is", null)
+      .orderBy("hostname", "asc")
+      .execute();
+    const hostsByProject = new Map<string, { hostname: string; url: string }[]>();
+    for (const host of hostRows) {
+      const entry = { hostname: host.hostname, url: `${host.status === "active" ? "https" : "http"}://${host.hostname}` };
+      const list = hostsByProject.get(host.project_id);
+      if (list) list.push(entry);
+      else hostsByProject.set(host.project_id, [entry]);
+    }
+
     const result = projects.map((p) => ({
       ...p,
       permission: accessOf(p.id),
       deploy_count: statsByProject.get(p.id)?.deploy_count ?? 0,
       last_deploy_at: statsByProject.get(p.id)?.last_deploy_at ?? null,
       services: servicesByProject.get(p.id) ?? [],
+      hosts: hostsByProject.get(p.id) ?? [],
     }));
 
     return NextResponse.json(result);

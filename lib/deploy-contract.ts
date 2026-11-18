@@ -130,6 +130,19 @@ export const deployContractSchema = z.object({
       timeoutSec: 30,
       intervalSec: 2,
     }),
+
+  /**
+   * When a new version never passes the health check, put the last one that
+   * did back online. On by default.
+   *
+   * Docker only for now (see the rollback in services/deploy-pipeline.ts):
+   * every deploy is its own image there, and the previous one is still on
+   * disk. Native runtimes build in place, so by the time the check fails the
+   * previous version's files are already gone.
+   */
+  rollback: z
+    .object({ enabled: z.boolean().default(true) })
+    .default({ enabled: true }),
 });
 
 export type DeployContract = z.infer<typeof deployContractSchema>;

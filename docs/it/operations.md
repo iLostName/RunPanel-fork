@@ -8,7 +8,7 @@ Tutto quello che segue riguarda il server selezionato nella barra: con [più ser
 
 ## Avvio automatico
 
-**Sistema › Avvio automatico** dice cosa la macchina fa già al boot e genera quello che manca:
+**Salute › Avvio automatico** dice cosa la macchina fa già al boot e genera quello che manca:
 
 - una **unit systemd** con percorsi assoluti, dopo `docker.service` e dipendente da esso. Se il pannello gira da root la installa, altrimenti mostra un blocco da incollare;
 - dove systemd non c'è, uno **script `@reboot`** supervisionato, che il pannello aggiunge al crontab dell'utente da solo. Il suo output va in `logs/autostart.log`.
@@ -40,7 +40,7 @@ La pagina mostra l'ultima occorrenza e cosa ha fatto. Se il pannello era spento 
 
 ## Liberare spazio
 
-**Sistema › Pulizia Docker** mostra quanto occupa Docker e cosa si può recuperare. **Pulisci ora** toglie solo ciò che si può ricreare, mai volumi o dati:
+**Salute › Spazio disco** mostra quanto occupa Docker e cosa si può recuperare. **Pulisci ora** toglie solo ciò che si può ricreare, mai volumi o dati:
 
 - le versioni vecchie delle immagini dei progetti, oltre quelle tenute per il rollback (2 per progetto di default);
 - le immagini senza nome che nessun container usa, avanzi delle build compreso compose;
@@ -55,7 +55,7 @@ Ogni 6 ore il pannello fa da sé la parte sicura: applica la retention delle imm
 
 ## Aggiornare il pannello
 
-RunPanel gira da un clone git del suo repository. La versione mostrata è `v0.1.0+125`, dove il numero è il conteggio dei commit sul ramo principale (su un clone shallow, lo SHA). A intervalli (1, 6 o 24 ore, si sceglie nella pagina) fa un `git fetch` e confronta; per un repository privato usa il token GitHub del pannello. **Non applica mai niente da solo**: quando il branch si è mosso compare una striscia in cima alle pagine con il pulsante **Aggiorna**, e **Sistema › Aggiornamenti** elenca i commit. Con più server, striscia e pagina seguono il server selezionato: per aggiornare un nodo, selezionalo.
+RunPanel gira da un clone git del suo repository. La versione mostrata è `v0.1.0+125`, dove il numero è il conteggio dei commit sul ramo principale (su un clone shallow, lo SHA). A intervalli (1, 6 o 24 ore, si sceglie nella pagina) fa un `git fetch` e confronta; per un repository privato usa il token GitHub del pannello. **Non applica mai niente da solo**: quando il branch si è mosso compare una striscia in cima alle pagine con il pulsante **Aggiorna**, e **Impostazioni › Aggiornamenti** elenca i commit. Con più server, striscia e pagina seguono il server selezionato: per aggiornare un nodo, selezionalo.
 
 Premuto **Aggiorna**, il pannello:
 

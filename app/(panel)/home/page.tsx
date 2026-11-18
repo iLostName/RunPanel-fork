@@ -45,6 +45,7 @@ import { Technical } from "@/components/ui/Technical";
 import { OverviewStatus } from "@/components/overview/OverviewStatus";
 import { SetupChecklist } from "@/components/overview/SetupChecklist";
 import { ActivityFeed } from "@/components/overview/ActivityFeed";
+import { useHostTrend } from "@/components/metrics/useHostTrend";
 
 interface Service {
   id: string;
@@ -74,6 +75,8 @@ interface Project {
   deploy_count: number;
   folder_id: string | null;
   services: Service[];
+  /** Where it answers; absent from servers that do not send it yet. */
+  hosts?: { hostname: string; url: string }[];
   permission?: Access;
   /** A last known copy: the server holding it did not answer. */
   unreachable?: boolean;
@@ -240,7 +243,14 @@ const ProjectCard = memo(function ProjectCard({
             <div className="mt-1 flex min-w-0 items-center gap-2">
               {showServer && <ServerBadge memberId={project.memberId} />}
               <p className="text-muted truncate text-xs">
-                {runtimeLabel(project.runtime_type)} · {deployCountLabel(project.deploy_count)}
+                {/* The address first, when there is one: it is what people come to open. */}
+                {project.hosts?.[0] ? (
+                  <span className="text-foreground/80 font-mono">{project.hosts[0].hostname}</span>
+                ) : (
+                  runtimeLabel(project.runtime_type)
+                )}
+                {" · "}
+                {deployCountLabel(project.deploy_count)}
                 {project.port ? (
                   <Technical>
                     <span className="font-mono"> · :{project.port}</span>
@@ -510,6 +520,8 @@ export default function HomePage() {
   const canCreateFolder = canCreate && me.seesEverything;
   // In a cluster the server cards above carry the metrics of every server.
   const { data: metrics } = useResource<Metrics>(canMonitor && isSolo ? api("/api/metrics") : null, { intervalMs: poll5000 });
+  // The last hour under each number, from the metrics history.
+  const trend = useHostTrend(canMonitor && isSolo);
 
   // Read once, on the client, and only consulted when a section first mounts:
   // the sections are uncontrolled from then on, so a poll never snaps one shut.
@@ -677,6 +689,7 @@ export default function HomePage() {
             hint={metrics ? `${metrics.cpu.cores} core` : undefined}
             percent={metrics?.cpu.usage}
             icon="solar:cpu-linear"
+            trend={trend?.cpu}
           />
           <StatTile
             label="Memoria"
@@ -684,6 +697,7 @@ export default function HomePage() {
             hint={metrics ? `di ${formatBytes(metrics.memory.total)}` : undefined}
             percent={memoryPercent}
             icon="solar:server-linear"
+            trend={trend?.mem}
             note={memoryPercent !== undefined && memoryPercent >= 75 ? "Quasi piena: in Salute › Monitor vedi chi usa di più" : undefined}
           />
           <StatTile
@@ -692,6 +706,7 @@ export default function HomePage() {
             hint={metrics ? `di ${formatBytes(metrics.disk.total)}` : undefined}
             percent={diskPercent}
             icon="solar:ssd-square-linear"
+            trend={trend?.disk}
             note={diskPercent !== undefined && diskPercent >= 75 ? "Poco spazio libero: Spazio disco può liberarne" : undefined}
           />
           <StatTile label="Acceso da" value={formatUptime(metrics?.uptime)} icon="solar:clock-circle-linear" />

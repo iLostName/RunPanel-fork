@@ -1,297 +1,78 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { useCallback, useState } from "react";
+import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
-import { MSG } from "@/lib/copy";
 import type { LogLine } from "@/components/ui/LogViewer";
-import { useResource } from "@/lib/hooks/useResource";
-import { Panel, PanelHeader } from "@/components/ui/Panel";
-import { Section } from "@/components/ui/Section";
-import { Segmented } from "@/components/ui/Segmented";
-import { SettingToggle } from "@/components/ui/SettingToggle";
+import { SelectField } from "@/components/ui/SelectField";
 import { StickySaveBar } from "@/components/ui/StickySaveBar";
-import { DangerZone } from "@/components/ui/DangerAction";
 import { AccessPanel } from "@/components/users/AccessPanel";
-import { InfoTip } from "@/components/ui/Tooltip";
-import { Code, FieldHint } from "@/components/ui/Hint";
-import { CommandField } from "@/components/ui/CommandField";
-import { CheckboxField } from "@/components/ui/CheckboxField";
-import { Field } from "@/components/ui/Field";
-import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
-import { AccessSection } from "@/components/AccessSection";
-import { ScheduledRestart } from "@/components/ScheduledRestart";
+import { useUrlTab } from "@/lib/hooks/useUrlTab";
+import { cn } from "@/lib/utils";
 import { BackupSection } from "./BackupSection";
 import { DomainSection } from "./DomainSection";
-import { LinkedServiceDelete, type LinkedServiceRow } from "./LinkedServiceDelete";
-import { MountsSection } from "./MountsSection";
-import { OneTimeCommandsSection } from "./OneTimeCommandsSection";
 import type { PendingSave, RegisterPendingSave } from "./pending-saves";
-import { RepoPathSection } from "./RepoPathSection";
-import { WebhookSection } from "./WebhookSection";
-import { normalizeContractInput, parseContractJson, type DeployContract } from "@/lib/deploy-contract";
-import type { RuntimeType } from "@/lib/validation";
-import type { Project } from "./types";
-import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
+import { BuildSection } from "./settings/BuildSection";
+import { DangerSection } from "./settings/DangerSection";
+import { AdvancedSection, AutomationsSection, GeneralSection } from "./settings/MoreSections";
+import { NetworkSection } from "./settings/NetworkSection";
+import { ResourcesSection } from "./settings/ResourcesSection";
+import { SourceSection } from "./settings/SourceSection";
+import { useDeployForm } from "./settings/useDeployForm";
+import type { Project, SettingsSectionId } from "./types";
 
-type RawContract = Record<string, unknown>;
+const SECTIONS: { id: SettingsSectionId; label: string; icon: string }[] = [
+  { id: "general", label: "Generale", icon: "solar:widget-2-linear" },
+  { id: "source", label: "Sorgente", icon: "solar:code-linear" },
+  { id: "build", label: "Build e avvio", icon: "solar:play-circle-linear" },
+  { id: "addresses", label: "Indirizzi", icon: "solar:global-linear" },
+  { id: "network", label: "Rete", icon: "solar:routing-linear" },
+  { id: "resources", label: "Risorse", icon: "solar:cpu-bolt-linear" },
+  { id: "automations", label: "Automazioni", icon: "solar:calendar-linear" },
+  { id: "backup", label: "Backup", icon: "solar:safe-square-linear" },
+  { id: "advanced", label: "Avanzate", icon: "solar:tuning-square-linear" },
+  { id: "permissions", label: "Permessi", icon: "solar:users-group-rounded-linear" },
+  { id: "danger", label: "Zona pericolosa", icon: "solar:danger-circle-linear" },
+];
 
-function isPlainObject(value: unknown): value is RawContract {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const SECTION_IDS = SECTIONS.map((s) => s.id);
+
+/** Which menu entry a section that saves on its own (see pending-saves.ts) belongs to. */
+const PENDING_SECTION: Record<string, SettingsSectionId> = { backup: "backup", "one-time": "build" };
 
 /**
- * What this form should actually send: what was stored, plus only what changed.
+ * Project settings: a side menu, one section at a time, one save bar.
  *
- * The form holds a contract from `parseContractJson`, which is `.parse()` — so
- * every field carrying a `.default()` is materialised whether or not anybody
- * chose it. Sending that object back wrote all of them into `builder_config`,
- * and since the panel's half WINS the merge, one press of Salva on an untouched
- * screen permanently pinned `packageManager: auto`, `timeoutSec: 900`, the whole
- * healthcheck block and the rest over whatever the repository's `runpanel.json`
- * or the detected preset had been contributing. The column is deliberately
- * sparse — see the comment on the PATCH route — and this is what keeps it sparse.
+ * This was one scroll of a dozen boxes and around thirty controls. Each
+ * section now answers one question (where the code comes from, how it builds,
+ * where it answers…), and they stay mounted while hidden, so an edit in one
+ * survives a look at another and the bar saves them all together. The menu
+ * marks the sections with unsaved edits.
  *
- * Compared against the contract as it was LOADED, not against the schema's
- * defaults, so a value the operator genuinely typed is written even when it
- * happens to equal a default.
+ * Settings that act at once keep their own buttons, as before: the access
+ * restriction (it restarts the app), the addresses, the mounts, the schedule.
  */
-function contractPatch(stored: string, loaded: DeployContract, current: DeployContract): RawContract {
-  let raw: RawContract = {};
-  try {
-    const parsed: unknown = stored ? JSON.parse(stored) : {};
-    // Translated first: a row in the old shape has no `version`, so a patch of
-    // the new shape laid over it would be read back as the old one, and refused.
-    if (isPlainObject(parsed)) raw = normalizeContractInput(parsed);
-  } catch {
-    /* an unreadable column is replaced by what the form knows */
-  }
-
-  const walk = (base: RawContract, before: RawContract, after: RawContract): RawContract => {
-    const out: RawContract = { ...base };
-
-    for (const [key, next] of Object.entries(after)) {
-      const previous = before[key];
-
-      if (isPlainObject(previous) && isPlainObject(next)) {
-        const nested = walk(isPlainObject(out[key]) ? out[key] : {}, previous, next);
-        if (Object.keys(nested).length > 0) out[key] = nested;
-        continue;
-      }
-
-      // Unchanged means nobody chose it, and a default nobody chose has no
-      // business shadowing a repository that did choose.
-      if (JSON.stringify(previous) !== JSON.stringify(next)) out[key] = next;
-    }
-
-    return out;
-  };
-
-  return walk(raw, loaded as unknown as RawContract, current as unknown as RawContract);
-}
-/** The saved state, so "unsaved changes" is a fact rather than a guess. */
-function snapshot(
-  appName: string,
-  branch: string,
-  port: string,
-  runtimeType: string,
-  contract: DeployContract
-): string {
-  return JSON.stringify({ appName, branch, port, runtimeType, contract });
-}
-
-interface Preset {
-  id: string;
-  label: string;
-  description: string;
-  runtime: RuntimeType;
-  commands: { install?: string; build?: string; start?: string };
-}
-
 export function SettingsTab({
   project,
   onProjectChange,
   onRefresh,
+  onDeploy,
   operationLines,
 }: {
   project: Project;
-  /**
-   * Takes an updater too: the sections save one after another from the same
-   * press, and each spreading the `project` it was rendered with would put
-   * back the fields the one before had just saved.
-   */
+  /** Takes an updater: sections save one after another from the same press. */
   onProjectChange: (update: Project | ((prev: Project) => Project)) => void;
   /** Re-read the project from the server, after an action that changed it there. */
   onRefresh: () => void;
+  onDeploy: () => void;
   /** What a files move or a mount apply is saying, live. */
   operationLines: LogLine[];
 }) {
-  const api = useNodeApi();
-  const href = useServerHref();
-  const router = useRouter();
-  const [contract, setContract] = useState<DeployContract>(() =>
-    parseContractJson(project.builder_config)
-  );
-  const [appName, setAppName] = useState(project.app_name ?? "");
-  const [branch, setBranch] = useState(project.source_branch);
-  const [port, setPort] = useState(project.port?.toString() ?? "");
-  const [runtimeType, setRuntimeType] = useState<string>(project.runtime_type);
+  const [section, setSection] = useUrlTab(SECTION_IDS, "general", "section");
   const [saving, setSaving] = useState(false);
+  const form = useDeployForm(project, (updated) => onProjectChange(updated));
 
-  /*
-    Re-read the contract when the row genuinely changes.
-
-    The form holds a copy from the moment it mounted, and until now nothing else
-    wrote that column while it was open. The mount editor below does: it saves
-    through its own route, because applying a bind copies bytes and restarts the
-    app. Without this, the next Salva would send the contract from before that
-    save and quietly put the old mount list back.
-
-    Compared against a baseline so an unchanged poll is a no-op, and adjusted
-    during render rather than in an effect — which is what React recommends for
-    state derived from props, and what `AccessSection` already does.
-  */
-  const [storedContract, setStoredContract] = useState(project.builder_config);
-  if (project.builder_config !== storedContract) {
-    setStoredContract(project.builder_config);
-    setContract(parseContractJson(project.builder_config));
-  }
-
-  /*
-    Which preset the operator is looking at. Local only — nothing about it is
-    saved. It drives the suggestions and it is what "Applica" copies from; the
-    project keeps no memory of having been built from a preset, and pretending
-    otherwise would be a column that goes stale the first time a command is
-    edited by hand.
-  */
-  const [presetId, setPresetId] = useState<string | null>(null);
-  const { data: presetData } = useResource<{ presets: Preset[] }>(api("/api/presets"));
-  const presets = presetData?.presets ?? [];
-  const preset = presets.find((entry) => entry.id === presetId) ?? null;
-
-  // The services that would be affected by deleting the project, listed where
-  // that decision is made. Their fate is opt-in: kept by default, taken down
-  // with the project only when the box below is ticked.
-  const { data: servicesData, refresh: refreshServices } = useResource<LinkedServiceRow[]>(api("/api/services"));
-  const linkedServices = useMemo(
-    () => (Array.isArray(servicesData) ? servicesData : []).filter((s) => s.project_id === project.id),
-    [servicesData, project.id]
-  );
-  const [deleteServices, setDeleteServices] = useState(false);
-
-  // What the server last confirmed. Compared against the live values, so the
-  // save bar appears on the first edit and leaves again if it is undone.
-  const [saved, setSaved] = useState(() =>
-    snapshot(
-      project.app_name ?? "",
-      project.source_branch,
-      project.port?.toString() ?? "",
-      project.runtime_type,
-      parseContractJson(project.builder_config)
-    )
-  );
-  const current = snapshot(appName, branch, port, runtimeType, contract);
-  const dirty = current !== saved;
-
-  const isDocker = runtimeType === "docker";
-
-  function patchContract(patch: Partial<DeployContract>) {
-    setContract((prev) => ({ ...prev, ...patch }));
-  }
-
-  function reset() {
-    const restored = JSON.parse(saved) as {
-      appName: string;
-      branch: string;
-      port: string;
-      runtimeType: string;
-      contract: DeployContract;
-    };
-    setAppName(restored.appName);
-    setBranch(restored.branch);
-    setPort(restored.port);
-    setRuntimeType(restored.runtimeType);
-    setContract(restored.contract);
-  }
-
-  /**
-   * Copy a preset's commands into the form.
-   *
-   * The three fields are replaced wholesale rather than merged: applying
-   * "Python" and keeping a leftover `npm run build` from before is exactly the
-   * mismatch this is meant to end. Nothing is written until Salva, and Annulla
-   * puts everything back, so replacing is safe to offer.
-   *
-   * The runtime comes with them, because they are not independent choices. The
-   * node builder reads `package.json` before it looks at the commands it was
-   * given, so pip commands on a Node project fail on a file that isn't there —
-   * a preset that set the commands and left the runtime alone would be handing
-   * out a broken configuration.
-   */
-  function applyPreset(chosen: Preset) {
-    patchContract({
-      commands: {
-        ...contract.commands,
-        install: chosen.commands.install ?? "",
-        build: chosen.commands.build ?? "",
-        start: chosen.commands.start ?? "",
-      },
-    });
-    setRuntimeType(chosen.runtime);
-    toast.success(`Comandi di "${chosen.label}" applicati — controlla e salva`);
-  }
-
-  /**
-   * What a closed section is currently set to.
-   *
-   * Without these, closing a section would hide the answer along with the
-   * controls — which is hiding information, not reducing it.
-   */
-  const hasCustomCommands = Boolean(
-    contract.commands.install || contract.commands.build || contract.commands.start || contract.commands.release
-  );
-
-  const buildSummary = useMemo(() => {
-    if (isDocker) {
-      return contract.commands.release ? "Dockerfile · con release command" : "Dal Dockerfile del repository";
-    }
-    // Non "rilevato": la rilevazione avviene nel repository a ogni deploy
-    // (`detectPreset`) e il pannello non ne conserva l'esito, quindi un
-    // riepilogo al passato dichiara un fatto che non conosce — su un progetto
-    // appena creato è semplicemente falso. Dice invece da dove verranno.
-    const pm = contract.packageManager === "auto" ? "package manager automatico" : contract.packageManager;
-    return hasCustomCommands ? `${pm} · comandi personalizzati` : `${pm} · comandi dal repository`;
-  }, [isDocker, contract.packageManager, contract.commands.release, hasCustomCommands]);
-
-  /**
-   * Why the access restriction cannot be offered here, when it cannot.
-   *
-   * Three shapes the panel would have to lie about. A Compose project publishes
-   * its ports from a file the operator owns, and rewriting it behind their back
-   * is a silent edit to their work. `network: host` gives the container the
-   * host's own stack, so there is no port to move. And with no port configured
-   * there is nothing published to restrict in the first place.
-   */
-  const accessUnavailable = useMemo(() => {
-    if (runtimeType === "compose") {
-      return "Le porte le pubblica il tuo compose file. RunPanel non lo riscrive: per limitare l'accesso metti il binding su 127.0.0.1 lì.";
-    }
-    if (isDocker && contract.docker.network === "host") {
-      return "Con rete host il container condivide la rete della macchina: non c'è una porta pubblicata da spostare. Passa a bridge o project.";
-    }
-    if (!project.port) {
-      return "Questo progetto non ha una porta configurata, quindi non c'è niente da limitare.";
-    }
-    return undefined;
-  }, [runtimeType, project.port, isDocker, contract.docker.network]);
-
-  const containerSummary = useMemo(() => {
-    const limits = [contract.runtime.memory, contract.runtime.cpus].filter(Boolean).join(" · ");
-    return `rete ${contract.docker.network} · riavvio ${contract.runtime.restartPolicy}${limits ? ` · ${limits}` : ""}`;
-  }, [contract.docker.network, contract.runtime.restartPolicy, contract.runtime.memory, contract.runtime.cpus]);
-
-  /** Sections with unsaved edits, by id — see `pending-saves.ts`. */
+  /** Sections with unsaved edits that save through their own endpoint. */
   const [pending, setPending] = useState<Record<string, PendingSave>>({});
   const registerPending = useCallback<RegisterPendingSave>((id, entry) => {
     setPending((prev) => {
@@ -304,637 +85,127 @@ export function SettingsTab({
       return { ...prev, [id]: entry };
     });
   }, []);
-  const pendingList = Object.values(pending);
-  const unsavedParts = [...(dirty ? ["Applicazione"] : []), ...pendingList.map((entry) => entry.label)];
+  const pendingIds = Object.keys(pending);
+  const dirtyMenu = new Set<SettingsSectionId>([
+    ...form.dirtySections,
+    ...pendingIds.map((id) => PENDING_SECTION[id]).filter(Boolean),
+  ]);
+  const unsavedParts = [
+    ...SECTIONS.filter((s) => form.dirtySections.includes(s.id)).map((s) => s.label),
+    ...pendingIds.map((id) => pending[id].label),
+  ];
 
   /*
     One press, every part with edits. The sections go first, each to its own
-    endpoint, and the deploy fields last: the PATCH answers with the whole row,
-    so the page ends on a copy that already includes what the sections wrote.
-    A part that fails does not stop the others — they are independent settings
-    — and the toast names it; its own error stays next to its fields.
+    endpoint, and the form last: the PATCH answers with the whole row, so the
+    page ends on a copy that includes what the sections wrote. A part that
+    fails does not stop the others; the toast names it.
   */
   async function saveAll() {
     setSaving(true);
     const failed: string[] = [];
     try {
-      for (const entry of pendingList) {
-        if (!(await entry.save())) failed.push(entry.label);
+      for (const id of pendingIds) {
+        if (!(await pending[id].save())) failed.push(pending[id].label);
       }
-      if (dirty && !(await save())) failed.push("Applicazione");
+      if (form.dirty && !(await form.save())) failed.push("Impostazioni");
     } finally {
       setSaving(false);
     }
     if (failed.length === 0) toast.success("Impostazioni salvate");
-    // The deploy fields already said why, in their own toast.
-    else if (!(failed.length === 1 && failed[0] === "Applicazione")) {
+    else if (!(failed.length === 1 && failed[0] === "Impostazioni")) {
       toast.error(`Non salvato: ${failed.join(", ")}. Il motivo è accanto ai campi.`);
     }
   }
 
   function resetAll() {
-    reset();
-    for (const entry of pendingList) entry.reset();
+    form.reset();
+    for (const id of pendingIds) pending[id].reset();
   }
 
-  /** The deploy fields. Resolves false when they were not saved. */
-  async function save(): Promise<boolean> {
-    try {
-      const res = await fetch(api(`/api/projects/${project.id}`), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          appName: appName.trim() || null,
-          sourceBranch: branch,
-          port: port ? Number.parseInt(port, 10) : null,
-          // Sent because applying a preset can change it. Unchanged otherwise,
-          // and the route treats an identical value as no change.
-          runtimeType,
-          builderConfig: contractPatch(storedContract, parseContractJson(storedContract), contract),
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSaved(current);
-        onProjectChange(data);
-        return true;
-      }
-      // Details first: "Dati non validi" does not say which field, and the
-      // branch name is now validated — an empty one has to come back as
-      // "Nome del branch non valido" rather than as a shrug.
-      toast.error(data.details?.[0]?.message ?? data.error ?? MSG.saveFailed);
-      return false;
-    } catch {
-      toast.error(MSG.saveFailed);
-      return false;
-    }
-  }
+  const show = (id: SettingsSectionId) => ({ hidden: section !== id });
 
   return (
-    <div className="max-w-3xl space-y-4">
-      {/*
-        One panel open, five sections closed.
-
-        This screen answered six unrelated questions — what the app is, how it
-        builds, how health is judged, whether a dotenv is written, how the
-        container runs, and how GitHub triggers it — in six identical boxes, all
-        expanded, in one scroll. Around thirty controls, of which the three
-        anyone opens this tab for were the first three.
-
-        Every section states what it is currently set to, so closing one hides
-        the controls and not the answer.
-      */}
-      <Panel className="space-y-4">
-        <PanelHeader title="Applicazione" description="Come si chiama e dove ascolta" />
-
-        <div>
-          <TextField value={appName} onChange={setAppName}>
-            <Label>Nome app</Label>
-            <Input placeholder={project.slug} />
-          </TextField>
-          <FieldHint>
-            Solo un&apos;etichetta. Container, processo, volumi e cartelle continuano a usare lo
-            slug <Code>{project.slug}</Code>, che non cambia mai.
-          </FieldHint>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <TextField value={branch} onChange={setBranch}>
-              <Label>Branch</Label>
-              <Input />
-            </TextField>
-            <FieldHint>Ha effetto dal prossimo deploy, non subito.</FieldHint>
-          </div>
-          <div>
-            <TextField value={port} onChange={setPort}>
-              <Label>Porta</Label>
-              <Input type="number" placeholder="3000" />
-            </TextField>
-            <PortHint runtimeType={runtimeType} />
-          </div>
-        </div>
-      </Panel>
-
-      <Section title="Build e avvio" summary={buildSummary} defaultExpanded={hasCustomCommands}>
-        {presets.length > 0 && (
-          <div>
-            <div className="mb-2 flex items-center gap-1">
-              <span className="text-muted text-sm font-medium">Punto di partenza</span>
-              <InfoTip title="Preset">
-                Una configurazione già pronta per una forma di repository comune. Sceglierne uno
-                qui non cambia niente da solo: mostra i comandi che userebbe, e li scrive nei
-                campi solo se premi Applica.
-              </InfoTip>
-            </div>
-            <Segmented
-              label="Preset di deploy"
-              value={presetId ?? "none"}
-              onChange={(id) => setPresetId(id === "none" ? null : id)}
-              options={[
-                { value: "none", label: "Nessuno" },
-                ...presets.map((entry) => ({ value: entry.id, label: entry.label })),
-              ]}
-            />
-            {preset && (
-              <div className="mt-2 space-y-2">
-                <FieldHint className="mt-0">{preset.description}</FieldHint>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="secondary" onPress={() => applyPreset(preset)}>
-                    Applica i comandi
-                  </Button>
-                  {preset.runtime !== runtimeType && (
-                    <span className="text-warning text-meta">
-                      Cambia anche il runtime: <Code>{runtimeType}</Code> → <Code>{preset.runtime}</Code>
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {runtimeType === "node" && (
-          <Field label="Package manager">
-            <Segmented
-              label="Package manager"
-              value={contract.packageManager}
-              onChange={(packageManager) => patchContract({ packageManager })}
-              options={[
-                { value: "auto", label: "Auto" },
-                { value: "npm", label: "npm" },
-                { value: "bun", label: "bun" },
-                { value: "pnpm", label: "pnpm" },
-                { value: "yarn", label: "yarn" },
-              ]}
-            />
-          </Field>
-        )}
-
-        {!isDocker && (
-          <div className="space-y-3">
-            <CommandField
-              label="Comandi di install"
-              value={contract.commands.install ?? ""}
-              /*
-                Con un preset scelto il suggerimento è il suo; senza, il
-                ripiego per un runtime non-node è Python, ed è la forma con il
-                venv. Diceva `pip install -r requirements.txt`, che su Debian 12
-                e Ubuntu 23.04 in su non funziona — PEP 668 marca il Python di
-                sistema come externally-managed e pip rifiuta. Il preset lo
-                sapeva già; questo campo diceva il contrario, ed è il testo che
-                si copia.
-              */
-              placeholder={
-                preset
-                  ? (preset.commands.install ?? "")
-                  : runtimeType === "node"
-                    ? "rilevato automaticamente"
-                    : "python3 -m venv venv\nvenv/bin/pip install -r requirements.txt"
-              }
-              hint="Un comando per riga, eseguiti in ordine nella stessa shell."
-              onChange={(v) => patchContract({ commands: { ...contract.commands, install: v } })}
-            />
-            <CommandField
-              label="Comandi di build"
-              value={contract.commands.build ?? ""}
-              placeholder={
-                preset
-                  ? (preset.commands.build ?? "")
-                  : runtimeType === "node"
-                    ? "rilevato automaticamente"
-                    : "go build -o app ."
-              }
-              onChange={(v) => patchContract({ commands: { ...contract.commands, build: v } })}
-            />
-            <CommandField
-              label="Comando di start"
-              rows={1}
-              value={contract.commands.start ?? ""}
-              // Coerente con l'install qui sopra: i tre campi descrivevano tre
-              // progetti diversi — install Python, build Go, start Go.
-              placeholder={
-                preset
-                  ? (preset.commands.start ?? "")
-                  : runtimeType === "node"
-                    ? "rilevato automaticamente"
-                    : "venv/bin/python -m uvicorn main:app"
-              }
-              hint="Solo la prima riga viene usata come comando di avvio."
-              onChange={(v) => patchContract({ commands: { ...contract.commands, start: v } })}
-            />
-          </div>
-        )}
-
-        <CommandField
-          label="Release command"
-          rows={2}
-          value={contract.commands.release ?? ""}
-          placeholder="npx prisma migrate deploy"
-          hint={
-            <>
-              Eseguito una volta dopo il build e prima dell&apos;avvio. Se fallisce, fallisce il
-              deploy e la nuova versione non parte: è il posto giusto per le migrazioni.{" "}
-              {isDocker
-                ? "Gira in un container usa-e-getta creato dall'immagine appena costruita, sulla stessa rete e con lo stesso ambiente dell'app."
-                : "Gira nella cartella del repository con lo stesso ambiente dell'app."}
-            </>
-          }
-          onChange={(v) => patchContract({ commands: { ...contract.commands, release: v } })}
+    <div className="grid gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
+      {/* A select on phones, a sticky list beside the content from lg up. */}
+      <div className="lg:hidden">
+        <SelectField
+          label="Sezione"
+          value={section}
+          onChange={(value) => setSection(value as SettingsSectionId)}
+          options={SECTIONS.map((s) => ({ value: s.id, label: `${s.label}${dirtyMenu.has(s.id) ? " •" : ""}` }))}
         />
-      </Section>
-
-      {/*
-        Comandi che girano una volta sola, subito sotto quelli che girano
-        sempre: sono la stessa materia vista dall'altro lato, e la domanda
-        che porta qui ("dove metto questo comando?") ha le due risposte
-        una accanto all'altra.
-
-        Fuori dal guard `isDocker` perché vale per ogni runtime, e con un
-        salvataggio proprio come i bind: questa coda cambia da sola mentre
-        un deploy gira, e non è una cosa che un campo di form possa essere.
-      */}
-      <OneTimeCommandsSection
-        projectId={project.id}
-        runtimeType={runtimeType}
-        queued={project.oneTimeCommands ?? []}
-        isDeploying={project.status === "deploying"}
-        registerPending={registerPending}
-        onChanged={(queued) => (queued ? onProjectChange((prev) => ({ ...prev, oneTimeCommands: queued })) : onRefresh())}
-      />
-
-      {/*
-        The switch sits in the header, outside the trigger: a section can be
-        turned on and off without being opened, which is what lets it stay shut.
-      */}
-      <Section
-        title="Health check"
-        summary={
-          contract.healthcheck.enabled
-            ? `${contract.healthcheck.path} · attesa ${contract.healthcheck.startPeriodSec}s · timeout ${contract.healthcheck.timeoutSec}s`
-            : "Spento: il deploy riesce appena il processo parte"
-        }
-        actions={
-          <SettingToggle
-            label="Attiva health check"
-            isSelected={contract.healthcheck.enabled}
-            onChange={(v) => patchContract({ healthcheck: { ...contract.healthcheck, enabled: v } })}
-            className="w-auto"
-          />
-        }
-      >
-        {contract.healthcheck.enabled ? (
-          <>
-            <HealthcheckHint />
-            <div className="grid gap-4 sm:grid-cols-3">
-              <TextField
-                value={contract.healthcheck.path}
-                onChange={(v) => patchContract({ healthcheck: { ...contract.healthcheck, path: v } })}
+      </div>
+      <nav aria-label="Sezioni delle impostazioni" className="hidden lg:block">
+        <ul className="sticky top-4 space-y-0.5">
+          {SECTIONS.map((s) => (
+            <li key={s.id}>
+              <button
+                type="button"
+                onClick={() => setSection(s.id)}
+                aria-current={section === s.id ? "page" : undefined}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-[var(--radius)] px-3 py-2 text-left text-sm transition-colors",
+                  section === s.id ? "bg-surface-secondary text-foreground font-medium" : "text-muted hover:bg-surface-hover hover:text-foreground",
+                  s.id === "danger" && "text-danger hover:text-danger"
+                )}
               >
-                <Label>Path</Label>
-                <Input placeholder="/" className="font-mono text-sm" />
-              </TextField>
-              <TextField
-                value={String(contract.healthcheck.startPeriodSec)}
-                onChange={(v) =>
-                  patchContract({
-                    healthcheck: {
-                      ...contract.healthcheck,
-                      startPeriodSec: Number.parseInt(v, 10) || 0,
-                    },
-                  })
-                }
-              >
-                <Label>Attesa iniziale (s)</Label>
-                <Input type="number" />
-              </TextField>
-              <TextField
-                value={String(contract.healthcheck.timeoutSec)}
-                onChange={(v) =>
-                  patchContract({
-                    healthcheck: {
-                      ...contract.healthcheck,
-                      timeoutSec: Number.parseInt(v, 10) || 30,
-                    },
-                  })
-                }
-              >
-                <Label>Timeout (s)</Label>
-                <Input type="number" />
-              </TextField>
-            </div>
-          </>
-        ) : (
-          <p className="text-muted text-sm">
-            Senza health check, un&apos;app che parte e muore un secondo dopo risulta comunque
-            distribuita con successo.
-          </p>
-        )}
-      </Section>
+                <Icon icon={s.icon} width={16} aria-hidden />
+                <span className="flex-1">{s.label}</span>
+                {dirtyMenu.has(s.id) && <span className="bg-warning size-2 rounded-full" aria-label="modifiche non salvate" />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
-      {/*
-        Its own save, deliberately, and outside the sticky bar: this one moves
-        the port the app listens on, so it restarts the app. Bundling it with
-        the other settings would make pressing Salva mean "and also restart",
-        which is not what the bar has meant anywhere else in the panel.
-      */}
-      <AccessSection
-        kind="project"
-        targetId={project.id}
-        name={project.name}
-        publicPort={project.port}
-        access={project.access}
-        gate={project.gate}
-        unavailable={accessUnavailable}
-        onSaved={(updated) => onProjectChange((prev) => ({ ...prev, ...(updated as Partial<Project>) }))}
-      />
-
-      {/* Right after who may connect: a name is one more way in, and follows those rules. */}
-      <DomainSection projectId={project.id} />
-
-      {/*
-        Saved on its own, like the access section above, rather than through the
-        sticky bar: a schedule is one decision with its own preview, and holding
-        it hostage to an unrelated unsaved port change would be a surprise.
-      */}
-      <ScheduledRestart
-        kind="project"
-        id={project.id}
-        cron={project.restart_cron ?? ""}
-        nextAt={project.restart_next_at}
-        lastAt={project.restart_last_at}
-        lastResult={project.restart_last_result}
-        onSaved={(updated) => onProjectChange((prev) => ({ ...prev, ...(updated as Partial<Project>) }))}
-      />
-
-      <BackupSection
-        project={project}
-        onSaved={(backupSettings) => onProjectChange((prev) => ({ ...prev, backup_settings: backupSettings }))}
-        registerPending={registerPending}
-      />
-
-      <Section
-        title="File .env"
-        summary={
-          contract.envFile.enabled ? contract.envFile.path : "Le variabili arrivano solo da process.env"
-        }
-        actions={
-          <SettingToggle
-            label="Scrivi un file .env"
-            isSelected={contract.envFile.enabled}
-            onChange={(v) => patchContract({ envFile: { ...contract.envFile, enabled: v } })}
-            className="w-auto"
-          />
-        }
-      >
-        <div>
-          <TextField
-            value={contract.envFile.path}
-            onChange={(v) => patchContract({ envFile: { ...contract.envFile, path: v } })}
-            isDisabled={!contract.envFile.enabled}
-          >
-            <Label>Percorso del file</Label>
-            <Input placeholder="/app/.env" className="font-mono text-sm" />
-          </TextField>
-          <EnvFilePathHint runtimeType={runtimeType} />
-          <FieldHint>
-            Riscritto a ogni deploy con tutte le variabili del progetto: quello che modifichi lì a
-            mano sparisce. Il posto giusto è la scheda Variabili.
-          </FieldHint>
+      <div className="min-w-0 max-w-3xl">
+        <div {...show("general")}>
+          <GeneralSection form={form} project={project} />
         </div>
-      </Section>
-
-      {isDocker && (
-        <Section title="Container" summary={containerSummary}>
-          <div>
-            <div className="mb-2 flex items-center gap-1">
-              <span className="text-muted text-sm font-medium">Rete</span>
-              <InfoTip title="Rete del container">
-                <Code>project</Code> mette app e servizi sulla stessa rete, dove si raggiungono per
-                nome del container: è quello che rende automatico il collegamento del database.{" "}
-                <Code>bridge</Code> lascia l&apos;app isolata dai servizi. <Code>host</Code>{" "}
-                condivide lo stack di rete della macchina: niente porte pubblicate, e{" "}
-                <Code>localhost</Code> dentro il container è già quello dell&apos;host.
-              </InfoTip>
-            </div>
-            <Segmented
-              label="Rete del container"
-              value={contract.docker.network}
-              onChange={(network) => patchContract({ docker: { ...contract.docker, network } })}
-              options={[
-                { value: "project", label: "project" },
-                { value: "bridge", label: "bridge" },
-                { value: "host", label: "host" },
-              ]}
-            />
-          </div>
-
-          <div>
-            <div className="mb-2 flex items-center gap-1">
-              <span className="text-muted text-sm font-medium">Riavvio</span>
-              <InfoTip title="Policy di riavvio">
-                <Code>unless-stopped</Code> riparte al riavvio della macchina, ma se sei tu a
-                fermarlo resta fermo. <Code>always</Code> lo rimette su anche se l&apos;avevi
-                fermato a mano. <Code>no</Code> lo lascia giù dopo ogni crash.
-              </InfoTip>
-            </div>
-            <Segmented
-              label="Policy di riavvio"
-              value={contract.runtime.restartPolicy}
-              onChange={(restartPolicy) =>
-                patchContract({ runtime: { ...contract.runtime, restartPolicy } })
-              }
-              options={[
-                { value: "no", label: "no" },
-                { value: "on-failure", label: "on-failure" },
-                { value: "unless-stopped", label: "unless-stopped" },
-                { value: "always", label: "always" },
-              ]}
-            />
-          </div>
-
-          <div>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <TextField
-                value={contract.runtime.memory ?? ""}
-                onChange={(v) =>
-                  patchContract({ runtime: { ...contract.runtime, memory: v || undefined } })
-                }
-              >
-                <Label>Memoria</Label>
-                <Input placeholder="2g" className="font-mono text-sm" />
-              </TextField>
-              <TextField
-                value={contract.runtime.cpus ?? ""}
-                onChange={(v) =>
-                  patchContract({ runtime: { ...contract.runtime, cpus: v || undefined } })
-                }
-              >
-                <Label>CPU</Label>
-                <Input placeholder="1.5" className="font-mono text-sm" />
-              </TextField>
-              <TextField
-                value={contract.runtime.shmSize ?? ""}
-                onChange={(v) =>
-                  patchContract({ runtime: { ...contract.runtime, shmSize: v || undefined } })
-                }
-              >
-                <Label>shm-size</Label>
-                <Input placeholder="2g" className="font-mono text-sm" />
-              </TextField>
-            </div>
-            <FieldHint>
-              Formato Docker: <Code>512m</Code>, <Code>2g</Code>. Vuoti significano nessun limite.{" "}
-              <Code>shm-size</Code> serve solo a browser headless e Postgres, che con il default di
-              64 MB crashano senza spiegazioni.
-            </FieldHint>
-          </div>
-
-          <div>
-            <TextField
-              value={contract.docker.hostname ?? ""}
-              onChange={(v) =>
-                patchContract({ docker: { ...contract.docker, hostname: v || undefined } })
-              }
-            >
-              <Label>Hostname</Label>
-              <Input placeholder="app" className="font-mono text-sm" />
-            </TextField>
-            <FieldHint>
-              Il nome che il container dà a se stesso. Per raggiungerlo dagli altri basta il nome del
-              container, che non cambia.
-            </FieldHint>
-          </div>
-
-          <MountsSection
-            projectId={project.id}
-            mounts={project.mounts ?? []}
-            onApplied={onRefresh}
-            logLines={operationLines}
+        <div {...show("source")}>
+          <SourceSection form={form} project={project} onDeploy={onDeploy} onUploaded={onRefresh} />
+        </div>
+        <div {...show("build")}>
+          <BuildSection form={form} project={project} registerPending={registerPending} onProjectChange={onProjectChange} onRefresh={onRefresh} />
+        </div>
+        <div {...show("addresses")}>
+          <DomainSection projectId={project.id} />
+        </div>
+        <div {...show("network")}>
+          <NetworkSection form={form} project={project} onProjectChange={onProjectChange} />
+        </div>
+        <div {...show("resources")}>
+          <ResourcesSection form={form} project={project} onRefresh={onRefresh} operationLines={operationLines} />
+        </div>
+        <div {...show("automations")}>
+          <AutomationsSection project={project} onProjectChange={onProjectChange} />
+        </div>
+        <div {...show("backup")}>
+          <BackupSection
+            project={project}
+            onSaved={(backupSettings) => onProjectChange((prev) => ({ ...prev, backup_settings: backupSettings }))}
+            registerPending={registerPending}
           />
-        </Section>
-      )}
+        </div>
+        <div {...show("advanced")}>
+          <AdvancedSection form={form} project={project} onRefresh={onRefresh} operationLines={operationLines} />
+        </div>
+        <div {...show("permissions")}>
+          <AccessPanel kind="project" id={project.id} />
+        </div>
+        <div {...show("danger")}>
+          <DangerSection project={project} />
+        </div>
 
-      {/*
-        Native only, and the counterpart of the Container section above: a
-        project in a container keeps its files in an image and has binds
-        instead, so the two never both appear.
-      */}
-      {!isDocker && runtimeType !== "compose" && project.repo_location && (
-        <RepoPathSection
-          projectId={project.id}
-          location={project.repo_location}
-          repoPath={project.repo_path}
-          move={project.repoMove}
-          onChanged={onRefresh}
-          logLines={operationLines}
+        <StickySaveBar
+          isDirty={unsavedParts.length > 0}
+          isPending={saving}
+          onSave={() => void saveAll()}
+          onReset={resetAll}
+          message={`Modifiche non salvate: ${unsavedParts.join(", ")}`}
         />
-      )}
-
-      <WebhookSection project={project} onProjectChange={onProjectChange} />
-
-      <AccessPanel kind="project" id={project.id} />
-
-      <StickySaveBar
-        isDirty={unsavedParts.length > 0}
-        isPending={saving}
-        onSave={() => void saveAll()}
-        onReset={resetAll}
-        message={`Modifiche non salvate: ${unsavedParts.join(", ")}`}
-      />
-
-      {/*
-        The two irreversible actions, together and last.
-
-        Deleting the project used to live in the rename overlay — a dialog
-        titled "Progetto", opened by a gear icon, which is where someone goes to
-        fix a typo in a name. Removing the app was here. Same class of action,
-        two unrelated places, and the more destructive of the two was the harder
-        one to find.
-      */}
-      <DangerZone
-        title="Rimuovi l'app"
-        description="Il progetto e i suoi servizi restano"
-        actionLabel="Rimuovi app"
-        confirm={{
-          title: "Rimuovere l'app?",
-          confirmLabel: "Rimuovi",
-          description:
-            "Processo, file, immagini Docker e cronologia dei deploy verranno eliminati. Il progetto e i suoi servizi restano.",
-        }}
-        onConfirm={async () => {
-          const res = await fetch(api(`/api/projects/${project.id}/app`), { method: "DELETE" });
-          if (res.ok) {
-            toast.success("App rimossa");
-            router.push(href("/home"));
-          } else {
-            toast.error(MSG.removeFailed);
-          }
-        }}
-      />
-
-      {/*
-        Deleting the project used to take its databases with it, volumes
-        included, and the dialog could only warn about it. Now the services are
-        listed here, each deletable on its own, and going with the project is
-        the opt-in box — off by default, because "I no longer need this app" and
-        "I no longer need this data" are different sentences.
-      */}
-      <DangerZone
-        title="Elimina il progetto"
-        description={
-          linkedServices.length > 0
-            ? "I servizi collegati restano, se non li includi"
-            : "Processi, file, immagini e cronologia dei deploy"
-        }
-        actionLabel="Elimina progetto"
-        confirm={{
-          title: `Eliminare ${project.name}?`,
-          confirmLabel: deleteServices ? "Elimina tutto" : "Elimina progetto",
-          description: deleteServices
-            ? "Processi, container, immagini e cronologia verranno eliminati, insieme ai servizi collegati e ai loro volumi. I dati dei database non sono recuperabili."
-            : linkedServices.length > 0
-              ? "Processi, file, immagini e cronologia verranno eliminati. I servizi collegati restano come servizi autonomi, con i loro dati."
-              : "Processi, file, immagini e cronologia dei deploy verranno eliminati.",
-        }}
-        onConfirm={async () => {
-          const res = await fetch(
-            api(`/api/projects/${project.id}${deleteServices ? "?services=delete" : ""}`),
-            { method: "DELETE" }
-          );
-          if (res.ok) {
-            toast.success("Progetto eliminato");
-            router.push(href("/home"));
-          } else {
-            toast.error(MSG.deleteFailed);
-          }
-        }}
-      >
-        {linkedServices.length > 0 && (
-          <div className="space-y-3">
-            <ul className="space-y-1.5">
-              {linkedServices.map((service) => (
-                <LinkedServiceDelete key={service.id} service={service} onDeleted={refreshServices} />
-              ))}
-            </ul>
-            <CheckboxField
-              isSelected={deleteServices}
-              onChange={setDeleteServices}
-              label={
-                <span className="text-muted text-xs leading-relaxed">
-                  Elimina anche{" "}
-                  {linkedServices.length === 1
-                    ? "il servizio collegato"
-                    : `i ${linkedServices.length} servizi collegati`}{" "}
-                  e i loro dati. <strong className="text-foreground">Non è recuperabile.</strong>{" "}
-                  Senza la spunta restano come servizi autonomi, container e volumi compresi, nella
-                  cartella del progetto.
-                </span>
-              }
-            />
-          </div>
-        )}
-      </DangerZone>
+      </div>
     </div>
   );
 }
