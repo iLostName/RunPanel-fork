@@ -19,6 +19,10 @@ Per chi usa già il pannello: dove sono finite le cose e cosa c'è di nuovo. Nie
 
 Tre passi, e il progetto viene creato solo alla fine: sorgente (GitHub o ZIP trascinato), revisione di quello che il pannello ha riconosciuto (per esempio *Next.js · porta 3000*), messa online con il primo deploy seguito dal vivo. Se serve un database viene creato e collegato insieme; le variabili si incollano da un `.env`; un indirizzo si sceglie tra i domini configurati. Se un passo non riesce, non resta niente a metà. Vedi [Distribuire un progetto](deploy.md#creare-un-progetto).
 
+## App pronte da installare
+
+**Nuovo progetto › Da un modello** apre un catalogo di app a un clic: n8n, WordPress, Uptime Kuma, Umami, Ghost, Vaultwarden, Gitea e MinIO. Il pannello fa solo le domande che servono, genera le password (mostrate una volta, da copiare), sceglie una porta libera, crea anche il database quando l'app ne vuole uno e fa il primo deploy. Dopo è un normale progetto Compose. Vedi [Distribuire un progetto](deploy.md).
+
 ## La pagina del progetto
 
 - Si apre sulla **Panoramica**: lo stato in una frase e la prossima cosa da fare, l'ultimo deploy, risorse e grafici, uptime, indirizzi, database collegati.

@@ -19,6 +19,10 @@ For people already using the panel: where things moved and what was added. Nothi
 
 Three steps, and the project is created only at the end: source (GitHub, or a ZIP dropped on the page), a review of what the panel recognised (for example *Next.js · porta 3000*), and going online with the first deploy followed live. A database the app needs is created and linked along with it; variables are pasted from a `.env`; an address is picked from the configured domains. If a step fails, nothing is left half-made. See [Deploying a project](deploy.md#creating-a-project).
 
+## Ready-made apps
+
+**Nuovo progetto › Da un modello** (from a template) opens a catalogue of one-click apps: n8n, WordPress, Uptime Kuma, Umami, Ghost, Vaultwarden, Gitea and MinIO. The panel asks only what is needed, generates the passwords (shown once, to copy), picks a free port, creates the database when the app wants one and runs the first deploy. Afterwards it is an ordinary Compose project. See [Deploying a project](deploy.md).
+
 ## The project page
 
 - It opens on **Panoramica** (overview): the state in one sentence and the next thing to do, the last deploy, resources and charts, uptime, addresses, linked databases.
