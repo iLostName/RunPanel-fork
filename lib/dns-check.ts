@@ -166,7 +166,7 @@ export function checkDns(input: DnsCheckInput): DnsCheck {
       summary =
         A.status !== "wrong" && AAAA.status === "wrong" && AAAA.expected.length === 0
           ? `C'è anche un record AAAA (IPv6) verso ${list(AAAA.foreign)}, ma questo server non ha un indirizzo IPv6 pubblico: cancellalo, o chi usa IPv6 (e Let's Encrypt) finisce altrove.`
-          : `Il record punta a ${list(foreign)}, che non è questo server.`;
+          : `Il record punta a ${list(foreign)}, che non ${foreign.length > 1 ? "sono" : "è"} questo server.`;
     }
   } else if (has("proxied")) {
     state = "cloudflare";

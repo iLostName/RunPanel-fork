@@ -1,58 +1,69 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { Button, Input, TextField } from "@heroui/react";
-import { FormDialog } from "@/components/ui/FormDialog";
 import { Icon } from "@iconify/react";
+import { FormDialog } from "@/components/ui/FormDialog";
 import { toast } from "@/lib/toast";
 import { Section } from "@/components/ui/Section";
 import { Field } from "@/components/ui/Field";
-import { SelectField } from "@/components/ui/SelectField";
 import { CheckboxField } from "@/components/ui/CheckboxField";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { Badge } from "@/components/ui/Badge";
+import { ListRow, RowMenu, type RowAction } from "@/components/ui/ListRow";
+import { Technical } from "@/components/ui/Technical";
+import { FieldHint, Hint } from "@/components/ui/Hint";
+import { useExpertMode } from "@/components/Providers";
 import { MSG } from "@/lib/copy";
 import { formatWhen } from "@/lib/format";
-import { HOST_STATUS } from "@/lib/host-status";
-import { TONE_DOT } from "@/lib/status";
-import { cn } from "@/lib/utils";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
-import { HOST_PASSWORD_MIN, HOST_USER_RULE, SUBDOMAIN_RULE, hostAuthSchema, subdomainSchema } from "@/lib/validation";
+import { wwwTwin } from "@/lib/proxy-names";
+import { HOST_PASSWORD_MIN, HOST_USER_RULE, hostAuthSchema } from "@/lib/validation";
+import { AddressBadge, addressDetail, needsAttention } from "@/app/(panel)/domains/_components/AddressStatus";
+import { PROXY_SERVES, ProxySetup, type ProxyInfo } from "@/app/(panel)/domains/_components/ProxySetup";
 import type { HostView } from "@/services/proxy";
+import { DomainAddDialog } from "./DomainAddDialog";
+import { DomainCheckDialog } from "./DomainCheckDialog";
 
 /**
- * The names a project is served on.
+ * The addresses a project is served on, and everything it takes to get one:
+ * the domain, the DNS record, nginx, the certificate — from here, without a
+ * trip to the Domains page unless the reader wants one.
  *
  * Saved on its own, like the access section, rather than through the sticky
- * bar: assigning a name rewrites nginx and asks Let's Encrypt for a
+ * bar: adding an address rewrites nginx and asks Let's Encrypt for a
  * certificate, which is not something a form save should do in passing.
  */
 
 interface HostsData {
   hosts: HostView[];
-  domains: { id: string; name: string }[];
-  proxy: { state: string; detail: string };
+  domains: { id: string; name: string; cloudflare?: boolean }[];
+  proxy: ProxyInfo;
   hasPort: boolean;
   restricted: boolean;
+  /** Absent from a server on an older panel, which let the routes decide. */
+  canEdit?: boolean;
   canManageDomains: boolean;
+  panelHostname?: string | null;
 }
-
-const SERVES = new Set(["ready", "no-certbot"]);
 
 export function DomainSection({ projectId }: { projectId: string }) {
   const api = useNodeApi();
   const href = useServerHref();
-  // Polled with the page: a certificate arrives seconds after the name is assigned.
+  const { expert } = useExpertMode();
+  // Polled with the page: a certificate arrives seconds after the DNS record is right.
   const { data, refresh } = useResource<HostsData>(api(`/api/projects/${projectId}/hosts`), {
     intervalMs: usePollInterval(5000),
   });
 
-  const [subdomain, setSubdomain] = useState("");
-  const [domainId, setDomainId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  // A fresh form at every opening, without resetting it field by field.
+  const [addKey, setAddKey] = useState(0);
+  const [checking, setChecking] = useState<HostView | null>(null);
+  const justAdded = useRef<HostView | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [removing, setRemoving] = useState<HostView | null>(null);
   const [locking, setLocking] = useState<HostView | null>(null);
@@ -62,8 +73,15 @@ export function DomainSection({ projectId }: { projectId: string }) {
   const [authErrors, setAuthErrors] = useState<{ user?: string; password?: string }>({});
 
   const hosts = data?.hosts ?? [];
-  const domains = data?.domains ?? [];
-  const chosen = domains.find((d) => d.id === domainId) ?? (domains.length === 1 ? domains[0] : null);
+  const canEdit = data?.canEdit ?? true;
+  const canAdd = !!data && canEdit && data.canManageDomains && data.hasPort;
+  const proxyServes = data ? PROXY_SERVES.has(data.proxy.state) : true;
+  const byId = new Map(hosts.map((host) => [host.id, host]));
+  // Each name, then the twin that redirects to it.
+  const ordered = hosts
+    .filter((host) => !host.redirectTo || !byId.has(host.redirectTo))
+    .flatMap((host) => [host, ...hosts.filter((twin) => twin.redirectTo === host.id)]);
+  const twinsOf = (host: HostView) => hosts.filter((twin) => twin.redirectTo === host.id);
 
   async function send(path: string, init: RequestInit): Promise<Record<string, unknown> | null> {
     try {
@@ -80,24 +98,9 @@ export function DomainSection({ projectId }: { projectId: string }) {
     }
   }
 
-  async function assign() {
-    const parsed = subdomainSchema.safeParse(subdomain);
-    if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? SUBDOMAIN_RULE);
-      return;
-    }
-    if (!chosen) return;
-    setBusy("add");
-    const body = await send(`/api/projects/${projectId}/hosts`, {
-      method: "POST",
-      body: JSON.stringify({ domainId: chosen.id, subdomain: parsed.data }),
-    });
-    setBusy(null);
-    if (!body) return;
-    toast.success(`${parsed.data ? `${parsed.data}.` : ""}${chosen.name} assegnato`);
-    setSubdomain("");
-    setError(null);
-    await refresh();
+  function openAdd() {
+    setAddKey((key) => key + 1);
+    setAdding(true);
   }
 
   async function retry(host: HostView) {
@@ -118,6 +121,18 @@ export function DomainSection({ projectId }: { projectId: string }) {
     });
     setBusy(null);
     if (body) await refresh();
+  }
+
+  async function addTwin(host: HostView, twinName: string) {
+    setBusy(host.id);
+    const body = await send(`/api/projects/${projectId}/hosts/${host.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ www: true }),
+    });
+    setBusy(null);
+    if (!body) return;
+    toast.success(`${twinName} ora rimanda a ${host.hostname}`);
+    await refresh();
   }
 
   function openLock(host: HostView) {
@@ -170,7 +185,6 @@ export function DomainSection({ projectId }: { projectId: string }) {
     return true;
   }
 
-  const proxyServes = data ? SERVES.has(data.proxy.state) : true;
   const domainsLink = data?.canManageDomains ? (
     <Link href={href("/domains")} className="text-accent hover:underline">
       Domini
@@ -179,94 +193,159 @@ export function DomainSection({ projectId }: { projectId: string }) {
     "Domini (serve il permesso Accesso all'host)"
   );
 
+  const names = ordered.filter((host) => !host.redirectTo);
+  const problems = hosts.filter(
+    (host) => host.applyError !== null || host.certificate === "error" || host.certificate === "expired"
+  ).length;
+  const summary =
+    hosts.length === 0
+      ? "Nessun indirizzo"
+      : `${names.map((host) => host.hostname).join(", ")}${
+          problems > 0
+            ? ` · ${problems === 1 ? "1 da sistemare" : `${problems} da sistemare`}`
+            : hosts.some(needsAttention)
+              ? " · certificato in attesa"
+              : ""
+        }`;
+
+  function rowActions(host: HostView): RowAction[] {
+    const actions: RowAction[] = [
+      { id: "check", label: "Controlla DNS e HTTPS", icon: "solar:routing-2-linear", onAction: () => setChecking(host) },
+    ];
+    if (!canEdit) return actions;
+    if (data?.proxy.state === "ready" && host.certificate !== "issuing") {
+      actions.push({
+        id: "retry",
+        label: "Richiedi il certificato",
+        icon: "solar:restart-linear",
+        disabled: busy === host.id,
+        onAction: () => void retry(host),
+      });
+    }
+    const domain = data?.domains.find((d) => d.id === host.domainId);
+    const twinName = !host.redirectTo && domain ? wwwTwin(host.subdomain, domain.name)?.hostname : undefined;
+    if (twinName && data?.canManageDomains && twinsOf(host).length === 0) {
+      actions.push({
+        id: "twin",
+        label: `Aggiungi ${twinName}, che rimanda qui`,
+        icon: "solar:forward-linear",
+        disabled: busy === host.id,
+        onAction: () => void addTwin(host, twinName),
+      });
+    }
+    if (host.authUser) {
+      actions.push({ id: "password", label: "Cambia password", icon: "solar:key-minimalistic-linear", onAction: () => openLock(host) });
+    }
+    actions.push({ id: "remove", label: "Rimuovi", icon: "solar:trash-bin-trash-linear", danger: true, onAction: () => setRemoving(host) });
+    return actions;
+  }
+
+  const removingTwins = removing ? twinsOf(removing) : [];
+
   return (
     <Section
-      title="Dominio"
-      summary={hosts.length > 0 ? hosts.map((h) => h.hostname).join(", ") : "Nessun nome"}
+      title="Indirizzi"
+      summary={summary}
+      actions={
+        canAdd ? (
+          <Button size="sm" variant="secondary" onPress={openAdd}>
+            <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+            Aggiungi
+          </Button>
+        ) : undefined
+      }
     >
       {data && !proxyServes && (
-        <Hint tone="warn" title="nginx su questo server non è pronto">
-          {data.proxy.detail} Si sistema da {domainsLink}: i nomi assegnati intanto restano in attesa.
-        </Hint>
+        <div className="space-y-3">
+          <Hint tone="warn" title="nginx su questo server non è pronto">
+            {data.proxy.detail}{" "}
+            {data.canManageDomains
+              ? "Gli indirizzi intanto restano in attesa."
+              : <>Lo prepara chi ha il permesso Accesso all&apos;host, dalla pagina {domainsLink}: gli indirizzi intanto restano in attesa.</>}
+          </Hint>
+          {data.canManageDomains && <ProxySetup proxy={data.proxy} onChanged={refresh} />}
+        </div>
       )}
+      {data && data.proxy.state === "no-certbot" && data.canManageDomains && <ProxySetup proxy={data.proxy} onChanged={refresh} />}
 
-      {hosts.length > 0 && (
-        <ul className="divide-border divide-y">
-          {hosts.map((host) => {
-            const status = HOST_STATUS[host.status] ?? HOST_STATUS.pending;
+      {ordered.length > 0 && (
+        <ul className="divide-border -my-1 divide-y">
+          {ordered.map((host) => {
+            const twin = host.redirectTo ? byId.get(host.redirectTo) : undefined;
             const url = `${host.status === "active" ? "https" : "http"}://${host.hostname}`;
+            const failed = host.status === "error" || host.applyError !== null;
             return (
-              <li key={host.id} className="space-y-2 py-3 first:pt-0">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0 space-y-1">
-                    <a href={url} target="_blank" rel="noreferrer" className="text-foreground inline-flex items-center gap-1 font-mono text-sm hover:underline">
+              <li key={host.id} className={twin ? "pl-6" : undefined}>
+                <ListRow
+                  className="px-0"
+                  title={
+                    <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-mono hover:underline">
+                      {twin && <Icon icon="solar:forward-linear" width={14} className="text-muted" aria-hidden />}
                       {host.hostname}
                       <Icon icon="solar:square-arrow-right-up-linear" width={14} aria-hidden />
                     </a>
-                    <p className="text-muted flex flex-wrap items-center gap-x-3 text-xs">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className={cn("size-1.5 rounded-full", TONE_DOT[status.tone])} aria-hidden />
-                        {status.label}
-                      </span>
-                      {host.certExpiresAt && <span>scade {formatWhen(host.certExpiresAt)}, si rinnova da solo</span>}
-                      {host.authUser && (
-                        <span className="inline-flex items-center gap-1">
-                          <Icon icon="solar:lock-keyhole-minimalistic-linear" width={12} aria-hidden />
-                          password per <span className="font-mono">{host.authUser}</span>
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 gap-1.5">
-                    {(host.status === "error" || host.status === "pending") && data?.proxy.state === "ready" && (
-                      <Button variant="ghost" size="sm" onPress={() => retry(host)} isPending={busy === host.id}>
-                        <Icon icon="solar:restart-linear" width={16} aria-hidden />
-                        Richiedi il certificato
+                  }
+                  status={<AddressBadge host={host} />}
+                  badges={
+                    host.authUser ? (
+                      <Badge icon="solar:lock-keyhole-minimalistic-linear">password per {host.authUser}</Badge>
+                    ) : undefined
+                  }
+                  description={twin ? `Rimanda a ${twin.hostname}` : failed ? undefined : addressDetail(host, proxyServes)}
+                  meta={
+                    expert && host.certExpiresAt && (host.certificate === "active" || host.certificate === "expiring")
+                      ? `Certificato valido fino al ${formatWhen(host.certExpiresAt)}`
+                      : undefined
+                  }
+                  action={
+                    needsAttention(host) ? (
+                      <Button size="sm" variant="secondary" onPress={() => setChecking(host)}>
+                        Verifica
                       </Button>
+                    ) : undefined
+                  }
+                  menu={<RowMenu label={`Azioni per ${host.hostname}`} actions={rowActions(host)} />}
+                />
+
+                {failed && (
+                  <div className="-mt-1 space-y-1 pb-3">
+                    <p className="text-danger text-xs">{addressDetail(host, proxyServes)}</p>
+                    {host.status === "error" && host.explanation && host.lastError && (
+                      <Technical>
+                        <p className="text-muted font-mono text-meta break-words">{host.lastError}</p>
+                      </Technical>
                     )}
-                    <Button variant="ghost" size="sm" className="text-danger" onPress={() => setRemoving(host)}>
-                      Rimuovi
-                    </Button>
                   </div>
-                </div>
-
-                {host.applyError && <p className="text-danger text-xs">{host.applyError}</p>}
-                {host.status === "error" && host.lastError && <p className="text-danger text-xs">{host.lastError}</p>}
-
-                {data?.restricted && (
-                  <CheckboxField
-                    label="Raggiungibile da tutti tramite il nome"
-                    description={
-                      host.publicAccess
-                        ? "La porta resta limitata, il nome è aperto: è il modo per esporre il progetto solo in HTTPS."
-                        : "Il nome segue le stesse regole della porta, in Chi può collegarsi."
-                    }
-                    isSelected={host.publicAccess}
-                    onChange={(next) => setPublic(host, next)}
-                    isDisabled={busy === host.id}
-                  />
                 )}
 
-                <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-                  <CheckboxField
-                    label="Chiedi una password"
-                    description={
-                      host.authUser
-                        ? "Il browser chiede utente e password prima di mostrare il progetto. La porta non cambia."
-                        : "Chi apre il nome deve inserire utente e password. La porta non cambia."
-                    }
-                    isSelected={host.authUser !== null}
-                    onChange={(next) => (next ? openLock(host) : setUnlocking(host))}
-                    isDisabled={busy === host.id}
-                    className="flex-1"
-                  />
-                  {host.authUser && (
-                    <Button variant="ghost" size="sm" onPress={() => openLock(host)}>
-                      <Icon icon="solar:key-minimalistic-linear" width={16} aria-hidden />
-                      Cambia password
-                    </Button>
-                  )}
-                </div>
+                {!twin && canEdit && (
+                  <div className="space-y-1 pb-3">
+                    {data?.restricted && (
+                      <CheckboxField
+                        label="Raggiungibile da tutti tramite l'indirizzo"
+                        description={
+                          host.publicAccess
+                            ? "La porta resta limitata, l'indirizzo è aperto: è il modo per esporre il progetto solo in HTTPS."
+                            : "L'indirizzo segue le stesse regole della porta, quelle della sezione sulla rete."
+                        }
+                        isSelected={host.publicAccess}
+                        onChange={(next) => setPublic(host, next)}
+                        isDisabled={busy === host.id}
+                      />
+                    )}
+                    <CheckboxField
+                      label="Chiedi una password"
+                      description={
+                        host.authUser
+                          ? "Il browser chiede utente e password prima di mostrare il progetto. La porta non cambia."
+                          : "Chi apre l'indirizzo deve inserire utente e password. La porta non cambia."
+                      }
+                      isSelected={host.authUser !== null}
+                      onChange={(next) => (next ? openLock(host) : setUnlocking(host))}
+                      isDisabled={busy === host.id}
+                    />
+                  </div>
+                )}
               </li>
             );
           })}
@@ -274,62 +353,69 @@ export function DomainSection({ projectId }: { projectId: string }) {
       )}
 
       {!data ? null : !data.hasPort ? (
-        <FieldHint>Senza una porta non c&apos;è niente da servire: impostala in Build e avvio.</FieldHint>
-      ) : !data.canManageDomains ? (
-        <FieldHint>Un nuovo nome lo assegna chi ha il permesso Accesso all&apos;host.</FieldHint>
-      ) : domains.length === 0 ? (
-        <Hint title="Nessun dominio su questo server">Aggiungine uno da {domainsLink}, poi torna qui.</Hint>
-      ) : (
-        <>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
-            <Field label="Sottodominio" hint={SUBDOMAIN_RULE} error={error ?? undefined} className="sm:flex-1">
-              <TextField
-                value={subdomain}
-                onChange={(value) => {
-                  setSubdomain(value);
-                  setError(null);
-                }}
-                aria-label="Sottodominio"
-              >
-                <Input placeholder="app" className="font-mono" />
-              </TextField>
-            </Field>
-            <div className="sm:mt-7 sm:w-56">
-              <SelectField
-                ariaLabel="Dominio"
-                value={chosen?.id ?? null}
-                onChange={setDomainId}
-                options={domains.map((d) => ({ value: d.id, label: `.${d.name}` }))}
-              />
-            </div>
-            <Button
-              size="sm"
-              className="sm:mt-7"
-              onPress={assign}
-              isPending={busy === "add"}
-              isDisabled={!chosen}
-            >
-              <Icon icon="solar:link-round-linear" width={16} aria-hidden />
-              Assegna
-            </Button>
-          </div>
-          {chosen && (
-            <FieldHint>
-              Il progetto risponderà su{" "}
-              <Code>https://{subdomain.trim() ? `${subdomain.trim().toLowerCase()}.` : ""}{chosen.name}</Code>.{" "}
-              {subdomain.trim()
-                ? "Il certificato arriva da solo in qualche secondo, se il record DNS punta a questo server."
-                : <>Il dominio intero non è coperto da <Code>*.{chosen.name}</Code>: serve un record <Code>A</Code> anche per <Code>{chosen.name}</Code>, poi il certificato arriva da solo.</>}
-            </FieldHint>
-          )}
-        </>
+        <FieldHint>
+          Per avere un indirizzo il progetto deve avere una porta: impostala nel campo Porta, in Applicazione, e salva.
+        </FieldHint>
+      ) : !canEdit ? null : !data.canManageDomains ? (
+        <FieldHint>Un nuovo indirizzo lo aggiunge chi ha il permesso Accesso all&apos;host.</FieldHint>
+      ) : hosts.length === 0 ? (
+        <div className="flex flex-col items-start gap-2">
+          <p className="text-muted text-sm">
+            Con un indirizzo il progetto si apre da <span className="font-mono">app.tuodominio.it</span>, in HTTPS, invece
+            che da IP e porta.
+          </p>
+          <Button size="sm" onPress={openAdd}>
+            <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+            Aggiungi un indirizzo
+          </Button>
+        </div>
+      ) : null}
+
+      {data && (
+        <DomainAddDialog
+          key={addKey}
+          projectId={projectId}
+          isOpen={adding}
+          onOpenChange={(open) => {
+            setAdding(open);
+            // What comes next for the new address — its DNS record — in the same
+            // commit that closes the form, so the two dialogs never overlap.
+            if (!open && justAdded.current) {
+              setChecking(justAdded.current);
+              justAdded.current = null;
+            }
+          }}
+          data={data}
+          onChanged={refresh}
+          onAdded={(host) => {
+            justAdded.current = host;
+            void refresh();
+          }}
+        />
+      )}
+
+      {data && (
+        <DomainCheckDialog
+          projectId={projectId}
+          host={checking ? (byId.get(checking.id) ?? checking) : null}
+          hosts={hosts}
+          proxy={data.proxy}
+          canEdit={canEdit}
+          canManageDomains={data.canManageDomains}
+          onClose={() => setChecking(null)}
+          onChanged={refresh}
+        />
       )}
 
       <ConfirmDialog
         isOpen={removing !== null}
         onOpenChange={(open) => !open && setRemoving(null)}
         title={`Rimuovere ${removing?.hostname ?? ""}?`}
-        description="nginx smette di servire il nome e il suo certificato viene cancellato. Il progetto resta raggiungibile dalla sua porta."
+        description={
+          removingTwins.length > 0
+            ? `nginx smette di servirlo, insieme a ${removingTwins.map((t) => t.hostname).join(", ")} che rimanda qui, e i loro certificati vengono cancellati. Il progetto resta raggiungibile dalla sua porta.`
+            : "nginx smette di servire l'indirizzo e il suo certificato viene cancellato. Il progetto resta raggiungibile dalla sua porta."
+        }
         confirmLabel="Rimuovi"
         destructive
         onConfirm={remove}
@@ -371,8 +457,8 @@ export function DomainSection({ projectId }: { projectId: string }) {
         </Field>
         {locking && locking.status !== "active" && (
           <Hint tone="warn" title="Ancora senza certificato">
-            Finché il nome è servito in HTTP la password viaggia in chiaro: aspetta il certificato prima di usarla
-            su una rete che non controlli.
+            Finché l&apos;indirizzo è servito in HTTP la password viaggia in chiaro: aspetta il certificato prima di
+            usarla su una rete che non controlli.
           </Hint>
         )}
       </FormDialog>
@@ -381,7 +467,7 @@ export function DomainSection({ projectId }: { projectId: string }) {
         isOpen={unlocking !== null}
         onOpenChange={(open) => !open && setUnlocking(null)}
         title={`Togliere la password da ${unlocking?.hostname ?? ""}?`}
-        description="Il nome torna aperto a chi lo raggiunge, secondo le regole di accesso del progetto."
+        description="L'indirizzo torna aperto a chi lo raggiunge, secondo le regole di accesso del progetto."
         confirmLabel="Togli la password"
         destructive
         onConfirm={unlock}

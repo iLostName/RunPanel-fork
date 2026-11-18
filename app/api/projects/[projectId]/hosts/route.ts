@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireProject } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
-import { hasPermission } from "@/lib/authz";
+import { PROJECT_ACTIONS, hasPermission, satisfies } from "@/lib/authz";
 import { getDb } from "@/lib/db";
 import { getSetting } from "@/lib/settings";
 import { hostnameFor, wwwTwin } from "@/lib/proxy-names";
@@ -53,6 +53,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
       : { state: proxy.state, detail: proxy.detail },
     hasPort: project.port !== null,
     restricted: readAccess(project).mode === "restricted",
+    // Whether the section offers to change its names at all, or only shows them.
+    canEdit: satisfies(denied.access, PROJECT_ACTIONS.settings),
     // Whether to point at the Domains page or only say who can add a domain.
     canManageDomains,
     // So the form can say so while the name is typed, not only once it is sent.
