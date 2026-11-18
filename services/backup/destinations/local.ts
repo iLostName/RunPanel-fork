@@ -147,6 +147,16 @@ export function localDestination(row: BackupDestinationsTable, raw: Record<strin
         if (back !== marker) {
           return { ok: false, message: `Il file scritto in ${directory} si rilegge diverso: il disco potrebbe essere danneggiato.` };
         }
+        // A folder of its own on the very disk of the panel's data protects
+        // from a deletion, not from the disk. It is also what an unmounted
+        // second disk looks like: its empty mount point, on the system disk.
+        if (base && sameDisk(base, config.dataDir)) {
+          return {
+            ok: true,
+            warning: true,
+            message: `Scrittura e lettura riuscite in ${directory}, ma è sullo stesso disco dei dati del pannello: se quel disco si guasta, le copie si perdono insieme. Se doveva essere un altro disco, controlla che sia montato.`,
+          };
+        }
         return { ok: true, message: `Scrittura e lettura riuscite in ${directory}, su questo server.` };
       } catch (err) {
         fs.rmSync(probe, { force: true });
@@ -193,6 +203,15 @@ function placeCopy(source: string, target: string): void {
   fs.renameSync(partial, target);
   // Renaming a name onto another name of the same file leaves both in place.
   fs.rmSync(partial, { force: true });
+}
+
+/** Whether two paths are on one filesystem; unknown counts as not. */
+function sameDisk(a: string, b: string): boolean {
+  try {
+    return fs.statSync(a).dev === fs.statSync(b).dev;
+  } catch {
+    return false;
+  }
 }
 
 function missingFolder(base: string): string {
