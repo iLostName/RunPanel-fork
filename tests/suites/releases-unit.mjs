@@ -5,7 +5,8 @@ import { pathToFileURL } from "node:url";
 
 /**
  * Release folders for native projects, without a filesystem: the rules that
- * decide when a deploy gets a folder of its own, what in it is data shared
+ * decide when a deploy gets a folder of its own (only once the operator opted
+ * in, never by default), what in it is data shared
  * with the project folder and what is the version's own, what is handed over
  * when a version stops, which versions stay on disk, and when a failed deploy
  * goes back. Then the wiring, read off the sources, of everything that has to
@@ -24,9 +25,9 @@ export async function run({ repoRoot }) {
 
   // --- when ---------------------------------------------------------------------
   {
-    const base = { runtimeType: "node", platform: "linux", sourceType: "github", gitCheckout: true, rollbackEnabled: true };
+    const base = { runtimeType: "node", platform: "linux", sourceType: "github", gitCheckout: true, rollbackEnabled: true, nativeEnabled: true };
     const mode = (patch) => rel.releaseMode({ ...base, ...patch });
-    r.check("a node project from git on Linux gets a folder per version", mode({}).on === true);
+    r.check("a node project from git on Linux that opted in gets a folder per version", mode({}).on === true);
     r.check("so do static and custom ones", mode({ runtimeType: "static" }).on && mode({ runtimeType: "custom" }).on);
     r.check("macOS too: nothing in it is Linux-only", mode({ platform: "darwin" }).on === true);
     r.check("Docker and Compose never do", mode({ runtimeType: "docker" }).reason === "runtime" && mode({ runtimeType: "compose" }).reason === "runtime");
@@ -34,7 +35,28 @@ export async function run({ repoRoot }) {
     r.check("an uploaded ZIP builds in place", mode({ sourceType: "upload" }).reason === "source");
     r.check("a project folder that is not a git checkout builds in place", mode({ gitCheckout: false }).reason === "no-git");
     r.check("the automatic return off means in place, as before", mode({ rollbackEnabled: false }).reason === "setting");
+    r.check("without the native opt-in, in place too", mode({ nativeEnabled: false }).reason === "setting");
     r.check("the page asks the platform alone", rel.releasesSupported("linux") && !rel.releasesSupported("win32"));
+  }
+
+  // --- opt-in --------------------------------------------------------------------------
+  {
+    const { parseContract, parseContractJson } = await import(pathToFileURL(join(repoRoot, "lib", "deploy-contract.ts")).href);
+    const linux = { runtimeType: "node", platform: "linux", sourceType: "github", gitCheckout: true };
+    const modeFor = (contract) =>
+      rel.releaseMode({ ...linux, rollbackEnabled: contract.rollback.enabled, nativeEnabled: contract.rollback.native });
+
+    const fresh = parseContractJson("{}");
+    r.check("a project nobody configured keeps the Docker return on", fresh.rollback.enabled === true);
+    r.check("and builds in place: version folders are off until asked for", fresh.rollback.native === false && modeFor(fresh).on === false);
+    r.check("an existing project's stored contract builds in place after the update", modeFor(parseContractJson('{"version":1,"commands":{"start":"node server.js"}}')).on === false);
+    r.check("Docker's own switch alone does not move a native project", modeFor(parseContract({ rollback: { enabled: true } })).on === false);
+    r.check("both switches on: version folders", modeFor(parseContract({ rollback: { enabled: true, native: true } })).on === true);
+    r.check("turned off again: in place", modeFor(parseContract({ rollback: { enabled: true, native: false } })).on === false);
+    r.check(
+      "Docker still goes back without the native flag",
+      rel.rollbackPlan({ healthFailed: true, cancelled: false, rollbackEnabled: fresh.rollback.enabled, runtimeType: "docker", usedRelease: false, previous: null }).attempt === true
+    );
   }
 
   // --- what is a version's own ----------------------------------------------------
@@ -227,7 +249,26 @@ export async function run({ repoRoot }) {
   // --- what follows the version that runs ------------------------------------------------------------------
   {
     const pipeline = source("services", "deploy-pipeline.ts");
-    r.check("the pipeline decides on the resolved contract", pipeline.includes("rollbackEnabled: contract.rollback.enabled"));
+    r.check(
+      "the pipeline decides on the resolved contract, opt-in included",
+      pipeline.includes("rollbackEnabled: contract.rollback.enabled") && pipeline.includes("nativeEnabled: contract.rollback.native")
+    );
+    r.check(
+      "turned off, the next deploy builds in place and hands the last version's data to the project folder",
+      /const leaving = !release && IN_PLACE_BUILD_RUNTIMES\.has\(project\.runtime_type\) && currentRelease\(project\.slug\) !== null/.test(pipeline) &&
+        pipeline.includes("leftReleases = await leaveReleases(project.slug, contract, appendLog)") &&
+        pipeline.includes("pruneReleases(project, contract, appendLog, { keepNone: !release })")
+    );
+    r.check(
+      "and the version folders it leaves are only removed after that deploy worked",
+      pipeline.indexOf("{ keepNone: !release }") > pipeline.indexOf("await runPhase(\"post-deploy\"") &&
+        pipeline.indexOf("{ keepNone: !release }") < pipeline.indexOf("=== ${label} successful ===")
+    );
+    const panel = source("app", "(panel)", "projects", "[projectId]", "_components", "settings", "HealthcheckPanel.tsx");
+    r.check(
+      "the settings switch for a native project writes the opt-in, and is marked new",
+      panel.includes("isSelected={contract.rollback.enabled && contract.rollback.native}") && panel.includes("native: true") && panel.includes(">Nuovo<")
+    );
     r.check(
       "the version folder is made before the env file and the build",
       pipeline.indexOf("await createRelease(") > 0 &&

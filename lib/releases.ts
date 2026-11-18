@@ -5,7 +5,8 @@ import path from "path";
  *
  * A native app used to build in the folder it runs from, so by the time a new
  * version failed its health check the previous one's files were gone and there
- * was nothing to go back to. Each deploy now builds into a folder of its own:
+ * was nothing to go back to. A project that opts in (`releaseMode`) now builds
+ * each deploy into a folder of its own:
  *
  *   <dataDir>/repos/<slug>                 the project folder, as before: the
  *                                          git checkout, and every file the app
@@ -113,7 +114,10 @@ export type ReleaseMode = { on: true } | { on: false; reason: ReleaseOffReason }
  *  - only from a git repository: an uploaded ZIP is the project folder itself,
  *    with no record of which files came from the archive and which the app
  *    wrote, so there is no telling code from data;
- *  - and only while the project's automatic return is on. Off, the deploy
+ *  - and only once the operator turned it on for this project: the automatic
+ *    return (`rollback.enabled`, which Docker shares) and the native opt-in
+ *    (`rollback.native`, off by default) both. An update of the panel never
+ *    moves a live project into version folders by itself. Off, the deploy
  *    builds in place exactly as it did before, which is also the way back for
  *    a project that does not build well in a separate folder.
  */
@@ -123,12 +127,13 @@ export function releaseMode(input: {
   sourceType: string;
   gitCheckout: boolean;
   rollbackEnabled: boolean;
+  nativeEnabled: boolean;
 }): ReleaseMode {
   if (!RELEASE_RUNTIMES.has(input.runtimeType)) return { on: false, reason: "runtime" };
   if (!releasesSupported(input.platform)) return { on: false, reason: "platform" };
   if (input.sourceType !== "github") return { on: false, reason: "source" };
   if (!input.gitCheckout) return { on: false, reason: "no-git" };
-  if (!input.rollbackEnabled) return { on: false, reason: "setting" };
+  if (!input.rollbackEnabled || !input.nativeEnabled) return { on: false, reason: "setting" };
   return { on: true };
 }
 

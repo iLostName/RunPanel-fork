@@ -31,8 +31,8 @@ export function relocatedArtifactDir(stored: string, slug: string, reposDir: str
 
 /**
  * The same for a native project's version folder, `<releasesDir>/<slug>/<id>`,
- * which is where a deploy builds and starts the app when the project has its
- * automatic return on (lib/releases.ts).
+ * which is where a deploy builds and starts the app once the project opted in
+ * to version folders (lib/releases.ts).
  */
 export function relocatedReleaseDir(stored: string, slug: string, releasesDir: string): string | null {
   const parts = stored.split(/[\\/]+/);

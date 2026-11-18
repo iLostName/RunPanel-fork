@@ -531,10 +531,12 @@ async function runDeploy(
       A folder of its own for this version, or the project folder as before.
 
       Decided here, on the resolved contract, because the automatic return is
-      what switches it: off, a native project builds in place exactly as it
-      always did. Made before the env file, the post-source commands and the
-      build, which all run in it. Nothing has been stopped yet, so a version
-      folder that cannot be made fails a deploy that cost nothing.
+      what switches it — together with the native opt-in, off unless the
+      operator turned it on, and which a repository cannot set for itself
+      (`PANEL_ONLY_FIELDS`). Off, a native project builds in place exactly as
+      it always did. Made before the env file, the post-source commands and
+      the build, which all run in it. Nothing has been stopped yet, so a
+      version folder that cannot be made fails a deploy that cost nothing.
     */
     const releases = releaseMode({
       runtimeType: project.runtime_type,
@@ -542,6 +544,7 @@ async function runDeploy(
       sourceType: project.source_type,
       gitCheckout: repoExists(project.slug),
       rollbackEnabled: contract.rollback.enabled,
+      nativeEnabled: contract.rollback.native,
     });
 
     if (releases.on) {

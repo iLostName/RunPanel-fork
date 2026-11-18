@@ -369,5 +369,13 @@ async function linked(r, fsx, base, log) {
   r.check("but not over a file git tracks there", leaving.kept.includes("tracked.db") && readFileSync(at(checkout, "tracked.db"), "utf8") === "in git");
   fsx.clearCurrent(root);
   r.check("and nothing is current any more", fsx.readCurrent(root) === null && !existsSync(join(root, "current")));
+
+  // Turned off: nothing to move back. Everything a version used is a real file
+  // in the project folder, which is still the clean checkout an in-place deploy
+  // pulls into.
+  const kept = ["server.js", "package.json", "data/app.sqlite", "prisma/dev.db", "public/uploads/old.png", ".env.local", "sessions/s1", "db.json", "fresh.db", "added.db"];
+  const missing = kept.filter((p) => !existsSync(at(checkout, p)) || isLink(at(checkout, p)));
+  r.check("turned off, the project folder alone holds the code and every file the versions kept", missing.length === 0, missing.join(", "));
+  r.check("and is still a clean checkout", git(checkout, "status", "--porcelain") === "", git(checkout, "status", "--porcelain"));
   r.check("the displaced copies are kept under the releases folder", readdirSync(join(root, ".displaced")).length === 1);
 }
