@@ -115,7 +115,7 @@ export function parseRcloneToken(text: string): { token: string } | { error: str
     }
   }
   if (!parsed || typeof parsed !== "object") {
-    return { error: "Non riconosco un token: incolla quello che rclone ha stampato tra ---> e <---End paste" };
+    return { error: "Non riconosco un token: incolla quello che rclone authorize ha stampato tra ---> e <---End paste" };
   }
   const token = parsed as Record<string, unknown>;
   if (typeof token.access_token !== "string" || !token.access_token) {
