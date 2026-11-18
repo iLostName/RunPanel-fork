@@ -109,7 +109,8 @@ export interface BackupManifest {
  *
  * `open` hands back a stream rather than a path on purpose: it is the one
  * decision that decides whether a second destination — Telegram, S3 — is a new
- * file or a refactor of the restore path.
+ * file or a refactor of the restore path. Telegram proved it: an archive kept
+ * there in several pieces still comes back as one stream.
  */
 export interface Destination {
   id: string;
@@ -123,10 +124,10 @@ export interface Destination {
    * destinations hands the same staged archive to each of them in turn, and
    * the runner removes it once they have all finished.
    */
-  put(localPath: string, fileName: string): Promise<{ ref: string; bytes: number }>;
+  put(localPath: string, fileName: string, options?: PutOptions): Promise<{ ref: string; bytes: number }>;
   remove(ref: string): Promise<void>;
   open(ref: string): Promise<Readable>;
-  stat(ref: string): Promise<{ bytes: number; exists: boolean }>;
+  stat(ref: string): Promise<DestinationStat>;
   /** Behind the "Verifica" button, so a broken destination is found before the night it matters. */
   test(): Promise<DestinationCheck>;
   /**
@@ -142,6 +143,27 @@ export interface Destination {
    * cannot be told.
    */
   location?(): string;
+}
+
+/**
+ * What the run hands a destination along with the archive. Optional, because
+ * a copy on the same disk has nothing to report; an upload that takes an hour
+ * does, and a run log that sits still for that hour looks hung.
+ */
+export interface PutOptions {
+  /** A line in the run's log: progress, a wait the service asked for. */
+  log?: (line: string) => void;
+  signal?: AbortSignal;
+}
+
+export interface DestinationStat {
+  bytes: number;
+  exists: boolean;
+  /**
+   * Why `exists` is false, in plain Italian, when the destination can say more
+   * than "gone": one missing piece of an archive stored in several.
+   */
+  detail?: string;
 }
 
 /** What "Verifica" found. `message` is plain Italian; `code` and `detail` are for expert mode. */

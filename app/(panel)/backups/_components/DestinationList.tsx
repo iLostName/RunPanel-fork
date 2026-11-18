@@ -144,7 +144,13 @@ export function DestinationList({
               {remaining.map((destination) => (
                 <Dropdown.Item key={destination.id} id={destination.id} textValue={destination.name}>
                   <Icon
-                    icon={destination.type === "local" ? "solar:server-linear" : "solar:cloud-storage-linear"}
+                    icon={
+                      destination.type === "local"
+                        ? "solar:server-linear"
+                        : destination.type === "telegram"
+                          ? "solar:plain-linear"
+                          : "solar:cloud-storage-linear"
+                    }
                     width={15}
                     aria-hidden
                   />
@@ -167,7 +173,7 @@ export function DestinationList({
           ? list.length > 1
             ? "Almeno una copia esce da questo server: se il server si rompe, il backup resta. Il ripristino usa la prima copia disponibile, partendo da quelle su questo server."
             : "Gli archivi vanno fuori da questo server: se il server si rompe, il backup resta."
-          : "Tutte le copie sono su dischi di questo server: un guasto, un furto o un ransomware le prenderebbe insieme. Per la regola 3-2-1 aggiungi una copia fuori da qui, per esempio su S3."}
+          : "Tutte le copie sono su dischi di questo server: un guasto, un furto o un ransomware le prenderebbe insieme. Per la regola 3-2-1 aggiungi una copia fuori da qui, per esempio su S3 o su Telegram."}
       </FieldHint>
     </div>
   );

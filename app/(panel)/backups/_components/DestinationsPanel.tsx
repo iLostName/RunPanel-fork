@@ -27,6 +27,23 @@ import type { DestinationView } from "@/components/backups/types";
 
 type Row = Located<DestinationView>;
 
+/** Where a deleted destination's archives stay, for the sentence that says so. */
+function whereArchivesStay(destination: DestinationView): string {
+  if (destination.type === "local") return destination.directory ? `in ${destination.directory}` : "sul disco di questo server";
+  if (destination.type === "s3") return `nel bucket «${destination.target?.bucket ?? ""}»`;
+  if (destination.type === "telegram") {
+    return destination.telegram?.chat === "channel"
+      ? `su Telegram, nel canale «${destination.telegram.title ?? ""}»`
+      : "su Telegram, nei Messaggi salvati";
+  }
+  return `in «${destination.name}»`;
+}
+
+const ICONS: Record<string, string> = {
+  local: "solar:server-linear",
+  telegram: "solar:plain-linear",
+};
+
 function usageLine(destination: DestinationView): string {
   const used = destination.usedBy ?? [];
   const count = destination.usedByCount ?? used.length;
@@ -213,14 +230,19 @@ export function DestinationsPanel({
             <>
               <p>
                 Qui ci sono {archives} archivi{deleting.archiveBytes ? ` (${formatBytes(deleting.archiveBytes)})` : ""}.
-                Restano dove sono — {deleting.type === "local" ? (deleting.directory ? `in ${deleting.directory}` : "sul disco di questo server") : deleting.type === "s3" ? `nel bucket «${deleting.target?.bucket ?? ""}»` : `in «${deleting.name}»`} —
+                Restano dove sono — {whereArchivesStay(deleting)} —
                 ma il pannello non li vedrà più: niente ripristino, download o pulizia automatica da qui.
               </p>
               <p className="mt-2">
                 I backup che hanno una copia anche in un&apos;altra destinazione restano ripristinabili da quella. Se ti
                 servono gli altri, scaricali prima dalla Cronologia.
               </p>
+              {deleting.type === "telegram" && (
+                <p className="mt-2">La sessione del pannello su Telegram viene chiusa: sparisce dai dispositivi dell&apos;account.</p>
+              )}
             </>
+          ) : deleting.type === "telegram" ? (
+            "Nessuna pianificazione la usa e non contiene archivi. La sessione del pannello su Telegram viene chiusa."
           ) : (
             "Nessuna pianificazione la usa e non contiene archivi."
           )
@@ -255,7 +277,7 @@ export function DestinationsPanel({
         <EmptyState
           icon="solar:folder-linear"
           title="Nessuna destinazione"
-          description="Una destinazione è dove finiscono gli archivi: il disco di questo server o un archivio S3 fuori da qui."
+          description="Una destinazione è dove finiscono gli archivi: il disco di questo server, oppure un archivio S3 o Telegram fuori da qui."
           className="py-8"
         />
       ) : (
@@ -263,7 +285,7 @@ export function DestinationsPanel({
           {destinations.map((row) => (
             <li key={`${row.memberId}:${row.id}`}>
               <ListRow
-                icon={row.type === "local" ? "solar:server-linear" : "solar:cloud-storage-linear"}
+                icon={ICONS[row.type] ?? "solar:cloud-storage-linear"}
                 title={row.name}
                 badges={
                   <>
@@ -360,6 +382,7 @@ export function DestinationsPanel({
           editing={editing.detail}
           archives={editing.row.archives ?? 0}
           apiFor={(path) => memberApi(editing.row.memberId, path)}
+          memberId={editing.row.memberId}
         />
       )}
 

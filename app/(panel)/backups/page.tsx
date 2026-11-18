@@ -423,7 +423,7 @@ export default function BackupsPage() {
           error={destinationsError}
           description={
             isSolo
-              ? "Dove finiscono gli archivi: il disco di questo server o un archivio S3 fuori da qui. Una pianificazione può mandarne una copia in più destinazioni."
+              ? "Dove finiscono gli archivi: il disco di questo server, oppure un archivio S3 o Telegram fuori da qui. Una pianificazione può mandarne una copia in più destinazioni."
               : `Dove finiscono gli archivi. Una nuova va su ${nameOf(target)}.`
           }
           onChanged={refreshAll}

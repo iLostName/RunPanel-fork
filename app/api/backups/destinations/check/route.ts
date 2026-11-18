@@ -3,9 +3,13 @@ import { z } from "zod";
 import { isDenied, requireOwner, requirePermission } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
+import { formatBytes } from "@/lib/format";
 import { destinationTypes, destinationUpdateSchema, localConfigSchema, s3ConfigSchema } from "@/lib/validation";
-import { destinationConfig, transientDestination } from "@/services/backup/destinations";
+import { destinationConfig, destinationUsage, transientDestination } from "@/services/backup/destinations";
 import { localPathProblem } from "@/services/backup/destinations/local";
+import { accountLabel } from "@/services/backup/destinations/telegram";
+import { linkedTelegramLogin } from "@/services/backup/telegram-login";
+import { relinkTelegramConfig } from "@/services/backup/telegram-setup";
 
 const checkSchema = z
   .object({
@@ -44,6 +48,8 @@ export async function POST(request: NextRequest) {
     }
 
     const { type, destinationId } = parsed.data;
+    if (type === "telegram") return checkTelegram(denied.principal.userId, parsed.data);
+
     let merged: Record<string, unknown> = {};
     if (destinationId) {
       const owner = await requireOwner();
@@ -91,4 +97,60 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, message: err instanceof Error ? err.message : "Verifica fallita" });
     }
   });
+}
+
+/**
+ * Telegram, tried before saving: with a finished login, the account it linked
+ * (and, editing, whether it can still reach the archives already stored);
+ * with only `destinationId`, the stored session. A channel that does not exist
+ * yet cannot be written to: the panel creates it when the destination is
+ * saved, and checks it then.
+ */
+async function checkTelegram(userId: string, data: z.infer<typeof checkSchema>): Promise<NextResponse> {
+  let stored: Record<string, unknown> | null = null;
+  if (data.destinationId) {
+    const owner = await requireOwner();
+    if (isDenied(owner)) return owner;
+    const db = await getDb();
+    const row = await db.selectFrom("backup_destinations").selectAll().where("id", "=", data.destinationId).executeTakeFirst();
+    if (!row) return NextResponse.json({ error: "Destinazione non trovata" }, { status: 404 });
+    if (row.type !== "telegram") return NextResponse.json({ error: "Il tipo di una destinazione non cambia" }, { status: 400 });
+    stored = destinationConfig(row);
+  }
+
+  // The update shape of the union: a local folder has no login.
+  const form = data.config && !("path" in data.config) ? data.config : {};
+  const loginId = "loginId" in form ? form.loginId : undefined;
+  const chat = "chat" in form ? form.chat : undefined;
+  let config = stored;
+  if (loginId) {
+    const linked = linkedTelegramLogin(loginId, userId);
+    if (!linked) {
+      return NextResponse.json({ ok: false, message: "Il collegamento a Telegram è scaduto o non è finito: collega di nuovo l'account." });
+    }
+    if (stored && data.destinationId) {
+      const archives = (await destinationUsage()).get(data.destinationId)?.archives ?? 0;
+      try {
+        config = { ...(await relinkTelegramConfig(stored, linked, archives)).config };
+      } catch (err) {
+        return NextResponse.json({ ok: false, message: err instanceof Error ? err.message : "Verifica non riuscita" });
+      }
+    } else if ((chat ?? "channel") === "channel") {
+      return NextResponse.json({
+        ok: true,
+        message:
+          `Account ${accountLabel(linked.account)}, ${linked.account.premium ? "con Telegram Premium" : "senza Premium"}: ` +
+          `parti fino a ${formatBytes(linked.maxPartBytes)}. Il canale viene creato quando salvi, e verificato allora.`,
+      });
+    } else {
+      config = { apiId: linked.apiId, apiHash: linked.apiHash, session: linked.session, chat: { kind: "saved" } };
+    }
+  }
+  if (!config) return NextResponse.json({ ok: false, message: "Collega prima l'account Telegram." });
+
+  try {
+    return NextResponse.json(await transientDestination("telegram", config).test());
+  } catch (err) {
+    return NextResponse.json({ ok: false, message: err instanceof Error ? err.message : "Verifica non riuscita" });
+  }
 }

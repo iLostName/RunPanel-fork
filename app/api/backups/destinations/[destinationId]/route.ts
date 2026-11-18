@@ -12,14 +12,37 @@ import {
   destinationDirectory,
   destinationUsage,
 } from "@/services/backup/destinations";
+import { TelegramFailure, readTelegramChat } from "@/services/backup/destinations/telegram";
+import { linkedTelegramLogin, releaseTelegramLogin } from "@/services/backup/telegram-login";
+import { logOutTelegram, relinkTelegramConfig } from "@/services/backup/telegram-setup";
+import type { DestinationCheck } from "@/services/backup/types";
 
 type Params = { params: Promise<{ destinationId: string }> };
+
+/** A Telegram destination as its edit form shows it: who, where, and whether a session is stored — never the session. */
+function telegramDetail(config: Record<string, unknown>) {
+  const chat = readTelegramChat(config.chat);
+  const account = config.account && typeof config.account === "object" ? (config.account as Record<string, unknown>) : null;
+  const apiId = typeof config.apiId === "number" ? config.apiId : null;
+  return {
+    apiId,
+    hasApiHash: typeof config.apiHash === "string" && config.apiHash !== "",
+    linked: typeof config.session === "string" && config.session !== "",
+    chat: chat?.kind ?? "saved",
+    channelTitle: chat?.kind === "channel" ? chat.title || null : null,
+    account:
+      account && typeof account.name === "string"
+        ? { name: account.name, username: typeof account.username === "string" ? account.username : null }
+        : null,
+  };
+}
 
 /**
  * One destination, as the edit form needs it: everything but the secret.
  *
  * Owner only, like editing it. The access key id is here and not in the list
- * because the list is read by anyone holding `backup`.
+ * because the list is read by anyone holding `backup`; the same goes for the
+ * Telegram account a destination is linked to.
  */
 export async function GET(_request: NextRequest, { params }: Params) {
   const denied = await requireOwner();
@@ -52,6 +75,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
             hasSecret: text("secretAccessKey") !== "",
           }
         : null,
+    telegram: row.type === "telegram" ? telegramDetail(config) : null,
   });
 }
 
@@ -122,12 +146,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         { status: 403 }
       );
     }
-    if (config && row.type !== "s3") {
+    if (config && row.type === "local") {
       // A local destination's folder is where its archives are: changed, every
       // copy it holds would be looked for somewhere else. A new destination
       // is the honest way to write elsewhere.
       return NextResponse.json(
         { error: "La cartella di un disco locale non si cambia: aggiungi una nuova destinazione che scriva altrove" },
+        { status: 400 }
+      );
+    }
+    if (config && row.type === "telegram" && !config.loginId) {
+      return NextResponse.json(
+        { error: "Di una destinazione Telegram si cambia solo l'account, collegandolo di nuovo: la chat resta quella degli archivi." },
         { status: 400 }
       );
     }
@@ -145,7 +175,27 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       patch.name = name;
     }
 
-    if (config) {
+    // Re-linking Telegram: a finished login replaces the account, and the chat
+    // the archives are in stays — or the re-link is refused with the reason.
+    let relinked: string | null = null;
+    if (config && row.type === "telegram" && config.loginId) {
+      const linked = linkedTelegramLogin(config.loginId, denied.principal.userId);
+      if (!linked) {
+        return NextResponse.json(
+          { error: "Il collegamento a Telegram è scaduto o non è finito: collega di nuovo l'account." },
+          { status: 400 }
+        );
+      }
+      const archives = (await destinationUsage()).get(destinationId)?.archives ?? 0;
+      try {
+        const { config: next } = await relinkTelegramConfig(destinationConfig(row), linked, archives);
+        patch.config = encrypt(JSON.stringify(next));
+      } catch (err) {
+        const failure = err instanceof TelegramFailure ? err : new TelegramFailure(err instanceof Error ? err.message : String(err));
+        return NextResponse.json({ error: failure.message, code: failure.code }, { status: failure.code ? 502 : 409 });
+      }
+      relinked = config.loginId;
+    } else if (config) {
       const stored = destinationConfig(row);
       // An empty secret means "the one you have": the form never receives it,
       // so it cannot send it back.
@@ -168,7 +218,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
 
     await db.updateTable("backup_destinations").set(patch).where("id", "=", destinationId).execute();
-    return NextResponse.json({ ok: true, id: destinationId, name: patch.name ?? row.name });
+
+    let check: DestinationCheck | undefined;
+    if (relinked && patch.config) {
+      // The session is the destination's now: let go of it without logging it
+      // out, and end the one it replaces instead of leaving it among the
+      // account's devices.
+      await releaseTelegramLogin(relinked, denied.principal.userId);
+      void logOutTelegram(destinationConfig(row)).catch(() => {});
+      check = await buildDestination({ ...row, ...patch, config: patch.config })
+        .test()
+        .catch((err: unknown) => ({ ok: false, message: err instanceof Error ? err.message : "Verifica non riuscita" }));
+    }
+    return NextResponse.json({ ok: true, id: destinationId, name: patch.name ?? row.name, ...(check ? { check } : {}) });
   });
 }
 
@@ -278,6 +340,10 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     });
 
     for (const runId of new Set(affected)) await syncRunArchive(runId).catch(() => {});
+
+    // A Telegram session nothing uses any more is a door left open on the
+    // whole account: closed at Telegram, the archives stay in the chat.
+    if (row.type === "telegram") void logOutTelegram(destinationConfig(row)).catch(() => {});
 
     return NextResponse.json({ ok: true, orphanedArchives: used.archives, newDefault });
   });

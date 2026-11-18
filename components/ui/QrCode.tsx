@@ -4,7 +4,9 @@ import { useMemo } from "react";
 import { encodeQr, qrSvgPath } from "@/lib/qr";
 
 /**
- * A QR code, drawn as one SVG path from `lib/qr.ts`.
+ * A QR code, drawn as one SVG path from `lib/qr.ts`: the authenticator app's
+ * `otpauth://` URI in two-factor setup, Telegram's `tg://login` token when a
+ * backup destination links an account.
  *
  * Always dark on white, whatever the theme: phone cameras and scanner apps
  * look for dark modules on a light ground, and many cannot read the inverted

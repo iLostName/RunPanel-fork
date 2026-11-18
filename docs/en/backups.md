@@ -61,6 +61,7 @@ Still in **Backup dei volumi**, each volume can exclude paths relative to its ro
 
 - **Disco locale** (local disk): `data/backups/archives/<year>/<month>`, files 0600. Created at first start. The owner can add more local destinations with a **folder** of their own (under **Avanzate** in the form), say a second disk or a mounted NAS: a full path, outside the panel's data directory, that already exists and that the panel's user can write to; archives go to `<folder>/<year>/<month>`. The folder cannot be changed afterwards: to write elsewhere, add a new destination. When the folder is on the same disk as the panel's data, **Verifica** succeeds but says so: that is also what happens when the second disk is not mounted and its empty mount point gets written. An archive that only lives on the machine it protects dies with it: add an S3 destination for that.
 - **S3-compatible**: Amazon S3, Cloudflare R2, Backblaze B2, Hetzner Object Storage, Wasabi, and MinIO or any server of your own. Picking the service fills the endpoint and the addressing style; the region is usually the only field to change. Bucket, keys and an optional prefix complete it; the configuration is encrypted. `https://` anywhere, `http://` only to a private address. The object is named `<prefix>/<file>` and uploaded in one request: on AWS the 5 GB per-object limit applies. After the upload the panel reads back the size the bucket kept, and a mismatch fails the run.
+- **Telegram**: a private channel the panel creates, or your Saved Messages, through your own account. Archives larger than one Telegram file are split into parts. See [Telegram](#telegram) below.
 
 A new destination, or one being edited, is **tried before it is saved**: a test object is written, read back and deleted. A failed check saves nothing and says why; **Salva comunque** (save anyway) is there for a bucket that is unreachable from here on purpose. **Verifica** (check) in the list runs the same test later. A bucket where the key cannot delete is accepted with a warning: that is a deliberate protection against ransomware, but retention then cannot remove old archives.
 
@@ -74,13 +75,39 @@ From the list, the owner can also:
 
 Other accounts holding the `backup` permission can add destinations, check them, rename them and delete one that holds nothing, but not change where an existing one writes or which one is the default: either would move everyone's archives, the owner's included.
 
-Every archive is first built in `data/backups/staging`, S3 included: local free space is needed, and the backup stops if it falls under 2 GB.
+Every archive is first built in `data/backups/staging`, S3 and Telegram included: local free space is needed, and the backup stops if it falls under 2 GB.
+
+### Telegram
+
+Archives go to Telegram through **your own account**, not a bot: a bot uploads 50 MB at most, an account up to 2 GB per file, 4 GB with Telegram Premium.
+
+**The keys.** Telegram wants every program to use its own, and the panel ships none:
+
+1. Open [my.telegram.org](https://my.telegram.org) and sign in with the number of the account that will hold the backups: the code arrives in the Telegram app.
+2. Choose **API development tools** and create an app: any name and title (for example *RunPanel*), platform *Other*; URL and description can stay empty.
+3. In **Backup › Destinazioni › Aggiungi › Telegram** paste **api_id** and **api_hash**.
+
+**Linking.** With the **QR code**: on the phone open Telegram › Settings › Devices › Link Desktop Device and scan it (it renews itself every 30 seconds). Or with the **phone number**: Telegram sends a code in the app or by SMS. If the account has two-step verification, the panel asks for that password too. The login waits on the server, ten minutes to complete it and twenty to save; the session it produces goes only into the destination's encrypted configuration and never passes through the browser. An abandoned login is closed, at Telegram too. Starting one takes the same permission as adding a destination; attempts are limited, because Telegram locks out for hours an account that asks for too many codes.
+
+**Where.** A **private channel** the panel creates for this server when you save ("RunPanel · backup di" followed by the server's name, which you can change), or your **Saved Messages**. The chat is chosen when the destination is created and does not change afterwards: the archives are there. Do not delete or edit their messages by hand: the panel finds them by message number.
+
+**Parts.** A Telegram file has at most 4000 pieces of 512 KiB, 8000 with Premium: 2000 and 4000 MiB. At every backup the panel reads from the account whether it is Premium — a subscription can lapse — and the piece count from Telegram's configuration, and keeps a 20 MiB margin: parts of up to 1980 MiB, or 3980 MiB with Premium. A larger archive is split into parts uploaded as separate documents (`….zip.enc.001`, `.002`…), read straight from the archive file with no temporary copies. Each part's caption gives the archive's name, the part ("Parte 2 di 3"), its size and its sha256. The reference stored with the run lists the messages in order: restore, integrity check and download fetch the parts in sequence and rebuild the usual archive, checking each part's sha256. Without the panel, download the parts from the chat and join them with `cat name.zip.enc.* > name.zip.enc` (on Windows `copy /b name.zip.enc.001 + name.zip.enc.002 name.zip.enc`).
+
+The run's log shows the account, whether it is Premium, how many parts the archive takes, the progress and the waits Telegram asks for (FLOOD_WAIT): up to 15 minutes the panel waits and carries on by itself, beyond that the run fails and the next one tries again. A dropped connection is retried piece by piece. If a part does not make it, the parts already uploaded are deleted: the chat only ever holds whole archives. After the upload the panel reads back from Telegram the size of every part, and a mismatch fails the run. **Verifica** (check) connects, says whether the account is Premium and how large a part can be, then writes, reads back and deletes a small file in the chat.
+
+**Security.**
+
+- The session opens **the whole account**: whoever got it could read and write every chat. It is encrypted with the panel's key like every other secret and used only for backups; if you prefer, use a Telegram account dedicated to backups. In Telegram › Settings › Devices it shows as "RunPanel su" followed by the server's name: closing it there makes the next backup fail with "Sessione chiusa dall'app di Telegram, o scaduta: ricollega l'account" (session closed from the app, or expired: link the account again).
+- Telegram's cloud chats are **not end-to-end encrypted**: Telegram can read what you upload. Turn on [encryption with a password](#encryption-with-a-password); while it is off, the destination form suggests it.
+- Deleting the destination also ends its session at Telegram; the archives stay in the chat.
+
+**Re-linking.** With the session closed, **Modifica › Ricollega l'account** (edit, link the account again) logs in again (an empty api_hash keeps the stored one) and the old session is ended. Another account is accepted only if it still reaches the archives: for a channel it must be one of its admins, for Saved Messages the destination must still be empty. The owner re-links, as for S3 keys.
 
 ## Several copies of every backup (3-2-1)
 
 A policy can write the same archive to several destinations, say the server's disk, a second disk and a bucket: losing a disk, a bucket or an account does not lose the backups. That is the 3-2-1 rule: three copies, on two different media, one off-site.
 
-- **Dove salvare** (where to save), in the policy form, is an ordered list: the first is the **primary**, the others receive an identical copy. **Aggiungi una copia** (add a copy) puts another at the end; each row's ⋯ menu moves it, makes it the primary or removes it. Up to 5 destinations; the same one twice, or two writing to the same place (two local destinations on one folder, two S3 ones on the same bucket and prefix), are refused: a second copy there protects from nothing. Policies that existed before have one destination, and do what they did.
+- **Dove salvare** (where to save), in the policy form, is an ordered list: the first is the **primary**, the others receive an identical copy. **Aggiungi una copia** (add a copy) puts another at the end; each row's ⋯ menu moves it, makes it the primary or removes it. Up to 5 destinations; the same one twice, or two writing to the same place (two local destinations on one folder, two S3 ones on the same bucket and prefix, two Telegram ones on the same channel or the same Saved Messages), are refused: a second copy there protects from nothing. Policies that existed before have one destination, and do what they did.
 - The archive is written **once**, encrypted when the backup password is set, then copied to each destination **one after the other**, in the list's order: the primary first, so the run is restorable as early as it can be. Sequential rather than parallel because the uplink is one — two uploads at once finish no sooner than two in a row — and because the server also runs your apps: one predictable load at a time. On the staging folder's disk the local copy is a link to the file, instant and free; on another disk it is a full copy, written beside the target and renamed only once whole. The staged file stays until every copy has finished.
 - **Quanto tenerne** (retention): each copy follows the policy's rule, or one of its own (**Per ogni destinazione**, with more than one destination): a week on the disk and a year in the bucket, say. Retention removes copies destination by destination, and the newest copy on each destination is never removed; a run leaves the history only when no copy of it is left.
 - **When a copy fails** the backup has not failed: the archive is in the others. The run stays successful (or partial, for missing items), the history shows "2 copie su 3" and the backup notification arrives as a warning, naming the destination and the reason. On the run's page, **Copie** lists every copy with its state, size, where it is and its error; **Riprova la copia** (retry the copy) sends it again from a copy that is there, after comparing it with the sha256 of the archive the run wrote. Only a run where no copy arrived has failed.
@@ -146,7 +173,7 @@ For anyone reading it with other tools: a header — `RPBKENC`, the version (1 b
 Every run records the archive's sha256, and `checksums.txt` the sha256 of each dump and volume. **Verifica integrità** (check integrity), on a run's page, reads the archive back in the background, from the first available copy (and says which, when there are several):
 
 - on the local disk, completely: the archive's sha256, then every member's CRC-32, its sha256 where listed, and every `.gz` decompressed to the end — a dump cut short still has a valid checksum of its own short self;
-- in a bucket, by streaming it once through its sha256, without storing it: that proves the bytes are the ones written; the members are checked again before any restore.
+- in a bucket or on Telegram, by streaming it once through its sha256, without storing it: that proves the bytes are the ones written; the members are checked again before any restore. On Telegram every part's own sha256 is checked too.
 
 An encrypted archive is checked the same way: the sha256 is the encrypted file's, and the members are read through the decryption, which verifies every chunk. If the panel no longer has its password, it checks the sha256 and says the content could not be opened.
 
@@ -158,7 +185,7 @@ Restoring is one dialog. Everything is selected; each item says, in a line, what
 
 Before anything is stopped, copied or overwritten:
 
-1. The archive comes from the first available copy, those on this server's disk first. One on S3 is downloaded into the restore's working folder (free space is needed, plus the 2 GB reserve), hashed on the way in and compared with the sha256 recorded when it was written; a mismatch stops the restore when there is no other copy to try.
+1. The archive comes from the first available copy, those on this server's disk first. One on S3 or Telegram is downloaded into the restore's working folder (free space is needed, plus the 2 GB reserve), hashed on the way in and compared with the sha256 recorded when it was written; a mismatch stops the restore when there is no other copy to try. The parts of an archive split on Telegram are downloaded in order and put back together; if one is missing, the panel says which one before downloading anything, and moves on to the next copy if there is one.
 2. The members the restore will use — only those — are checked as **Verifica integrità** does. A damaged one, or a missing or wrong password for an encrypted archive, stops the restore with nothing touched. An encrypted archive is never decrypted whole to disk: as with a zip, the restore extracts only the members it needs into its working folder, which is removed at the end.
 3. A **safety backup** of the targets goes to the default destination (labelled "Sicurezza pre-ripristino", never removed by retention, deleted by hand). If it fails the restore stops, unless you ticked **Procedi anche senza backup di sicurezza** (go on without a safety backup).
 

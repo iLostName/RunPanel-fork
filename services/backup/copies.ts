@@ -13,7 +13,7 @@ import { archiveForRestore } from "./archive-source";
 import { buildDestination, destinationFacts } from "./destinations";
 import { hashFile } from "./integrity";
 import { FREE_SPACE_RESERVE, archiveFileName, assertBackupId, backupLog, freeBytes } from "./paths";
-import type { Destination } from "./types";
+import type { Destination, DestinationStat } from "./types";
 
 /**
  * Several copies of every backup.
@@ -213,7 +213,9 @@ export async function sendCopies({ runId, file, fileName, bytes, emit, signal }:
     }
 
     try {
-      const stored = await destination.put(file, fileName);
+      // The run's log and its cancellation go along: an upload that takes an
+      // hour, split into parts on Telegram, reports its progress there.
+      const stored = await destination.put(file, fileName, { log: emit, signal });
       await settle(runId, copy, { status: "done", ref: stored.ref, bytes: stored.bytes, error_message: null, finished_at: nowIso() });
       emit(single ? `Archivio pronto: ${formatBytes(stored.bytes)} — ${stored.ref}` : `  ✓ salvata: ${formatBytes(stored.bytes)} — ${stored.ref}`);
     } catch (err) {
@@ -334,7 +336,7 @@ export async function readFirstCopy<T>(
       continue;
     }
 
-    let stat: { bytes: number; exists: boolean };
+    let stat: DestinationStat;
     try {
       stat = await destination.stat(copy.ref as string);
     } catch (err) {
@@ -342,7 +344,9 @@ export async function readFirstCopy<T>(
       continue;
     }
     if (!stat.exists) {
-      passOver(copy, describeMissing(destination));
+      // A destination that can say more than "gone" — which part of an archive
+      // split on Telegram was deleted — says it.
+      passOver(copy, stat.detail ? `L'archivio non è più intero in «${destination.name}». ${stat.detail}` : describeMissing(destination));
       continue;
     }
 
@@ -494,7 +498,7 @@ async function retry(run: BackupRunsTable, copy: CopyRecord): Promise<void> {
 
     if (!copy.row) throw new Error("La destinazione non esiste più");
     const destination = buildDestination(copy.row);
-    const stored = await destination.put(sourceFile, fileName);
+    const stored = await destination.put(sourceFile, fileName, { log: emit });
     await settle(run.id, copy, { status: "done", ref: stored.ref, bytes: stored.bytes, error_message: null, finished_at: nowIso() });
     await syncRunArchive(run.id);
     emit(`  ✓ copia su «${copy.name}» salvata: ${formatBytes(stored.bytes)} — ${stored.ref}`);

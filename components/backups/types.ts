@@ -121,6 +121,8 @@ export interface DestinationView {
   createdAt: string;
   /** Where an S3 destination writes; null for the local disk. Never the keys. */
   target?: { endpoint: string; region: string; bucket: string; prefix: string | null; pathStyle: boolean } | null;
+  /** Where a Telegram destination writes: the chat, never the session or the account. */
+  telegram?: { chat: "channel" | "saved"; title: string | null; linked: boolean } | null;
   /** A local destination's folder of its own; null for the panel's archive folder. */
   directory?: string | null;
   /** The policies writing here that this account can see; `primary` when it is their first destination. */
@@ -147,6 +149,17 @@ export interface RunsResponse {
 export interface TargetCatalog {
   services: { id: string; name: string; type: string; version: string; databases: string[] }[];
   projects: { id: string; slug: string; name: string; sourceType: string; volumes: string[] }[];
+}
+
+/**
+ * Where a Telegram destination writes, said for a list: "Telegram · canale
+ * «RunPanel · backup di srv1»". Shared by the destinations list and the
+ * policy form, which both name a destination by where it puts things.
+ */
+export function telegramWhere(telegram: DestinationView["telegram"]): string {
+  if (!telegram) return "Telegram";
+  if (!telegram.linked) return "Telegram · account da collegare";
+  return telegram.chat === "channel" ? `Telegram · canale «${telegram.title ?? "senza nome"}»` : "Telegram · Messaggi salvati";
 }
 
 /**

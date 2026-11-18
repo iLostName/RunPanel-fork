@@ -20,7 +20,7 @@ import { useResource } from "@/lib/hooks/useResource";
 import { formatWhen } from "@/lib/format";
 import { MSG } from "@/lib/copy";
 import { toast } from "@/lib/toast";
-import { QrCode } from "./QrCode";
+import { QrCode } from "@/components/ui/QrCode";
 import { RecoveryCodes } from "./RecoveryCodes";
 
 /**
