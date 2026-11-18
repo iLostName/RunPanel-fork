@@ -2,12 +2,11 @@
 
 import { memo, useCallback, useMemo, useState } from "react";
 import Link from "next/link";
-import { Button, Dropdown, Input, Label, TextField } from "@heroui/react";
+import { Button, Dropdown } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { toast } from "@/lib/toast";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
-import { useMemberApi, useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
+import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { useClusterList } from "@/lib/hooks/useClusterList";
 import type { Located } from "@/lib/cluster-merge";
 import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
@@ -18,19 +17,19 @@ import { Panel } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
 import { StatTile } from "@/components/ui/StatTile";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { FormDialog } from "@/components/ui/FormDialog";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { HealthBanner } from "@/components/HealthBanner";
 import { ClusterOverview } from "@/components/ClusterOverview";
+import { FolderDialogs, type FolderDialogRequest } from "@/components/folders/FolderDialogs";
+import { MoveMenu } from "@/components/folders/MoveMenu";
+import { useFolderMove } from "@/components/folders/useFolderMove";
 import { statusMeta, TONE_DOT } from "@/lib/status";
 import { formatBytes, formatUptime } from "@/lib/format";
 import {
   distinctFolderNames,
   groupOverview,
   itemKey,
-  moveFailureText,
   serverSections,
   uniqueFolders,
   withLastSeen,
@@ -133,17 +132,6 @@ const TYPE_ICONS: Record<string, string> = {
   redis: "solar:bolt-linear",
 };
 
-async function patchJson(url: string, body: unknown): Promise<{ ok: boolean; status: number; error?: string }> {
-  const res = await fetch(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (res.ok) return { ok: true, status: res.status };
-  const data = await res.json().catch(() => ({}));
-  return { ok: false, status: res.status, error: typeof data.error === "string" ? data.error : undefined };
-}
-
 /** A card links to what it shows, unless the server holding it is not answering. */
 function CardBody({ href, className, children }: { href: string | null; className: string; children: React.ReactNode }) {
   if (!href) return <div className={className}>{children}</div>;
@@ -151,65 +139,6 @@ function CardBody({ href, className, children }: { href: string | null; classNam
     <Link href={href} className={className}>
       {children}
     </Link>
-  );
-}
-
-/**
- * The "⋯" on a card: where this card is filed, and where else it could go.
- *
- * One click, no dialog. The folders are few and named, so listing them is
- * quicker than a picker, and the current one is marked rather than hidden so
- * the menu also answers "which folder am I in" for a card seen out of context.
- */
-function MoveMenu({
-  label,
-  folderId,
-  folders,
-  onMove,
-}: {
-  label: string;
-  folderId: string | null;
-  folders: FolderLike[];
-  onMove: (folderId: string | null) => void;
-}) {
-  return (
-    <Dropdown>
-      <Button
-        variant="ghost"
-        size="sm"
-        isIconOnly
-        aria-label={`Azioni per ${label}`}
-        className="text-muted hover:text-foreground -my-1 h-7 w-7 min-w-0 shrink-0"
-      >
-        <Icon icon="solar:menu-dots-bold" width={16} aria-hidden />
-      </Button>
-      <Dropdown.Popover placement="bottom end">
-        <Dropdown.Menu
-          aria-label={`Sposta ${label}`}
-          onAction={(key) => onMove(key === "root" ? null : String(key))}
-        >
-          <Dropdown.Section>
-            <Dropdown.Item id="root" textValue="Nessuna cartella" isDisabled={folderId === null}>
-              <Icon icon="solar:home-2-linear" width={14} aria-hidden />
-              <span className="flex-1">Nessuna cartella</span>
-              {folderId === null && <Icon icon="solar:check-read-linear" width={14} aria-hidden />}
-            </Dropdown.Item>
-            {folders.map((folder) => (
-              <Dropdown.Item
-                key={folder.id}
-                id={folder.id}
-                textValue={folder.name}
-                isDisabled={folder.id === folderId}
-              >
-                <Icon icon="solar:folder-linear" width={14} aria-hidden />
-                <span className="flex-1 truncate">{folder.name}</span>
-                {folder.id === folderId && <Icon icon="solar:check-read-linear" width={14} aria-hidden />}
-              </Dropdown.Item>
-            ))}
-          </Dropdown.Section>
-        </Dropdown.Menu>
-      </Dropdown.Popover>
-    </Dropdown>
   );
 }
 
@@ -367,12 +296,6 @@ function countLabel(projects: number, services: number, none = "Vuota"): string 
   return parts.length > 0 ? parts.join(" · ") : none;
 }
 
-type FolderDialog =
-  | { kind: "create" }
-  | { kind: "rename"; folder: Located<Folder> }
-  | { kind: "delete"; folder: Located<Folder> }
-  | null;
-
 interface CardProps {
   folders: FolderLike[];
   onMoveProject: (memberId: string, projectId: string, folderId: string | null) => void;
@@ -472,9 +395,8 @@ export default function HomePage() {
   // Every endpoint goes through the shared hooks, so they stop polling when
   // the tab is hidden and never overlap requests.
   const api = useNodeApi();
-  const memberApi = useMemberApi();
   const href = useServerHref();
-  const { isSolo, nodes, selfId, serverParam, nameOf } = useNode();
+  const { isSolo, nodes, selfId, serverParam } = useNode();
   const poll5000 = usePollInterval(5000);
 
   const {
@@ -535,78 +457,32 @@ export default function HomePage() {
     [collapsed]
   );
 
-  const [dialog, setDialog] = useState<FolderDialog>(null);
-  const [nameValue, setNameValue] = useState("");
+  const [folderDialog, setFolderDialog] = useState<FolderDialogRequest<Folder> | null>(null);
 
   // The filing is written on the server that holds the card.
-  const moveFailed = useCallback(
-    (memberId: string, folderId: string | null, result: { status: number; error?: string }) => {
-      const folder = namedFolders.find((f) => f.id === folderId);
-      toast.error(moveFailureText(result, { solo: isSolo, serverName: nameOf(memberId), folder }));
-    },
-    [isSolo, nameOf, namedFolders]
-  );
+  const move = useFolderMove(namedFolders);
 
   const moveProject = useCallback(
     async (memberId: string, projectId: string, folderId: string | null) => {
-      const result = await patchJson(memberApi(memberId, `/api/projects/${projectId}`), { folderId });
-      if (!result.ok) moveFailed(memberId, folderId, result);
+      await move("projects", memberId, projectId, folderId);
       await refreshProjects();
     },
-    [memberApi, moveFailed, refreshProjects]
+    [move, refreshProjects]
   );
 
   const moveService = useCallback(
     async (memberId: string, serviceId: string, folderId: string | null) => {
-      const result = await patchJson(memberApi(memberId, `/api/services/${serviceId}`), { folderId });
-      if (!result.ok) moveFailed(memberId, folderId, result);
+      await move("services", memberId, serviceId, folderId);
       await refreshServices();
     },
-    [memberApi, moveFailed, refreshServices]
+    [move, refreshServices]
   );
 
-  const onFolderAction = useCallback((action: "rename" | "delete", folder: Located<Folder>) => {
-    setNameValue(action === "rename" ? folder.name : "");
-    setDialog({ kind: action, folder });
-  }, []);
-
-  function openCreate() {
-    setNameValue("");
-    setDialog({ kind: "create" });
-  }
-
-  async function submitFolderName() {
-    const name = nameValue.trim();
-    if (!dialog || dialog.kind === "delete" || !name) return;
-    const isRename = dialog.kind === "rename";
-    // Created on this panel, whatever server is on screen: it reaches the others by itself.
-    const memberId = isRename ? dialog.folder.memberId : selfId;
-    const res = await fetch(memberApi(memberId, isRename ? `/api/folders/${dialog.folder.id}` : "/api/folders"), {
-      method: isRename ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      toast.error(data.error ?? (isRename ? "Rinomina non riuscita" : "Creazione non riuscita"));
-      // Keeps the dialog open on what was typed.
-      return false;
-    }
-    await refreshFolders();
-  }
-
-  async function deleteFolder() {
-    if (dialog?.kind !== "delete") return;
-    const res = await fetch(memberApi(dialog.folder.memberId, `/api/folders/${dialog.folder.id}`), { method: "DELETE" });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      toast.error(data.error ?? "Eliminazione non riuscita");
-      return;
-    }
+  const deletedFolder = useCallback(async () => {
     // Its contents moved to the root, so the two lists that carry `folder_id`
     // are stale as well as the folder list itself.
     await Promise.all([refreshFolders(), refreshProjects(), refreshServices()]);
-  }
+  }, [refreshFolders, refreshProjects, refreshServices]);
 
   // Folders first, shared by every server; then what each server holds outside
   // them, this server first. Solo mode is one section with no heading.
@@ -653,7 +529,7 @@ export default function HomePage() {
             {canCreate && (
               <>
                 {canCreateFolder && (
-                  <Button variant="ghost" onPress={openCreate}>
+                  <Button variant="ghost" onPress={() => setFolderDialog({ kind: "create" })}>
                     <Icon icon="solar:folder-with-files-linear" width={16} aria-hidden />
                     Nuova cartella
                   </Button>
@@ -795,7 +671,7 @@ export default function HomePage() {
                             aria-label={`Cartella ${folder.name}`}
                             onAction={(key) => {
                               const f = folders.find((x) => x.id === folder.id);
-                              if (f && (key === "rename" || key === "delete")) onFolderAction(key, f);
+                              if (f && (key === "rename" || key === "delete")) setFolderDialog({ kind: key, folder: f });
                             }}
                           >
                             <Dropdown.Item id="rename" textValue="Rinomina">
@@ -857,41 +733,11 @@ export default function HomePage() {
         </div>
       )}
 
-      <FormDialog
-        isOpen={dialog?.kind === "create" || dialog?.kind === "rename"}
-        onOpenChange={(open) => {
-          if (!open) setDialog(null);
-        }}
-        title={dialog?.kind === "rename" ? "Rinomina cartella" : "Nuova cartella"}
-        submitLabel={dialog?.kind === "rename" ? "Rinomina" : "Crea"}
-        isSubmitDisabled={!nameValue.trim() || (dialog?.kind === "rename" && nameValue.trim() === dialog.folder.name)}
-        onSubmit={submitFolderName}
-      >
-        <div className="space-y-4">
-          <TextField value={nameValue} onChange={setNameValue} autoFocus>
-            <Label>Nome</Label>
-            <Input placeholder="Es. Clienti" maxLength={60} />
-          </TextField>
-          {dialog?.kind === "create" && !isSolo && (
-            <p className="text-muted text-xs">La cartella vale per tutti i server: può contenere progetti e servizi di qualunque server.</p>
-          )}
-        </div>
-      </FormDialog>
-
-      <ConfirmDialog
-        isOpen={dialog?.kind === "delete"}
-        onOpenChange={(open) => {
-          if (!open) setDialog(null);
-        }}
-        title="Eliminare la cartella?"
-        description={
-          dialog?.kind === "delete"
-            ? `"${dialog.folder.name}" sparisce dalla Panoramica${isSolo ? "" : " di tutti i server"}. I progetti e i servizi che contiene non vengono toccati: tornano fuori da ogni cartella.`
-            : undefined
-        }
-        confirmLabel="Elimina"
-        destructive
-        onConfirm={deleteFolder}
+      <FolderDialogs
+        request={folderDialog}
+        onClose={() => setFolderDialog(null)}
+        onSaved={refreshFolders}
+        onDeleted={deletedFolder}
       />
     </>
   );
