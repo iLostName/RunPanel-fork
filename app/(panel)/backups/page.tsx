@@ -12,12 +12,14 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DeleteButton } from "@/components/ui/DangerAction";
-import { DestinationForm } from "./_components/DestinationForm";
+import { DestinationsPanel } from "./_components/DestinationsPanel";
 import { Hint } from "@/components/ui/Hint";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatTile } from "@/components/ui/StatTile";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useResource } from "@/lib/hooks/useResource";
+import { useMe } from "@/lib/hooks/useMe";
+import { capitalize } from "@/lib/schedule";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatBytes, formatDuration, formatRelative, formatWhen } from "@/lib/format";
 import { triggerLabel } from "./_components/format";
@@ -26,12 +28,13 @@ import { onlyMember, type Located, type MemberStatus } from "@/lib/cluster-merge
 import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
 import {
   describeTarget,
+  destinationPhrase,
   type DestinationView,
   type PolicyView,
   type RunView,
   type RunsResponse,
   type TargetCatalog,
-} from "./_components/types";
+} from "@/components/backups/types";
 
 /**
  * The one preset that matters: everything, every night, keep a week.
@@ -87,6 +90,7 @@ export default function BackupsPage() {
   const poll20000 = usePollInterval(20000);
   const poll5000 = usePollInterval(5000);
   const router = useRouter();
+  const me = useMe();
 
   // Solo mode reads this server's routes as always; a cluster reads every
   // server at once and narrows to `?server=` when the URL names one.
@@ -99,7 +103,6 @@ export default function BackupsPage() {
   const cluster = useResource<ClusterBackups>(isSolo ? null : "/api/cluster/backups", { intervalMs: poll5000 });
 
   const [busy, setBusy] = useState<string | null>(null);
-  const [addingDestination, setAddingDestination] = useState(false);
 
   const self = selfId ?? "";
   const tag = <T,>(list: T[] | undefined): Located<T>[] => (list ?? []).map((x) => ({ ...x, memberId: self, memberName: "" }));
@@ -219,13 +222,6 @@ export default function BackupsPage() {
     refreshAll();
   }
 
-  async function testDestination(destination: Located<DestinationView>) {
-    const body = await post(`/api/backups/destinations/${destination.id}`, "Verifica", destination.memberId);
-    if (!body) return;
-    if (body.ok) toast.success(body.message);
-    else toast.error(body.message);
-  }
-
   if ((isSolo ? runs.loading && !runs.data : cluster.loading && !cluster.data)) {
     return (
       <>
@@ -261,6 +257,12 @@ export default function BackupsPage() {
         actions={
           <>
             <ServerFilter />
+            {me.isOwner && (
+              <LinkButton href={href("/backups/upload")} variant="secondary">
+                <Icon icon="solar:upload-minimalistic-linear" width={16} aria-hidden />
+                Ripristina da un archivio
+              </LinkButton>
+            )}
             <LinkButton href={href("/backups/new")}>
               <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
               Nuova pianificazione
@@ -354,11 +356,14 @@ export default function BackupsPage() {
                       {policy.lastStatus && <StatusBadge status={policy.lastStatus} />}
                       <ServerBadge memberId={policy.memberId} />
                     </div>
+                    {/* When and where first, in a sentence; what, on its own line. */}
                     <p className="text-muted mt-0.5 truncate text-xs">
-                      {policy.schedule}
-                      {policy.timezone ? ` · ${policy.timezone}` : ""} ·{" "}
+                      {capitalize(policy.schedule)}
+                      {policy.cron && policy.timezone ? ` (ora di ${policy.timezone})` : ""} ·{" "}
+                      {destinationPhrase(policy.destinationType, policy.destinationName)}
+                    </p>
+                    <p className="text-muted/80 mt-0.5 truncate text-meta">
                       {policy.targets.map((t) => describeTarget(t, catalogFor(policy.memberId))).join(" · ")}
-                      {policy.destinationName ? ` → ${policy.destinationName}` : ""}
                     </p>
                   </div>
 
@@ -409,65 +414,17 @@ export default function BackupsPage() {
 
         {/* Above the history, not under it: the nightly preset needs a destination,
             and below 25 rows of runs nobody found where to add one. */}
-        <Panel padding="flush">
-          <div className="p-4 sm:p-5">
-            <PanelHeader
-              title="Destinazioni"
-              description={isSolo ? "Dove finiscono gli archivi" : `Dove finiscono gli archivi. Una nuova va su ${nameOf(target)}.`}
-              actions={
-                <Button size="sm" variant="secondary" onPress={() => setAddingDestination(true)}>
-                  <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
-                  Aggiungi
-                </Button>
-              }
-            />
-          </div>
-          {destinationsError && !destinationsLoaded ? (
-            <LoadError
-              what="le destinazioni"
-              error={destinationsError}
-              onRetry={refreshAll}
-              className="px-4 pb-4 sm:px-5"
-            />
-          ) : !destinationsLoaded ? (
-            <div className="space-y-2 px-4 pb-4 sm:px-5">
-              <SkeletonBlock className="h-12" />
-            </div>
-          ) : destinationList.length === 0 ? (
-            <EmptyState
-              icon="solar:folder-linear"
-              title="Nessuna destinazione"
-              description="Una destinazione è dove finiscono gli archivi: una cartella su questa macchina o uno storage remoto."
-              className="py-8"
-            />
-          ) : (
-          <ul className="divide-border divide-y">
-            {destinationList.map((destination) => (
-              <li
-                key={`${destination.memberId}:${destination.id}`}
-                className="flex items-center gap-3 px-4 py-3 sm:px-5"
-              >
-                <Icon icon="solar:folder-linear" width={16} className="text-muted" aria-hidden />
-                <div className="min-w-0 flex-1">
-                  <p className="text-foreground flex items-center gap-2 truncate text-sm">
-                    {destination.name}
-                    <ServerBadge memberId={destination.memberId} />
-                  </p>
-                  <p className="text-muted text-xs">{destination.type}</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => testDestination(destination)}
-                  isPending={busy === `/api/backups/destinations/${destination.id}`}
-                >
-                  Verifica
-                </Button>
-              </li>
-            ))}
-          </ul>
-          )}
-        </Panel>
+        <DestinationsPanel
+          destinations={destinationList}
+          loaded={destinationsLoaded}
+          error={destinationsError}
+          description={
+            isSolo
+              ? "Dove finiscono gli archivi: il disco di questo server o un archivio S3 fuori da qui."
+              : `Dove finiscono gli archivi. Una nuova va su ${nameOf(target)}.`
+          }
+          onChanged={refreshAll}
+        />
 
         <Panel padding="flush">
           <div className="p-4 sm:p-5">
@@ -507,11 +464,28 @@ export default function BackupsPage() {
                           <Icon icon="solar:pin-linear" width={14} aria-hidden />
                         </span>
                       )}
+                      {run.verification && (
+                        <span
+                          className={run.verification.status === "ok" ? "text-success" : "text-danger"}
+                          title={
+                            run.verification.status === "ok"
+                              ? `Integrità verificata ${formatWhen(run.verification.checkedAt)}`
+                              : `Verifica non superata ${formatWhen(run.verification.checkedAt)}: archivio danneggiato`
+                          }
+                        >
+                          <Icon
+                            icon={run.verification.status === "ok" ? "solar:shield-check-linear" : "solar:danger-circle-linear"}
+                            width={14}
+                            aria-label={run.verification.status === "ok" ? "Integrità verificata" : "Archivio danneggiato"}
+                          />
+                        </span>
+                      )}
                     </div>
                     <p className="text-muted mt-0.5 truncate text-xs">
                       {formatWhen(run.startedAt)} · {triggerLabel(run.trigger)} ·{" "}
                       {formatDuration(run.durationMs)}
                       {run.archiveBytes ? ` · ${formatBytes(run.archiveBytes)}` : ""}
+                      {run.hasArchive && run.destinationType ? ` · ${destinationPhrase(run.destinationType, run.destinationName)}` : ""}
                       {run.errorMessage ? ` · ${run.errorMessage}` : ""}
                     </p>
                   </div>
@@ -533,8 +507,11 @@ export default function BackupsPage() {
                       isDisabled={run.status === "running"}
                       confirm={{
                         title: "Eliminare questo backup?",
-                        description:
-                          "L'archivio viene cancellato dal disco. Se è l'ultimo riuscito, resti senza un punto di ripristino.",
+                        description: `L'archivio viene cancellato ${
+                          run.destinationType === "s3" && run.destinationName
+                            ? `anche da «${run.destinationName}»`
+                            : "dal disco di questo server"
+                        }. Se è l'ultimo riuscito, resti senza un punto di ripristino.`,
                       }}
                       onConfirm={() => removeRun(run.id, run.memberId)}
                     />
@@ -544,12 +521,6 @@ export default function BackupsPage() {
             </ul>
           )}
         </Panel>
-
-        <DestinationForm
-          isOpen={addingDestination}
-          onOpenChange={setAddingDestination}
-          onCreated={refreshAll}
-        />
 
         <Hint tone="warn" title="Gli archivi contengono segreti">
           Le variabili e le credenziali dei database vengono salvate cifrate con la chiave di questo

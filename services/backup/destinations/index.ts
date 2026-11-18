@@ -39,6 +39,86 @@ export function buildDestination(row: BackupDestinationsTable): Destination {
   return factory(row, destinationConfig(row));
 }
 
+/**
+ * What may be shown about where a destination writes: never the keys.
+ *
+ * The access key id is left out too, although it is not the secret half: the
+ * list is read by anyone holding `backup`, and only the owner edits.
+ */
+export interface DestinationTarget {
+  endpoint: string;
+  region: string;
+  bucket: string;
+  prefix: string | null;
+  pathStyle: boolean;
+}
+
+export function destinationTarget(row: BackupDestinationsTable): DestinationTarget | null {
+  if (row.type !== "s3") return null;
+  const config = destinationConfig(row);
+  const text = (key: string) => (typeof config[key] === "string" ? (config[key] as string) : "");
+  return {
+    endpoint: text("endpoint"),
+    region: text("region"),
+    bucket: text("bucket"),
+    prefix: text("prefix") || null,
+    pathStyle: config.forcePathStyle === true,
+  };
+}
+
+/** Which policies write to each destination, and how many archives each one holds. */
+export async function destinationUsage(): Promise<
+  Map<string, { policies: { id: string; name: string }[]; archives: number; archiveBytes: number }>
+> {
+  const db = await getDb();
+  const [policies, runs] = await Promise.all([
+    db.selectFrom("backup_policies").select(["id", "name", "destination_id"]).orderBy("created_at", "asc").execute(),
+    db
+      .selectFrom("backup_runs")
+      .select(["destination_id", "archive_bytes"])
+      .where("archive_path", "is not", null)
+      .where("destination_id", "is not", null)
+      .execute(),
+  ]);
+
+  const usage = new Map<string, { policies: { id: string; name: string }[]; archives: number; archiveBytes: number }>();
+  const entry = (id: string) => {
+    let found = usage.get(id);
+    if (!found) {
+      found = { policies: [], archives: 0, archiveBytes: 0 };
+      usage.set(id, found);
+    }
+    return found;
+  };
+  for (const policy of policies) entry(policy.destination_id).policies.push({ id: policy.id, name: policy.name });
+  for (const run of runs) {
+    const found = entry(run.destination_id as string);
+    found.archives += 1;
+    found.archiveBytes += run.archive_bytes ?? 0;
+  }
+  return usage;
+}
+
+/**
+ * A destination that exists only for one check: what the form would save,
+ * tried before it is saved, so a wrong key never becomes a stored row.
+ */
+export function transientDestination(type: string, config: Record<string, unknown>): Destination {
+  const factory = FACTORIES[type];
+  if (!factory) throw new Error(`Destinazione di tipo "${type}" non supportata`);
+  const now = new Date().toISOString();
+  const row: BackupDestinationsTable = {
+    id: "check",
+    name: "verifica",
+    type: type as BackupDestinationsTable["type"],
+    config: "",
+    is_default: 0,
+    created_at: now,
+    updated_at: now,
+  };
+  return factory(row, config);
+}
+
 export async function loadDestination(id: string): Promise<Destination> {
   const db = await getDb();
   const row = await db

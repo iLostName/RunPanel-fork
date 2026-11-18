@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
@@ -13,14 +13,15 @@ import { Segmented, SegmentedMulti } from "@/components/ui/Segmented";
 import { SelectField } from "@/components/ui/SelectField";
 import { CheckboxField } from "@/components/ui/CheckboxField";
 import { useResource } from "@/lib/hooks/useResource";
-import { formatWhen } from "@/lib/format";
+import { SchedulePicker } from "@/components/ui/SchedulePicker";
+import { providerLabel } from "./providers";
 import type {
   BackupTarget,
   DestinationView,
   PolicyView,
   ProjectInclude,
   TargetCatalog,
-} from "./types";
+} from "@/components/backups/types";
 import { serviceDisplayName } from "@/lib/service-name";
 import { ServerPicker } from "@/components/cluster/ServerBits";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
@@ -36,13 +37,6 @@ import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
  */
 
 type Scope = "all" | "some" | "none";
-
-const SCHEDULE_PRESETS: { label: string; cron: string }[] = [
-  { label: "Solo su richiesta", cron: "" },
-  { label: "Ogni ora", cron: "0 * * * *" },
-  { label: "Ogni notte alle 03:00", cron: "0 3 * * *" },
-  { label: "Ogni domenica alle 03:00", cron: "0 3 * * 0" },
-];
 
 const INCLUDE_LABELS: Record<ProjectInclude, string> = {
   config: "configurazione ed env",
@@ -138,8 +132,11 @@ export function PolicyForm({ policy }: Props) {
 
   const [name, setName] = useState(policy?.name ?? "Backup notturno");
   const [cron, setCron] = useState(policy?.cron ?? "0 3 * * *");
-  const [timezone, setTimezone] = useState(policy?.timezone ?? "");
+  /** Null follows the panel's zone, which is what a policy saved without one already did. */
+  const [timezone, setTimezone] = useState<string | null>(policy?.timezone ?? null);
   const [chosenDestination, setChosenDestination] = useState(policy?.destinationId ?? "");
+  // The zone a policy without its own is read in: the panel's, else UTC.
+  const settings = useResource<{ timezone_effective?: string }>(api("/api/settings"));
 
   const [databaseScope, setDatabaseScope] = useState<Scope>(initial.databaseScope);
   const [selectedServices, setSelectedServices] = useState(initial.services);
@@ -157,7 +154,7 @@ export function PolicyForm({ policy }: Props) {
     policy?.retentionBytes ? String(Math.round(policy.retentionBytes / 1024 ** 3)) : ""
   );
 
-  const [preview, setPreview] = useState<{ description: string; occurrences: string[] } | null>(null);
+  /** What the server's parser said about the expression; stale once it is empty. */
   const [cronError, setCronError] = useState<string | null>(null);
 
   /**
@@ -194,36 +191,6 @@ export function PolicyForm({ policy }: Props) {
     destinations.data?.destinations.find((d) => d.isDefault)?.id ||
     destinations.data?.destinations[0]?.id ||
     "";
-
-  // The preview comes from the server's parser, not from a second guess written
-  // in the browser — otherwise the form can accept what the scheduler rejects.
-  useEffect(() => {
-    // Nothing to preview, and nothing to clear: an empty expression simply
-    // hides the preview at render time, so the effect never writes state
-    // synchronously into the render that just scheduled it.
-    if (!cron) return;
-
-    const timer = setTimeout(() => {
-      fetch(api("/api/backups/cron-preview"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cron, ...(timezone ? { timezone } : {}), count: 3 }),
-      })
-        .then(async (res) => {
-          const body = await res.json();
-          if (!res.ok) {
-            setPreview(null);
-            setCronError(body.error ?? "Espressione non valida");
-            return;
-          }
-          setCronError(null);
-          setPreview(body);
-        })
-        .catch(() => setCronError("Impossibile verificare la pianificazione"));
-    }, 350);
-
-    return () => clearTimeout(timer);
-  }, [api, cron, timezone]);
 
   const targets = useMemo<BackupTarget[]>(() => {
     const list: BackupTarget[] = [];
@@ -303,7 +270,7 @@ export function PolicyForm({ policy }: Props) {
     const payload = {
       name: name.trim(),
       cron,
-      timezone: timezone.trim() || null,
+      timezone,
       destinationId,
       targets,
       retentionCount: retentionCount ? Number(retentionCount) : null,
@@ -358,13 +325,19 @@ export function PolicyForm({ policy }: Props) {
               onChange={setChosenDestination}
               options={(destinations.data?.destinations ?? []).map((destination) => ({
                 value: destination.id,
-                label: destination.name,
+                label: destination.isDefault ? `${destination.name} (predefinita)` : destination.name,
+                description:
+                  destination.type === "local"
+                    ? "Disco di questo server"
+                    : destination.target
+                      ? `${providerLabel(destination.target.endpoint)} · bucket «${destination.target.bucket}»`
+                      : "Archivio S3",
               }))}
             />
             <FieldHint>
               {(destinations.data?.destinations ?? []).find((d) => d.id === destinationId)?.type === "s3"
-                ? "Gli archivi vanno nel bucket S3 di questa destinazione, fuori da questa macchina."
-                : "Gli archivi restano su questa macchina, in data/backups. Per averli al sicuro anche se il disco si rompe, aggiungi una destinazione S3."}
+                ? "Gli archivi vanno nel bucket di questa destinazione, fuori da questo server."
+                : "Gli archivi restano sul disco di questo server. Per averli al sicuro anche se il server si rompe, aggiungi una destinazione S3."}
             </FieldHint>
           </div>
 
@@ -376,49 +349,18 @@ export function PolicyForm({ policy }: Props) {
       <Panel>
         <PanelHeader
           title="Quando"
-          description="Scegli un intervallo, oppure scrivi un'espressione cron a cinque campi."
+          description="Ogni quanto parte da sola. «Solo su richiesta» la fa partire solo quando premi Esegui ora."
         />
 
-        <div className="mt-4">
-          <Segmented
-            label="Con che frequenza"
-            value={cron}
-            onChange={setCron}
-            options={SCHEDULE_PRESETS.map((preset) => ({
-              value: preset.cron,
-              label: preset.label,
-            }))}
-          />
-        </div>
-
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <TextField value={cron} onChange={setCron}>
-            <Label>Espressione cron</Label>
-            <Input placeholder="0 3 * * *" />
-          </TextField>
-
-          <TextField value={timezone} onChange={setTimezone}>
-            <Label>Fuso orario</Label>
-            <Input placeholder="Europe/Rome" />
-          </TextField>
-        </div>
-
-        <FieldHint>
-          Vuota significa che parte solo quando lo chiedi tu. Il fuso vuoto usa quello del pannello.
-        </FieldHint>
-
-        {cron && cronError && (
-          <Hint tone="warn" className="mt-3">
-            {cronError}
-          </Hint>
-        )}
-
-        {cron && preview && !cronError && (
-          <Hint tone="info" className="mt-3" title={preview.description}>
-            Prossime esecuzioni:{" "}
-            {preview.occurrences.map((occurrence) => formatWhen(occurrence)).join(" · ")}
-          </Hint>
-        )}
+        <SchedulePicker
+          className="mt-4"
+          value={cron}
+          onChange={setCron}
+          timeZone={timezone}
+          onTimeZoneChange={setTimezone}
+          panelTimeZone={settings.data?.timezone_effective ?? null}
+          onValidityChange={setCronError}
+        />
       </Panel>
 
       {/*

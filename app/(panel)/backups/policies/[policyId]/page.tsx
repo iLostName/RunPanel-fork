@@ -8,7 +8,7 @@ import { LoadError } from "@/components/ui/LoadError";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { useResource } from "@/lib/hooks/useResource";
 import { PolicyForm } from "../../_components/PolicyForm";
-import type { PolicyView } from "../../_components/types";
+import type { PolicyView } from "@/components/backups/types";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 export default function EditBackupPolicyPage({

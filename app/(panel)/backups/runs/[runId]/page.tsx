@@ -11,14 +11,16 @@ import { LoadError } from "@/components/ui/LoadError";
 import { Hint } from "@/components/ui/Hint";
 import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
+import { Technical } from "@/components/ui/Technical";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useEventStream } from "@/lib/hooks/useEventStream";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatBytes, formatDuration, formatWhen } from "@/lib/format";
-import { RestoreDialog } from "../../_components/RestoreDialog";
+import { KIND_LABELS, RestoreDialog } from "@/components/backups/RestoreDialog";
+import { IntegrityCheck } from "../../_components/IntegrityCheck";
 import { triggerLabel } from "../../_components/format";
-import type { ArtifactView, RunDetail } from "../../_components/types";
+import { destinationPhrase, type ArtifactView, type RunDetail } from "@/components/backups/types";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 type OpsEvent =
@@ -26,14 +28,6 @@ type OpsEvent =
   | { type: "backup:log"; line: string }
   | { type: "backup:status"; status: string; message?: string }
   | { type: "backup:artifact"; label: string; status: string; bytes?: number; error?: string };
-
-const KIND_LABELS: Record<string, string> = {
-  "service-db": "Database",
-  "panel-store": "Store del pannello",
-  "project-config": "Configurazione",
-  "project-volume": "Volume",
-  "project-repo": "Repository",
-};
 
 export default function BackupRunPage({ params }: { params: Promise<{ runId: string }> }) {
   const poll4000 = usePollInterval(4000);
@@ -175,10 +169,21 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
               value={data.archiveBytes ? formatBytes(data.archiveBytes) : "—"}
             />
             <Field label="Elementi" value={`${ok.length} ok, ${failed.length} falliti, ${skipped.length} saltati`} />
-            {data.checksum && (
-              <Field label="sha256" value={<code className="text-meta">{data.checksum.slice(0, 16)}…</code>} />
+            {data.hasArchive && (
+              <Field
+                label="Salvato"
+                value={
+                  data.destinationType
+                    ? destinationPhrase(data.destinationType, data.destinationName)
+                    : "destinazione non più configurata"
+                }
+              />
             )}
           </div>
+
+          {data.hasArchive && data.status !== "running" && (
+            <IntegrityCheck runId={data.id} checksum={data.checksum} className="border-separator mt-4 border-t pt-4" />
+          )}
 
           {data.status === "partial" && (
             <Hint tone="warn" className="mt-4">
@@ -240,7 +245,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
           typed confirmation must not survive a Cancel. */}
       {restoreOpen && (
         <RestoreDialog
-          runId={data.id}
+          source={{ runId: data.id }}
           artifacts={data.artifacts}
           isOpen={restoreOpen}
           onOpenChange={setRestoreOpen}
@@ -272,11 +277,15 @@ function ArtifactRow({ artifact }: { artifact: ArtifactView }) {
           <span className="text-foreground truncate text-sm">{artifact.refName}</span>
           <span className="text-muted text-xs">{KIND_LABELS[artifact.kind] ?? artifact.kind}</span>
         </div>
-        <p className="text-muted mt-0.5 truncate text-xs">
-          {artifact.entryPath || "—"}
-          {tool ? ` · ${toolVersion ?? tool}` : ""}
-          {artifact.errorMessage ? ` · ${artifact.errorMessage}` : ""}
-        </p>
+        {/* Where it sits in the zip and which tool made it: for expert eyes. */}
+        <Technical>
+          <p className="text-muted mt-0.5 truncate font-mono text-meta">
+            {artifact.entryPath || "—"}
+            {tool ? ` · ${toolVersion ?? tool}` : ""}
+            {artifact.checksum ? ` · sha256 ${artifact.checksum.slice(0, 12)}…` : ""}
+          </p>
+        </Technical>
+        {artifact.errorMessage && <p className="text-muted mt-0.5 text-xs">{artifact.errorMessage}</p>}
       </div>
       <span className="text-muted shrink-0 text-xs tabular-nums">
         {artifact.bytes > 0 ? formatBytes(artifact.bytes) : "—"}

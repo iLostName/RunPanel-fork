@@ -18,6 +18,7 @@ export interface PolicyView {
   timezone: string | null;
   destinationId: string;
   destinationName: string | null;
+  destinationType: string | null;
   targets: BackupTarget[];
   retentionCount: number | null;
   retentionDays: number | null;
@@ -42,6 +43,10 @@ export interface RunView {
   durationMs: number | null;
   hasArchive: boolean;
   errorMessage: string | null;
+  destinationName?: string | null;
+  destinationType?: string | null;
+  /** The last "Verifica integrità", if one was ever run. */
+  verification?: { status: "ok" | "failed"; checkedAt: string } | null;
 }
 
 export interface ArtifactView {
@@ -68,6 +73,14 @@ export interface DestinationView {
   type: string;
   isDefault: boolean;
   createdAt: string;
+  /** Where an S3 destination writes; null for the local disk. Never the keys. */
+  target?: { endpoint: string; region: string; bucket: string; prefix: string | null; pathStyle: boolean } | null;
+  /** The policies writing here that this account can see. */
+  usedBy?: { id: string; name: string }[];
+  /** All of them, seen or not. */
+  usedByCount?: number;
+  archives?: number;
+  archiveBytes?: number;
 }
 
 export interface RunsResponse {
@@ -88,6 +101,29 @@ export interface TargetCatalog {
   projects: { id: string; slug: string; name: string; sourceType: string; volumes: string[] }[];
 }
 
+/**
+ * Where a policy's archives go, as the end of a sentence: "Ogni giorno alle
+ * 03:00 · su Backblaze B2". Every local destination is the same folder on this
+ * server, whatever it is called, so it is named for what it is.
+ */
+export function destinationPhrase(type: string | null | undefined, name: string | null | undefined): string {
+  if (!name) return "destinazione non più configurata";
+  // A server on an older version sends the name without the type: say the name.
+  return type === "local" ? "sul disco di questo server" : `su ${name}`;
+}
+
+const INCLUDE_WORDS: Record<ProjectInclude, string> = {
+  config: "configurazione",
+  volumes: "dati",
+  repo: "codice",
+};
+
+/** "configurazione e dati" rather than the wire names "config, volumes". */
+function includeWords(include: ProjectInclude[]): string {
+  const words = include.map((item) => INCLUDE_WORDS[item] ?? item);
+  return words.length > 1 ? `${words.slice(0, -1).join(", ")} e ${words[words.length - 1]}` : (words[0] ?? "");
+}
+
 /** How a target reads in a list, without the editor having to be open. */
 export function describeTarget(target: BackupTarget, catalog?: TargetCatalog | null): string {
   switch (target.kind) {
@@ -96,7 +132,7 @@ export function describeTarget(target: BackupTarget, catalog?: TargetCatalog | n
     case "all-services":
       return "Tutti i database";
     case "all-projects":
-      return `Tutti i progetti (${target.include.join(", ")})`;
+      return `Tutti i progetti (${includeWords(target.include)})`;
     case "service": {
       const service = catalog?.services.find((entry) => entry.id === target.id);
       const name = service?.name ?? "servizio rimosso";
@@ -104,7 +140,7 @@ export function describeTarget(target: BackupTarget, catalog?: TargetCatalog | n
     }
     case "project": {
       const project = catalog?.projects.find((entry) => entry.id === target.id);
-      return `${project?.slug ?? "progetto rimosso"} (${target.include.join(", ")})`;
+      return `${project?.slug ?? "progetto rimosso"} (${includeWords(target.include)})`;
     }
   }
 }

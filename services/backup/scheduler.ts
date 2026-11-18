@@ -3,6 +3,7 @@ import { getDb, nowIso, rowCount } from "@/lib/db";
 import type { BackupPoliciesTable } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { removePartialArchives } from "./paths";
+import { pruneUploads } from "./uploads";
 import { BackupBusyError, runBackup } from "./runner";
 import type { BackupTarget } from "./types";
 
@@ -28,6 +29,7 @@ const CATCH_UP_FLOOR_MS = 24 * 60 * 60 * 1000;
 const globalRef = globalThis as typeof globalThis & {
   __runpanelBackupTimer?: NodeJS.Timeout;
   __runpanelBackupFirstTick?: NodeJS.Timeout;
+  __runpanelUploadPrune?: number;
 };
 
 export function startBackupScheduler(): void {
@@ -37,6 +39,10 @@ export function startBackupScheduler(): void {
   if (removed > 0) {
     console.log(`[backup] Rimossi ${removed} archivi incompleti lasciati da un'interruzione`);
   }
+  // Uploaded archives are whole copies of someone's data: a day after their
+  // last use they go, as do pieces of an upload that never finished.
+  const uploads = pruneUploads();
+  if (uploads > 0) console.log(`[backup] Rimossi ${uploads} archivi caricati non più usati`);
 
   globalRef.__runpanelBackupTimer = setInterval(() => void tick(), TICK_MS);
   globalRef.__runpanelBackupTimer.unref?.();
@@ -87,6 +93,12 @@ export async function tick(now = new Date()): Promise<TickResult> {
     }
 
     await setSetting(TICK_SETTING, now.toISOString());
+
+    // Hourly is enough for a one-day lifetime, and costs one directory read.
+    if (now.getTime() - (globalRef.__runpanelUploadPrune ?? 0) > 3_600_000) {
+      globalRef.__runpanelUploadPrune = now.getTime();
+      pruneUploads(now.getTime());
+    }
   } catch (err) {
     // A tick that throws must not kill the interval, or the panel silently
     // stops taking backups until someone restarts it.

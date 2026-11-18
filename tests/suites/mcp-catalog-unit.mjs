@@ -18,6 +18,8 @@ const INTERNAL = [
   /^webhooks\//,
   /^nodes\//,
   /^upload$/,
+  // The raw pieces of an archive the browser uploads: a binary body no tool can send.
+  /^backups\/uploads\/\[uploadId\]\/chunk$/,
   /^mcp$/,
   /^api-tokens$/,
   /^cluster\/(join|directory|leave|ping|secret|folders\/sync)$/,

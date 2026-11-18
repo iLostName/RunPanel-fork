@@ -51,6 +51,7 @@ const BLOCKED = [
   /^\/api\/webhooks\//,
   /^\/api\/nodes\//,
   /^\/api\/upload$/,
+  /^\/api\/backups\/uploads\/[^/]+\/chunk$/,
   /^\/api\/mcp$/,
   /^\/api\/api-tokens$/,
   /^\/api\/cluster\/(join|directory|leave|ping|secret|folders\/sync)$/,

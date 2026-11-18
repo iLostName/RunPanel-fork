@@ -31,6 +31,8 @@ import { containerMounts } from "../docker/volumes";
 import { extractArchiveEntry, isSafeEntryPath, listArchiveEntries } from "./archive-read";
 import { buildDestination } from "./destinations";
 import { archiveForRestore } from "./archive-source";
+import { memberFailureMessage, readArchiveChecksums, verifyMembers } from "./integrity";
+import { touchUpload, uploadArchivePath, uploadArtifacts } from "./uploads";
 import { FREE_SPACE_RESERVE, assertBackupId, freeBytes, resolveArchivePath, restoreLog } from "./paths";
 import { backupDocker, projectOwner, projectVolumes } from "./project-export";
 import { startBackup } from "./runner";
@@ -233,7 +235,8 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
   let failure: string | null = null;
 
   try {
-    const archive = await resolveArchive(request, staging, emit);
+    const resolved = await resolveArchive(request, staging, emit);
+    const archive = resolved.file;
     emit(`Archivio: ${path.basename(archive)} (${formatBytes(fs.statSync(archive).size)})`);
 
     const artifacts = await loadArtifacts(request);
@@ -241,6 +244,10 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
     if (planned.length === 0) throw new Error("Nessun elemento selezionato");
 
     emit(`${planned.length} element${planned.length === 1 ? "o" : "i"} da ripristinare`);
+
+    // First of all: a damaged archive must stop the restore while nothing has
+    // been stopped, copied or overwritten yet.
+    await verifyBeforeRestore(resolved, planned, artifacts, emit);
 
     // Before the safety copy and before anything is stopped: a restore that is
     // not theirs must leave every service exactly as it found it.
@@ -317,16 +324,27 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
 
 // --- Finding the archive and what is in it -----------------------------------
 
+interface ResolvedArchive {
+  file: string;
+  /** Recorded when the archive was written; null for an upload or a run that has none. */
+  expectedSha256: string | null;
+  /** Computed while it was downloaded; null when it was read in place. */
+  downloadedSha256: string | null;
+  /** Where it came from, for the messages. */
+  sourceName: string;
+}
+
 async function resolveArchive(
   request: RestoreRequest,
   staging: string,
   emit: (line: string) => void
-): Promise<string> {
+): Promise<ResolvedArchive> {
   if (request.uploadId) {
-    const file = path.join(config.backupUploadsDir, `${assertBackupId(request.uploadId)}.zip`);
-    if (!fs.existsSync(file)) throw new Error("L'archivio caricato non è più disponibile");
+    const file = uploadArchivePath(request.uploadId);
+    if (!fs.existsSync(file)) throw new Error("L'archivio caricato non è più disponibile: caricalo di nuovo.");
+    touchUpload(request.uploadId);
     emit("Sorgente: archivio caricato");
-    return file;
+    return { file, expectedSha256: null, downloadedSha256: null, sourceName: "l'archivio caricato" };
   }
 
   if (!request.runId) throw new Error("Nessuna sorgente indicata");
@@ -351,18 +369,26 @@ async function resolveArchive(
   if (!destinationRow) throw new Error("La destinazione di quel backup non è più configurata");
 
   const destination = buildDestination(destinationRow);
-  const stat = await destination.stat(run.archive_path);
-  if (!stat.exists) throw new Error("L'archivio non è più su disco");
+  const stat = await destination.stat(run.archive_path).catch((err: unknown) => {
+    throw new Error(`Non riesco a raggiungere l'archivio su «${destination.name}»: ${err instanceof Error ? err.message : String(err)}`);
+  });
+  if (!stat.exists) {
+    throw new Error(
+      destination.type === "local"
+        ? "L'archivio non è più sul disco di questo server: è stato spostato o eliminato fuori dal pannello."
+        : `L'archivio non c'è più in «${destination.name}»: è stato eliminato fuori dal pannello, o da una regola di scadenza del bucket.`
+    );
+  }
 
   emit(`Sorgente: backup del ${new Date(run.started_at).toLocaleString()}`);
   if (destination.type !== "local") emit(`Scarico l'archivio da ${destination.name} (${formatBytes(stat.bytes)})…`);
-  const { file } = await archiveForRestore(destination, run.archive_path, staging, {
+  const { file, sha256 } = await archiveForRestore(destination, run.archive_path, staging, {
     bytes: stat.bytes,
     freeBytes: freeBytes(),
     reserveBytes: FREE_SPACE_RESERVE,
     localPath: resolveArchivePath,
   });
-  return file;
+  return { file, expectedSha256: run.checksum, downloadedSha256: sha256, sourceName: `«${destination.name}»` };
 }
 
 export interface RestorableArtifact {
@@ -372,6 +398,8 @@ export interface RestorableArtifact {
   refName: string;
   entryPath: string;
   bytes: number;
+  /** sha256 of the member, as recorded when it was staged. Null for a tree. */
+  checksum: string | null;
   meta: Record<string, unknown>;
 }
 
@@ -396,16 +424,68 @@ async function loadArtifacts(request: RestoreRequest): Promise<Map<string, Resto
           refName: row.ref_name,
           entryPath: row.entry_path,
           bytes: row.bytes,
+          checksum: row.checksum,
           meta: row.meta ? (JSON.parse(row.meta) as Record<string, unknown>) : {},
         },
       ])
     );
   }
 
-  throw new Error("Il ripristino da archivio caricato richiede prima un'ispezione");
+  // An upload carries its own catalogue: the manifest, read and checked when
+  // it finished arriving. One that failed that check never gets this far.
+  if (request.uploadId) return uploadArtifacts(request.uploadId);
+
+  throw new Error("Nessuna sorgente indicata");
 }
 
+/**
+ * Check what is about to be used, before anything is touched.
+ *
+ * A downloaded archive is compared whole with the sha256 recorded when it was
+ * written; then each member the restore will read is opened and checked — its
+ * CRC, its sha256, and a `.gz` dump read to the end, since a truncated one
+ * checksums perfectly as its own short self. Postgres runs `DROP DATABASE`
+ * before it reads the data that follows, so a dump that turns out to be cut
+ * short halfway through `psql` is a database lost: it is found here instead.
+ */
+async function verifyBeforeRestore(
+  archive: ResolvedArchive,
+  planned: RestoreMapping[],
+  artifacts: Map<string, RestorableArtifact>,
+  emit: (line: string) => void
+): Promise<void> {
+  if (archive.expectedSha256 && archive.downloadedSha256 && archive.expectedSha256 !== archive.downloadedSha256) {
+    throw new Error(
+      `L'archivio scaricato da ${archive.sourceName} non è quello creato dal backup: il suo sha256 è diverso. ` +
+        "È danneggiato, o è stato modificato fuori dal pannello. Niente è stato toccato."
+    );
+  }
 
+  const used = planned
+    .map((mapping) => artifacts.get(mapping.artifactId))
+    .filter((artifact): artifact is RestorableArtifact => Boolean(artifact));
+  const only = used
+    .map((artifact) =>
+      artifact.kind === "project-repo" ? String(artifact.meta.prefix ?? artifact.entryPath) : artifact.entryPath
+    )
+    .filter((entry) => entry && isSafeEntryPath(entry));
+  if (only.length === 0) return;
+
+  emit("Controllo l'integrità di quello che sto per ripristinare…");
+  const checksums = await readArchiveChecksums(archive.file);
+  // The catalogue's own record wins over the archive's: it was written by this
+  // panel, the other travelled with the file.
+  for (const artifact of used) {
+    if (artifact.checksum && artifact.kind !== "project-repo") checksums.set(artifact.entryPath, artifact.checksum);
+  }
+
+  const report = await verifyMembers(archive.file, { only, checksums });
+  if (report.failures.length > 0) throw new Error(memberFailureMessage(report.failures));
+  emit(
+    `  integro: ${report.checked} file controllati (${formatBytes(report.bytes)})` +
+      (archive.downloadedSha256 && archive.expectedSha256 ? ", e l'archivio è identico a quello creato" : "")
+  );
+}
 // --- Who may apply what -------------------------------------------------------
 
 /**
@@ -785,7 +865,18 @@ async function readProjectConfig(
   staging: string
 ): Promise<ProjectConfigPayload> {
   const file = await extract(archive, artifact.entryPath, staging);
-  return JSON.parse(decrypt(fs.readFileSync(file, "utf8"))) as ProjectConfigPayload;
+  let plain: string;
+  try {
+    plain = decrypt(fs.readFileSync(file, "utf8"));
+  } catch {
+    // The usual reason is an archive from another panel: the configuration is
+    // sealed with the key of the panel that wrote it.
+    throw new Error(
+      `La configurazione di ${artifact.refName} è cifrata con la chiave di un altro pannello, e senza quella chiave ` +
+        "non si legge. Ripristina solo i dati (database e volumi), oppure rimetti prima la chiave di quel pannello."
+    );
+  }
+  return JSON.parse(plain) as ProjectConfigPayload;
 }
 
 async function restoreProjectConfig(

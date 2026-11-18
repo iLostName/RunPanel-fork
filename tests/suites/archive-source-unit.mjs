@@ -1,4 +1,5 @@
 import { createReporter } from "../harness.mjs";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +46,11 @@ export async function run({ repoRoot }) {
       const res = await archiveForRestore(remote(payload), "a.zip", staging, opts());
       r.check("a remote archive lands in the staging folder", res.downloaded === true && res.file.startsWith(staging), res.file);
       r.check("with the same bytes", existsSync(res.file) && readFileSync(res.file).equals(payload));
+      r.check(
+        "hashed on the way in, so the restore can compare it",
+        res.sha256 === createHash("sha256").update(payload).digest("hex"),
+        String(res.sha256)
+      );
     }
 
     {

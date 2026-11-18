@@ -9,6 +9,7 @@ import type {
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
 import { formatBytes } from "@/lib/format";
+import { S3Failure } from "@/lib/s3-errors";
 import { panelVersion } from "@/lib/version";
 import { opsEvents } from "../events";
 import { notify } from "../notify";
@@ -299,7 +300,18 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
     const archive = await writeArchive(staged, files, manifest);
 
     const destination = await loadDestination(request.destinationId);
-    const stored = await destination.put(archive.absolutePath, fileName);
+    if (destination.type !== "local") emit(`Carico l'archivio su «${destination.name}» (${formatBytes(archive.bytes)})…`);
+    let stored: { ref: string; bytes: number };
+    try {
+      stored = await destination.put(archive.absolutePath, fileName);
+    } catch (err) {
+      // The sentence a person acts on goes into the run; the provider's own
+      // code and words, for whoever reads the log, go there.
+      if (err instanceof S3Failure && err.problem.detail) emit(`  dettaglio: ${err.problem.detail}`);
+      throw new Error(
+        `Salvataggio su «${destination.name}» non riuscito: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
     emit(`Archivio pronto: ${formatBytes(stored.bytes)} — ${stored.ref}`);
 
     const status: BackupRunStatus = failed.length > 0 ? "partial" : "success";

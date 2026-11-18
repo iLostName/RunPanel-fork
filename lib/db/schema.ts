@@ -445,6 +445,18 @@ export interface BackupArtifactsTable {
   created_at: string;
 }
 
+/** The last "Verifica integrità" of a run's archive — see migration 036. */
+export interface BackupVerificationsTable {
+  run_id: string;
+  /** `ok` | `failed` */
+  status: string;
+  /** The sentence a person reads. */
+  message: string;
+  /** JSON — the report: which member failed and why. */
+  detail: string | null;
+  checked_at: string;
+}
+
 /**
  * A restore is not a backup run with a direction flag: half the columns would
  * never apply, and the retention sweeper would have to learn to skip them.
@@ -884,6 +896,7 @@ export interface Database {
   backup_runs: BackupRunsTable;
   backup_artifacts: BackupArtifactsTable;
   restore_runs: RestoreRunsTable;
+  backup_verifications: BackupVerificationsTable;
   domains: DomainsTable;
   project_hosts: ProjectHostsTable;
   metric_samples: MetricSamplesTable;

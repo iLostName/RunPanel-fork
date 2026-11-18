@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireUser } from "@/lib/auth-guard";
 import { describeCron, isValidTimeZone, nextOccurrences } from "@/lib/cron";
+import { cronSentence } from "@/lib/schedule";
 import { getSetting } from "@/lib/settings";
 import { cronPreviewSchema } from "@/lib/validation";
 
@@ -38,7 +39,9 @@ export async function POST(request: NextRequest) {
   const timezone = parsed.data.timezone ?? (stored && isValidTimeZone(stored) ? stored : "UTC");
 
   return NextResponse.json({
-    description: describeCron(cron),
+    // The policy list's own words for the same expression (see catalog.ts):
+    // the editor's shapes when it is one of them, the parser's otherwise.
+    description: cronSentence(cron, describeCron(cron)),
     timezone,
     occurrences: nextOccurrences(cron, new Date(), timezone, count ?? 3).map((date) =>
       date.toISOString()

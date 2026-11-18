@@ -1,5 +1,6 @@
 import { parseBackupSettings, type ProjectBackupSettings } from "@/lib/backup-settings";
 import { describeCron } from "@/lib/cron";
+import { cronSentence } from "@/lib/schedule";
 import { getDb } from "@/lib/db";
 import { staleWhileRevalidate } from "@/lib/stale-cache";
 import type { BackupRunStatus, ProjectsTable } from "@/lib/db/schema";
@@ -30,6 +31,8 @@ export interface PolicyView {
   timezone: string | null;
   destinationId: string;
   destinationName: string | null;
+  /** `local` or `s3`: "sul disco di questo server" and "su <nome>" are different sentences. */
+  destinationType: string | null;
   targets: BackupTarget[];
   retentionCount: number | null;
   retentionDays: number | null;
@@ -45,10 +48,10 @@ export async function listPolicies(): Promise<PolicyView[]> {
 
   const [policies, destinations] = await Promise.all([
     db.selectFrom("backup_policies").selectAll().orderBy("created_at", "asc").execute(),
-    db.selectFrom("backup_destinations").select(["id", "name"]).execute(),
+    db.selectFrom("backup_destinations").select(["id", "name", "type"]).execute(),
   ]);
 
-  const names = new Map(destinations.map((d) => [d.id, d.name]));
+  const byId = new Map(destinations.map((d) => [d.id, d]));
 
   // One query for every policy's latest run rather than one per policy: the
   // list is rendered on every poll of the backups page.
@@ -77,10 +80,13 @@ export async function listPolicies(): Promise<PolicyView[]> {
     name: policy.name,
     enabled: policy.enabled === 1,
     cron: policy.cron,
-    schedule: policy.cron ? describeCron(policy.cron) : "solo su richiesta",
+    // The editor's own sentence when the expression is one of its shapes, the
+    // parser's otherwise: one wording for the same schedule on every screen.
+    schedule: cronSentence(policy.cron, policy.cron ? describeCron(policy.cron) : undefined),
     timezone: policy.timezone,
     destinationId: policy.destination_id,
-    destinationName: names.get(policy.destination_id) ?? null,
+    destinationName: byId.get(policy.destination_id)?.name ?? null,
+    destinationType: byId.get(policy.destination_id)?.type ?? null,
     targets: parseTargets(policy.targets),
     retentionCount: policy.retention_count,
     retentionDays: policy.retention_days,
@@ -107,6 +113,48 @@ export interface RunView {
   durationMs: number | null;
   hasArchive: boolean;
   errorMessage: string | null;
+  /** Where the archive went: "sul disco di questo server" and "su <bucket>" are different promises. */
+  destinationName: string | null;
+  destinationType: string | null;
+  /** The last "Verifica integrità", if one was ever run. */
+  verification: { status: "ok" | "failed"; checkedAt: string } | null;
+}
+
+type RunRow = {
+  id: string;
+  policy_id: string | null;
+  policy_name: string | null;
+  trigger: string;
+  status: BackupRunStatus;
+  destination_id: string | null;
+  archive_bytes: number | null;
+  archive_path: string | null;
+  checksum: string | null;
+  pinned: number;
+  started_at: string;
+  finished_at: string | null;
+  error_message: string | null;
+};
+
+interface RunContextMaps {
+  destinations: Map<string, { name: string; type: string }>;
+  verifications: Map<string, { status: string; checked_at: string }>;
+}
+
+/** The destinations and checks a page of runs refers to: two queries, whatever the page size. */
+async function runContext(runs: RunRow[]): Promise<RunContextMaps> {
+  const db = await getDb();
+  const ids = runs.map((run) => run.id);
+  const [destinations, verifications] = await Promise.all([
+    db.selectFrom("backup_destinations").select(["id", "name", "type"]).execute(),
+    ids.length > 0
+      ? db.selectFrom("backup_verifications").select(["run_id", "status", "checked_at"]).where("run_id", "in", ids).execute()
+      : Promise.resolve([]),
+  ]);
+  return {
+    destinations: new Map(destinations.map((d) => [d.id, { name: d.name, type: d.type }])),
+    verifications: new Map(verifications.map((v) => [v.run_id, v])),
+  };
 }
 
 export async function listRuns(limit = 50, policyId?: string): Promise<RunView[]> {
@@ -116,23 +164,13 @@ export async function listRuns(limit = 50, policyId?: string): Promise<RunView[]
   if (policyId) query = query.where("policy_id", "=", policyId);
 
   const runs = await query.execute();
-  return runs.map(toRunView);
+  const context = await runContext(runs);
+  return runs.map((run) => toRunView(run, context));
 }
 
-function toRunView(run: {
-  id: string;
-  policy_id: string | null;
-  policy_name: string | null;
-  trigger: string;
-  status: BackupRunStatus;
-  archive_bytes: number | null;
-  archive_path: string | null;
-  checksum: string | null;
-  pinned: number;
-  started_at: string;
-  finished_at: string | null;
-  error_message: string | null;
-}): RunView {
+function toRunView(run: RunRow, context?: RunContextMaps): RunView {
+  const destination = run.destination_id ? context?.destinations.get(run.destination_id) : undefined;
+  const verification = context?.verifications.get(run.id);
   return {
     id: run.id,
     policyId: run.policy_id,
@@ -147,6 +185,11 @@ function toRunView(run: {
     durationMs: run.finished_at ? Date.parse(run.finished_at) - Date.parse(run.started_at) : null,
     hasArchive: Boolean(run.archive_path),
     errorMessage: run.error_message,
+    destinationName: destination?.name ?? null,
+    destinationType: destination?.type ?? null,
+    verification: verification
+      ? { status: verification.status === "ok" ? "ok" : "failed", checkedAt: verification.checked_at }
+      : null,
   };
 }
 
@@ -184,7 +227,7 @@ export async function getRunDetail(runId: string): Promise<RunDetail | null> {
     .execute();
 
   return {
-    ...toRunView(run),
+    ...toRunView(run, await runContext([run])),
     artifacts: artifacts.map((artifact) => ({
       id: artifact.id,
       kind: artifact.kind,
@@ -241,7 +284,7 @@ export async function backupOverview(): Promise<BackupOverview> {
     .sort();
 
   return {
-    lastRun: runs[0] ? toRunView(runs[0]) : null,
+    lastRun: runs[0] ? toRunView(runs[0], await runContext([runs[0]])) : null,
     nextRunAt: upcoming[0] ?? null,
     totalBytes: runs.reduce((total, run) => total + (run.archive_bytes ?? 0), 0),
     runCount: runs.length,

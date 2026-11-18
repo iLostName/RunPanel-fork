@@ -2,6 +2,15 @@ import crypto from "crypto";
 import fs from "fs";
 import { Readable } from "stream";
 import type { BackupDestinationsTable } from "@/lib/db/schema";
+import {
+  S3Failure,
+  describeS3Exception,
+  describeS3Response,
+  s3ProblemText,
+  type S3Context,
+  type S3Operation,
+  type S3Problem,
+} from "@/lib/s3-errors";
 import type { Destination } from "../types";
 
 /**
@@ -154,6 +163,84 @@ function isValid(config: Partial<S3Config>): config is S3Config {
   );
 }
 
+/** Enough to see a check fail; a backup's own upload has no clock but the socket's. */
+const CHECK_TIMEOUT_MS = 20_000;
+/** An error document is a few hundred bytes; anything past this is not one. */
+const MAX_ERROR_BODY = 16 * 1024;
+
+async function errorBody(res: Response): Promise<string> {
+  try {
+    const text = await res.text();
+    return text.length > MAX_ERROR_BODY ? text.slice(0, MAX_ERROR_BODY) : text;
+  } catch {
+    return "";
+  }
+}
+
+function contextOf(cfg: S3Config, operation: S3Operation): S3Context {
+  return {
+    operation,
+    bucket: cfg.bucket,
+    region: cfg.region,
+    endpoint: cfg.endpoint,
+    pathStyle: cfg.forcePathStyle ?? false,
+  };
+}
+
+/**
+ * One signed request, with every way it can fail turned into an `S3Failure`
+ * whose message is already the Italian cause and fix.
+ */
+async function request(
+  cfg: S3Config,
+  operation: S3Operation,
+  method: string,
+  key: string,
+  init: { headers?: Record<string, string>; body?: BodyInit; stream?: boolean; timeoutMs?: number } = {}
+): Promise<Response> {
+  const signed = sign(cfg, method, key, init.headers);
+  try {
+    return await fetch(signed.url, {
+      method,
+      headers: signed.headers,
+      body: init.body,
+      ...(init.stream ? { duplex: "half" } : {}),
+      ...(init.timeoutMs ? { signal: AbortSignal.timeout(init.timeoutMs) } : {}),
+    } as RequestInit & { duplex?: "half" });
+  } catch (err) {
+    throw new S3Failure(describeS3Exception(err, contextOf(cfg, operation)));
+  }
+}
+
+async function refusal(cfg: S3Config, operation: S3Operation, res: Response): Promise<S3Failure> {
+  const body = res.status === 304 || operation === "stat" ? "" : await errorBody(res);
+  return new S3Failure(describeS3Response({ status: res.status, body, headers: res.headers }, contextOf(cfg, operation)));
+}
+
+/**
+ * Why a write is refused, asked with a few bytes instead of an archive.
+ *
+ * A service that refuses a large upload often answers before the body is sent
+ * and closes the connection, and Node then reports a reset rather than the
+ * service's reason. A tiny write gets the reason back as a document.
+ */
+async function diagnoseWrite(cfg: S3Config): Promise<S3Problem | null> {
+  const key = objectKey(cfg, `.runpanel-write-test-${Date.now()}`);
+  try {
+    const body = Buffer.from("runpanel");
+    const res = await request(cfg, "upload", "PUT", key, {
+      headers: { "content-length": String(body.byteLength), "content-type": "text/plain" },
+      body,
+      timeoutMs: CHECK_TIMEOUT_MS,
+    });
+    if (!res.ok) return (await refusal(cfg, "upload", res)).problem;
+    await request(cfg, "delete", "DELETE", key, { timeoutMs: CHECK_TIMEOUT_MS }).catch(() => null);
+    return null;
+  } catch (err) {
+    return err instanceof S3Failure ? err.problem : null;
+  }
+}
+
 export function s3Destination(
   row: BackupDestinationsTable,
   raw: Record<string, unknown>
@@ -163,10 +250,18 @@ export function s3Destination(
   function requireConfig(): S3Config {
     if (!isValid(config)) {
       throw new Error(
-        "Configurazione S3 incompleta: servono endpoint, region, bucket e le credenziali."
+        "Configurazione S3 incompleta: servono endpoint, regione, bucket e le due chiavi. Modifica la destinazione e completala."
       );
     }
     return config;
+  }
+
+  async function stat(ref: string): Promise<{ bytes: number; exists: boolean }> {
+    const cfg = requireConfig();
+    const res = await request(cfg, "stat", "HEAD", ref, { timeoutMs: CHECK_TIMEOUT_MS * 2 });
+    if (res.status === 404) return { bytes: 0, exists: false };
+    if (!res.ok) throw await refusal(cfg, "stat", res);
+    return { bytes: Number(res.headers.get("content-length") ?? 0), exists: true };
   }
 
   return {
@@ -179,22 +274,34 @@ export function s3Destination(
       const { size } = await fs.promises.stat(localPath);
       const key = objectKey(cfg, fileName);
 
-      const { url, headers } = sign(cfg, "PUT", key, {
-        "content-length": String(size),
-        "content-type": "application/zip",
-      });
+      let res: Response;
+      try {
+        res = await request(cfg, "upload", "PUT", key, {
+          headers: { "content-length": String(size), "content-type": "application/zip" },
+          // Streamed, not buffered: an archive is routinely larger than the heap.
+          body: Readable.toWeb(fs.createReadStream(localPath)) as ReadableStream,
+          // Required by undici whenever the body is a stream.
+          stream: true,
+        });
+      } catch (err) {
+        const problem = err instanceof S3Failure ? err.problem : null;
+        if (problem && (problem.code === "RESET" || problem.code === "STALLED")) {
+          const reason = await diagnoseWrite(cfg);
+          if (reason) throw new S3Failure(reason);
+        }
+        throw err;
+      }
+      if (!res.ok) throw await refusal(cfg, "upload", res);
 
-      const res = await fetch(url, {
-        method: "PUT",
-        headers,
-        // Streamed, not buffered: an archive is routinely larger than the heap.
-        body: Readable.toWeb(fs.createReadStream(localPath)) as ReadableStream,
-        // Required by undici whenever the body is a stream.
-        duplex: "half",
-      } as RequestInit & { duplex: "half" });
-
-      if (!res.ok) {
-        throw new Error(`Upload su S3 non riuscito (${res.status}): ${await res.text()}`);
+      // A 200 says the service took the request; the size it reports is what
+      // it actually kept. A key allowed to write but not to read cannot ask,
+      // and that is a legitimate setup (a bucket nobody can read back from
+      // here), so only a definite mismatch fails the run.
+      const kept = await stat(key).catch(() => null);
+      if (kept?.exists && kept.bytes !== size) {
+        throw new Error(
+          `Il bucket ha conservato ${kept.bytes} byte invece di ${size}: l'archivio caricato è incompleto. Riprova il backup.`
+        );
       }
 
       return { ref: key, bytes: size };
@@ -202,39 +309,26 @@ export function s3Destination(
 
     async remove(ref) {
       const cfg = requireConfig();
-      const { url, headers } = sign(cfg, "DELETE", ref);
-      const res = await fetch(url, { method: "DELETE", headers });
+      const res = await request(cfg, "delete", "DELETE", ref, { timeoutMs: CHECK_TIMEOUT_MS * 2 });
       // 404 means the object is already gone, which is the state we wanted.
-      if (!res.ok && res.status !== 404) {
-        throw new Error(`Eliminazione su S3 non riuscita (${res.status})`);
-      }
+      if (!res.ok && res.status !== 404) throw await refusal(cfg, "delete", res);
     },
 
     async open(ref): Promise<Readable> {
       const cfg = requireConfig();
-      const { url, headers } = sign(cfg, "GET", ref);
-      const res = await fetch(url, { headers });
-      if (!res.ok || !res.body) {
-        throw new Error(`Lettura da S3 non riuscita (${res.status})`);
-      }
+      const res = await request(cfg, "download", "GET", ref);
+      if (!res.ok || !res.body) throw await refusal(cfg, "download", res);
       return Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]);
     },
 
-    async stat(ref) {
-      const cfg = requireConfig();
-      const { url, headers } = sign(cfg, "HEAD", ref);
-      const res = await fetch(url, { method: "HEAD", headers });
-      if (res.status === 404) return { bytes: 0, exists: false };
-      if (!res.ok) throw new Error(`HEAD su S3 non riuscita (${res.status})`);
-      return { bytes: Number(res.headers.get("content-length") ?? 0), exists: true };
-    },
+    stat,
 
     /**
-     * Writes and deletes a marker rather than only listing.
+     * Writes, reads back and deletes a marker rather than only listing.
      *
      * A read-only key passes any check that just looks, and then fails on the
-     * night of the first scheduled backup. The point of this button is to find
-     * that out now.
+     * night of the first scheduled backup; a write-only one uploads fine and
+     * cannot restore. The point of this button is to find either out now.
      */
     async test() {
       let cfg: S3Config;
@@ -245,30 +339,62 @@ export function s3Destination(
       }
 
       const key = objectKey(cfg, `.runpanel-write-test-${Date.now()}`);
+      const marker = `runpanel ${Date.now()}`;
+      const failed = (step: string, err: unknown) => {
+        const problem = err instanceof S3Failure ? err.problem : describeS3Exception(err, contextOf(cfg, "write-test"));
+        return { ok: false, message: `${step}${s3ProblemText(problem)}`, code: problem.code, detail: problem.detail };
+      };
+
       try {
-        const body = Buffer.from("runpanel");
-        const put = sign(cfg, "PUT", key, {
-          "content-length": String(body.byteLength),
-          "content-type": "text/plain",
+        const body = Buffer.from(marker);
+        const written = await request(cfg, "write-test", "PUT", key, {
+          headers: { "content-length": String(body.byteLength), "content-type": "text/plain" },
+          body,
+          timeoutMs: CHECK_TIMEOUT_MS,
         });
-        const written = await fetch(put.url, { method: "PUT", headers: put.headers, body });
-        if (!written.ok) {
+        if (!written.ok) throw await refusal(cfg, "write-test", written);
+      } catch (err) {
+        return failed("", err);
+      }
+
+      try {
+        const read = await request(cfg, "read-test", "GET", key, { timeoutMs: CHECK_TIMEOUT_MS });
+        if (!read.ok) throw await refusal(cfg, "read-test", read);
+        const text = await read.text();
+        if (text !== marker) {
           return {
             ok: false,
-            message: `Scrittura rifiutata (${written.status}). Controlla credenziali, bucket e permessi.`,
+            message:
+              "La scrittura funziona, ma rileggendo il file il servizio ha restituito un contenuto diverso. " +
+              "Controlla l'endpoint: tra il pannello e il servizio potrebbe esserci un proxy o una cache.",
           };
         }
-
-        const del = sign(cfg, "DELETE", key);
-        await fetch(del.url, { method: "DELETE", headers: del.headers });
-
-        return { ok: true, message: `Bucket ${cfg.bucket} raggiungibile e scrivibile.` };
       } catch (err) {
+        // The marker stays behind: removing it would need the very access that
+        // just failed to be checked, and it is a few bytes.
+        return failed("La scrittura funziona, ma la lettura no, e senza lettura non si può ripristinare. ", err);
+      }
+
+      try {
+        const removed = await request(cfg, "delete-test", "DELETE", key, { timeoutMs: CHECK_TIMEOUT_MS });
+        if (!removed.ok && removed.status !== 404) throw await refusal(cfg, "delete-test", removed);
+      } catch (err) {
+        const problem = err instanceof S3Failure ? err.problem : describeS3Exception(err, contextOf(cfg, "delete-test"));
+        // Not a failure: a bucket where nothing can be deleted is a deliberate
+        // protection against ransomware. It does mean retention cannot work.
         return {
-          ok: false,
-          message: err instanceof Error ? err.message : "Endpoint non raggiungibile",
+          ok: true,
+          warning: true,
+          message:
+            `Bucket ${cfg.bucket} raggiungibile: scrittura e lettura riuscite. L'eliminazione è stata rifiutata, ` +
+            "il che va bene se il bucket è protetto apposta, ma allora gli archivi vecchi non verranno cancellati " +
+            "dalla retention: dovrai farlo dal sito del servizio.",
+          code: problem.code,
+          detail: problem.detail,
         };
       }
+
+      return { ok: true, message: `Bucket ${cfg.bucket} raggiungibile: scrittura, lettura ed eliminazione riuscite.` };
     },
   };
 }
