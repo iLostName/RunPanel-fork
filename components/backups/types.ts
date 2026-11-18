@@ -47,6 +47,22 @@ export interface RunView {
   destinationType?: string | null;
   /** The last "Verifica integrità", if one was ever run. */
   verification?: { status: "ok" | "failed"; checkedAt: string } | null;
+  /** Null for an archive in clear; absent from a server on an older version. */
+  encryption?: RunEncryption | null;
+}
+
+/** How an archive is encrypted: with which password (by when it was set), and whether this panel still has it. */
+export interface RunEncryption {
+  keyCreatedAt: string | null;
+  usable: boolean;
+}
+
+/** What `GET /api/backups/encryption` answers. */
+export interface EncryptionStatus {
+  enabled: boolean;
+  since: string | null;
+  previous: number;
+  unreadable: boolean;
 }
 
 export interface ArtifactView {

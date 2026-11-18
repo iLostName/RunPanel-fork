@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Button, ProgressBar } from "@heroui/react";
+import { Button, Input, Label, ProgressBar, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
@@ -33,6 +33,10 @@ import type { ArtifactView } from "@/components/backups/types";
  * once it is in, and only an archive that passes offers "Ripristina". The
  * restore itself is the same dialog, and the same safety copy, as for a backup
  * in the catalogue.
+ *
+ * An archive encrypted on another server stops between the two: the check
+ * cannot read it without its password, so the page asks for it there, and
+ * the check starts once the panel has tried it against the archive.
  */
 
 interface UploadArtifact {
@@ -51,7 +55,7 @@ interface UploadRecord {
   fileName: string;
   bytes: number;
   received: number;
-  status: "uploading" | "checking" | "ready" | "invalid";
+  status: "uploading" | "checking" | "locked" | "ready" | "invalid";
   message: string | null;
   createdAt: string;
   updatedAt: string;
@@ -66,11 +70,14 @@ interface UploadRecord {
   } | null;
   artifacts: UploadArtifact[];
   failures: { entryPath: string; reason: string }[];
+  /** Null for a plain zip; absent from a server on an older version. */
+  encryption?: { keyCreatedAt: string | null; unlocked: boolean } | null;
 }
 
-const STATUS: Record<UploadRecord["status"], { label: string; tone: "neutral" | "accent" | "success" | "danger" }> = {
+const STATUS: Record<UploadRecord["status"], { label: string; tone: "neutral" | "accent" | "success" | "warning" | "danger" }> = {
   uploading: { label: "incompleto", tone: "neutral" },
   checking: { label: "in controllo", tone: "accent" },
+  locked: { label: "serve la password", tone: "warning" },
   ready: { label: "integro", tone: "success" },
   invalid: { label: "non utilizzabile", tone: "danger" },
 };
@@ -122,8 +129,9 @@ export default function UploadRestorePage() {
 
   /** Send the pieces in order, retrying a lost one and resuming where the panel says it got to. */
   async function send(file: File) {
-    if (!/\.zip$/i.test(file.name)) {
-      toast.error("Serve il file .zip di un backup di RunPanel");
+    // The name is only a first filter: the panel reads the format from the bytes.
+    if (!/\.zip(\.enc)?$/i.test(file.name)) {
+      toast.error("Serve il file di un backup di RunPanel: .zip, oppure .zip.enc se è cifrato");
       return;
     }
 
@@ -241,7 +249,10 @@ export default function UploadRestorePage() {
 
       <div className="space-y-4">
         <Panel>
-          <PanelHeader title="1. Carica l'archivio" description="Il file .zip di un backup di RunPanel, come lo scarichi dalla sua pagina." />
+          <PanelHeader
+            title="1. Carica l'archivio"
+            description="Il file di un backup di RunPanel come lo scarichi dalla sua pagina: .zip, oppure .zip.enc se è cifrato con la password dei backup."
+          />
 
           {sending ? (
             <div className="mt-4 space-y-2">
@@ -284,12 +295,12 @@ export default function UploadRestorePage() {
               <Icon icon="solar:upload-minimalistic-linear" width={28} className="text-muted" aria-hidden />
               <p className="text-muted text-sm">Trascina qui il file, oppure</p>
               <Button size="sm" variant="secondary" onPress={() => input.current?.click()}>
-                Scegli il file .zip
+                Scegli il file
               </Button>
               <input
                 ref={input}
                 type="file"
-                accept=".zip,application/zip"
+                accept=".zip,.enc,application/zip,application/octet-stream"
                 className="hidden"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
@@ -306,7 +317,19 @@ export default function UploadRestorePage() {
           </Hint>
         </Panel>
 
-        {current && <UploadDetail upload={current} onRestore={() => setRestoring(current)} onDelete={() => setDeleting(current)} />}
+        {current && (
+          // Keyed: a password typed for one archive is not offered to the next.
+          <UploadDetail
+            key={current.id}
+            upload={current}
+            onRestore={() => setRestoring(current)}
+            onDelete={() => setDeleting(current)}
+            onUnlocked={() => {
+              void selected.refresh();
+              void list.refresh();
+            }}
+          />
+        )}
 
         {uploads.length > 0 && (
           <Panel padding="flush">
@@ -371,14 +394,56 @@ export default function UploadRestorePage() {
   );
 }
 
-function UploadDetail({ upload, onRestore, onDelete }: { upload: UploadRecord; onRestore: () => void; onDelete: () => void }) {
+function UploadDetail({
+  upload,
+  onRestore,
+  onDelete,
+  onUnlocked,
+}: {
+  upload: UploadRecord;
+  onRestore: () => void;
+  onDelete: () => void;
+  onUnlocked: () => void;
+}) {
+  const api = useNodeApi();
   const manifest = upload.manifest;
   const checked = upload.progress?.done ?? 0;
+  const [password, setPassword] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+
+  async function unlock() {
+    setUnlocking(true);
+    try {
+      const res = await fetch(api(`/api/backups/uploads/${upload.id}/unlock`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(body.error ?? "Sblocco non riuscito");
+        return;
+      }
+      setPassword("");
+      toast.success("Password giusta: ora controllo l'archivio");
+      onUnlocked();
+    } catch {
+      toast.error(MSG.unreachable);
+    } finally {
+      setUnlocking(false);
+    }
+  }
 
   return (
     <Panel>
       <PanelHeader
-        title={upload.status === "ready" ? "3. Scegli cosa ripristinare" : "2. Controllo dell'archivio"}
+        title={
+          upload.status === "ready"
+            ? "3. Scegli cosa ripristinare"
+            : upload.status === "locked"
+              ? "2. Sblocca l'archivio"
+              : "2. Controllo dell'archivio"
+        }
         description={upload.fileName}
         actions={
           <Button size="sm" variant="ghost" onPress={onDelete} className="text-danger">
@@ -395,6 +460,33 @@ function UploadDetail({ upload, onRestore, onDelete }: { upload: UploadRecord; o
             {checked > 0 ? ` (${formatBytes(checked)} letti)` : ""}. Per un archivio grande ci vuole qualche minuto.
           </p>
         </div>
+      )}
+
+      {upload.status === "locked" && (
+        <form
+          className="mt-4 space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (password && !unlocking) void unlock();
+          }}
+        >
+          <div className="flex items-start gap-3">
+            <Icon icon="solar:lock-password-linear" width={18} className="text-warning mt-0.5 shrink-0" aria-hidden />
+            <p className="text-muted text-sm">{upload.message}</p>
+          </div>
+          <TextField type="password" value={password} onChange={setPassword} className="max-w-md">
+            <Label>Password dei backup</Label>
+            <Input autoComplete="off" spellCheck={false} />
+          </TextField>
+          <p className="text-muted text-xs">
+            Quella in uso sul server di origine il giorno del backup: se nel frattempo è stata cambiata, serve quella di
+            prima. Il pannello la tiene con l&apos;archivio caricato e la cancella insieme a lui.
+          </p>
+          <Button type="submit" isPending={unlocking} isDisabled={!password}>
+            <Icon icon="solar:lock-unlocked-linear" width={16} aria-hidden />
+            Sblocca e controlla
+          </Button>
+        </form>
       )}
 
       {upload.status === "invalid" && (
@@ -423,6 +515,12 @@ function UploadDetail({ upload, onRestore, onDelete }: { upload: UploadRecord; o
               { label: "Pianificazione", value: manifest.policyName ?? triggerLabel(manifest.trigger) },
               { label: "Elementi", value: `${upload.artifacts.length}` },
               { label: "Dimensione", value: formatBytes(upload.bytes) },
+              {
+                label: "Cifratura",
+                value: upload.encryption
+                  ? `password dei backup${upload.encryption.keyCreatedAt ? ` del ${formatWhen(upload.encryption.keyCreatedAt)}` : ""}`
+                  : "nessuna",
+              },
               { label: "Pannello", value: manifest.panelVersion ?? "—", technical: true, mono: true },
               { label: "Run", value: manifest.runId, technical: true, mono: true },
             ]}

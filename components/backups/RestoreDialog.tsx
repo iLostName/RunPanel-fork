@@ -9,8 +9,8 @@ import { Hint } from "@/components/ui/Hint";
 import { SelectField } from "@/components/ui/SelectField";
 import { CheckboxField } from "@/components/ui/CheckboxField";
 import { useResource } from "@/lib/hooks/useResource";
-import { formatBytes } from "@/lib/format";
-import type { ArtifactView, DestinationView, TargetCatalog } from "./types";
+import { formatBytes, formatWhen } from "@/lib/format";
+import type { ArtifactView, DestinationView, RunEncryption, TargetCatalog } from "./types";
 import { serviceDisplayName } from "@/lib/service-name";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
@@ -68,6 +68,7 @@ export function RestoreDialog({
   onOpenChange,
   preselect,
   fixedTargets,
+  askPassword,
 }: {
   /** A run of the catalogue, or an archive uploaded and checked. */
   source: { runId: string } | { uploadId: string };
@@ -78,6 +79,8 @@ export function RestoreDialog({
   preselect?: string[];
   /** Targets chosen by the page and not offered: restoring onto the database whose page this is. */
   fixedTargets?: Record<string, string>;
+  /** The run's archive is encrypted with a password this panel no longer has: ask for it. */
+  askPassword?: RunEncryption;
 }) {
   const api = useNodeApi();
   const href = useServerHref();
@@ -102,6 +105,7 @@ export function RestoreDialog({
   );
   const [skipSafety, setSkipSafety] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [password, setPassword] = useState("");
 
   function optionsFor(artifact: ArtifactView) {
     if (artifact.kind === "service-db") {
@@ -150,6 +154,10 @@ export function RestoreDialog({
       toast.error(`Per confermare, scrivi esattamente: ${requiredName}`);
       return false;
     }
+    if (askPassword && !password) {
+      toast.error("Scrivi la password dei backup di questo archivio");
+      return false;
+    }
 
     const res = await fetch(api("/api/backups/restore"), {
       method: "POST",
@@ -158,6 +166,7 @@ export function RestoreDialog({
         ...source,
         confirm: confirmText.trim(),
         skipSafetyBackup: skipSafety,
+        ...(askPassword && password ? { password } : {}),
         targets: restorable.map((artifact) => {
           const target = targetOf(artifact);
           return {
@@ -190,7 +199,7 @@ export function RestoreDialog({
       destructive
       title={fromUpload ? "Ripristinare dall'archivio caricato" : "Ripristinare da questo backup"}
       submitLabel={selected.length > 1 ? `Ripristina ${selected.length} elementi` : "Ripristina"}
-      isSubmitDisabled={!confirmed || selected.length === 0 || missingTarget.length > 0}
+      isSubmitDisabled={!confirmed || selected.length === 0 || missingTarget.length > 0 || Boolean(askPassword && !password)}
       onSubmit={submit}
     >
       <>
@@ -199,6 +208,20 @@ export function RestoreDialog({
           qualsiasi cosa il pannello controlla che l&apos;archivio sia integro e salva una copia di quello che
           sta per sovrascrivere.
         </p>
+
+        {askPassword && (
+          <div className="mt-4">
+            <TextField type="password" value={password} onChange={setPassword}>
+              <Label>Password dei backup</Label>
+              <Input autoComplete="off" spellCheck={false} />
+            </TextField>
+            <p className="text-muted mt-1 text-xs">
+              L&apos;archivio è cifrato con una password che questo pannello non ha più
+              {askPassword.keyCreatedAt ? `, impostata il ${formatWhen(askPassword.keyCreatedAt)}` : ""}: scrivila per
+              aprirlo. Viene usata solo per questo ripristino.
+            </p>
+          </div>
+        )}
 
         <ul className="border-border mt-4 divide-y divide-[var(--color-border)] rounded-[var(--radius)] border">
           {restorable.map((artifact) => {

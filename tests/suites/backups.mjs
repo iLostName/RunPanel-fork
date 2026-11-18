@@ -1,6 +1,9 @@
 import { createReporter, client, SETUP_TOKEN } from "../harness.mjs";
 import fs from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { pathToFileURL } from "node:url";
 
 /**
  * The backup API end to end, without Docker.
@@ -24,7 +27,7 @@ async function waitForRun(api, runId, deadlineMs = 120_000) {
   }
 }
 
-export async function run({ base, dataDir }) {
+export async function run({ base, dataDir, repoRoot }) {
   const r = createReporter("backups");
   const api = client(base);
 
@@ -523,6 +526,214 @@ export async function run({ base, dataDir }) {
       afterDelete.filter(isPolicyArchive).length === 1,
       afterDelete.join(", ")
     );
+
+    // --- encryption with the backup password -----------------------------------
+    //
+    // The whole cycle on a real server: the password is set, the next archive
+    // leaves encrypted and still verifies and restores here, a replaced
+    // password keeps its archives readable, an archive from "another server"
+    // asks for its password on upload, and a run whose password the panel lost
+    // asks for it in the restore.
+    const sealed = await import(pathToFileURL(path.join(repoRoot, "services", "backup", "archive-crypto.ts")).href);
+    const FIRST = "la prima password dei backup";
+    const SECOND = "la seconda password dei backup";
+    const putPassword = (password) =>
+      api.call("/api/backups/encryption", { method: "PUT", body: JSON.stringify({ password }) });
+    const waitFor = async (route, done) => {
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        const { body } = await api.call(route);
+        if (done(body)) return body;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      return null;
+    };
+    const verify = async (id) => {
+      await api.call(`/api/backups/runs/${id}/verify`, { method: "POST" });
+      return (await waitFor(`/api/backups/runs/${id}/verify`, (body) => body?.verification && body.verification.status !== "running"))
+        ?.verification;
+    };
+    const restoreAndWait = async (payload) => {
+      const started = await api.call("/api/backups/restore", { method: "POST", body: JSON.stringify(payload) });
+      if (started.status !== 202) return { started };
+      const done = await waitFor(`/api/backups/restore/${started.body.restoreId}`, (body) => body?.status && body.status !== "running");
+      fs.rmSync(path.join(dataDir, ".restore-pending"), { force: true });
+      fs.rmSync(path.join(dataDir, "runpanel.restored.db"), { force: true });
+      return { started, done };
+    };
+    const listEncrypted = () => {
+      const found = [];
+      const walk = (dir) => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else if (entry.name.endsWith(".zip.enc") || entry.name.endsWith(".part")) found.push(full);
+        }
+      };
+      if (fs.existsSync(archives)) walk(archives);
+      return found;
+    };
+
+    {
+      const initial = await api.call("/api/backups/encryption");
+      r.check("encryption starts off, so nothing changes until the owner asks", initial.body?.enabled === false, JSON.stringify(initial.body));
+      const short = await putPassword("corta");
+      r.check("a short backup password is refused", short.status === 400, JSON.stringify(short.body));
+      const spaced = await putPassword(" una password che finisce con uno spazio ");
+      r.check("so is one with a space at either end", spaced.status === 400, JSON.stringify(spaced.body));
+      const noCheck = await api.call("/api/backups/encryption/check", { method: "POST", body: JSON.stringify({ password: FIRST }) });
+      r.check("there is nothing to check while it is off", noCheck.status === 409, String(noCheck.status));
+
+      const set = await putPassword(FIRST);
+      r.check("the owner sets the backup password", set.status === 200 && set.body?.enabled === true, JSON.stringify(set.body));
+      r.check("and it never comes back out", !JSON.stringify(set.body).includes(FIRST));
+      const wrong = await api.call("/api/backups/encryption/check", { method: "POST", body: JSON.stringify({ password: "un'altra" }) });
+      const right = await api.call("/api/backups/encryption/check", { method: "POST", body: JSON.stringify({ password: FIRST }) });
+      r.check("checking it says no to another and yes to it", wrong.body?.matches === false && right.body?.matches === true);
+    }
+
+    const sealedPolicy = await api.call("/api/backups/policies", {
+      method: "POST",
+      body: JSON.stringify({ name: "Cifrato", cron: "", destinationId: destination.id, targets: [{ kind: "panel" }] }),
+    });
+    const firstSealed = await api.call(`/api/backups/policies/${sealedPolicy.body?.id}/run`, { method: "POST" });
+    const sealedRun = await waitForRun(api, firstSealed.body?.runId);
+    r.check("a run with the password set succeeds", sealedRun.status === "success", JSON.stringify(sealedRun.errorMessage));
+    r.check("and says its archive is encrypted, with a password this panel has", sealedRun.encryption?.usable === true, JSON.stringify(sealedRun.encryption));
+    r.check("the log says so too", /cifrato/.test(sealedRun.log ?? ""), (sealedRun.log ?? "").slice(0, 200));
+    {
+      const files = listEncrypted();
+      r.check("the archive on disk is a .zip.enc, and no .part is left", files.length === 1 && files[0].endsWith(".zip.enc"), files.join(", "));
+      const head = files[0] ? fs.readFileSync(files[0]).subarray(0, 7).toString("latin1") : "";
+      r.check("and starts with the encryption header, not a zip", head === "RPBKENC", head);
+
+      const download = await fetch(`${base}/api/backups/runs/${sealedRun.id}/download`, { headers: { cookie: api.cookie } });
+      const body = Buffer.from(await download.arrayBuffer());
+      r.check("it downloads as it is stored, encrypted", body.subarray(0, 7).toString("latin1") === "RPBKENC" && body.length === sealedRun.archiveBytes);
+      r.check(
+        "named .zip.enc and not served as a zip",
+        /\.zip\.enc"/.test(download.headers.get("content-disposition") ?? "") && download.headers.get("content-type") === "application/octet-stream",
+        `${download.headers.get("content-disposition")} ${download.headers.get("content-type")}`
+      );
+
+      const check = await verify(sealedRun.id);
+      r.check("an encrypted archive passes the full integrity check here", check?.status === "ok" && check?.depth === "full", JSON.stringify(check));
+
+      const listed = await api.call("/api/backups/runs?limit=50");
+      // The second retention run: the third was deleted above.
+      const plain = (listed.body?.runs ?? []).find((run) => run.id === second.body.runId);
+      r.check("archives taken before stay marked as not encrypted", plain && plain.encryption === null, JSON.stringify(plain?.encryption));
+
+      // --- a new password keeps the old archives readable here --------------------
+      const changed = await putPassword(SECOND);
+      r.check("the password can be replaced", changed.body?.enabled === true && changed.body?.previous === 1, JSON.stringify(changed.body));
+      const again = await verify(sealedRun.id);
+      r.check("an archive sealed with the old one still opens here", again?.status === "ok" && again?.depth === "full", JSON.stringify(again));
+
+      // --- back as an upload: this panel's own archive opens by itself -------------
+      const own = await sendPieces(body);
+      await api.call(`/api/backups/uploads/${own.id}`, { method: "POST" });
+      const ownReady = await waitForUpload(own.id);
+      r.check(
+        "an encrypted archive of this panel, uploaded back, needs no password",
+        ownReady?.status === "ready" && ownReady?.encryption?.unlocked === true,
+        JSON.stringify(ownReady).slice(0, 240)
+      );
+      await api.call(`/api/backups/uploads/${own.id}`, { method: "DELETE" });
+
+      // --- an archive from another server ---------------------------------------
+      // The plain archive downloaded earlier, sealed the way another panel would.
+      const foreignPassword = "la password di un altro server";
+      const seal = await sealed.prepareSeal({ password: foreignPassword, keyId: "altroserver01", keyCreatedAt: "2026-01-02T03:04:05.000Z" });
+      const foreignFile = path.join(dataDir, "foreign.zip.enc");
+      await pipeline(Readable.from([bytes]), seal.createStream(), fs.createWriteStream(foreignFile));
+      const foreign = await sendPieces(fs.readFileSync(foreignFile));
+      fs.rmSync(foreignFile, { force: true });
+      await api.call(`/api/backups/uploads/${foreign.id}`, { method: "POST" });
+      const locked = await waitForUpload(foreign.id);
+      r.check(
+        "an archive encrypted elsewhere waits for its password",
+        locked?.status === "locked" && locked?.encryption?.unlocked === false && /password/.test(locked?.message ?? ""),
+        JSON.stringify(locked).slice(0, 240)
+      );
+      const early = await api.call("/api/backups/restore", {
+        method: "POST",
+        body: JSON.stringify({ uploadId: foreign.id, confirm: "x", targets: [{ artifactId: "0", action: "restore" }] }),
+      });
+      r.check("and cannot be restored before it is unlocked", early.status === 409, String(early.status));
+      const badUnlock = await api.call(`/api/backups/uploads/${foreign.id}/unlock`, { method: "POST", body: JSON.stringify({ password: FIRST }) });
+      r.check("a wrong password is refused at once", badUnlock.status === 400, JSON.stringify(badUnlock.body));
+      const goodUnlock = await api.call(`/api/backups/uploads/${foreign.id}/unlock`, {
+        method: "POST",
+        body: JSON.stringify({ password: foreignPassword }),
+      });
+      r.check("the right one starts the check", goodUnlock.status === 202 && goodUnlock.body?.upload?.status === "checking", JSON.stringify(goodUnlock.body).slice(0, 200));
+      r.check("and is never echoed back", !JSON.stringify(goodUnlock.body).includes(foreignPassword) && !JSON.stringify(goodUnlock.body).includes("secret"));
+      const unlocked = await waitForUpload(foreign.id);
+      r.check("then the archive is checked like any other", unlocked?.status === "ready", JSON.stringify(unlocked).slice(0, 240));
+      const foreignStore = unlocked?.artifacts?.find((entry) => entry.kind === "panel-store");
+      if (foreignStore) {
+        const { started, done } = await restoreAndWait({
+          uploadId: foreign.id,
+          confirm: foreignStore.refName,
+          targets: [{ artifactId: foreignStore.id, action: "restore" }],
+        });
+        r.check("and restored from, with the password it was unlocked with", started.status === 202 && done?.status === "success", JSON.stringify(done?.errorMessage ?? started.body));
+        r.check("the restore log says it was encrypted", /cifrato/.test(done?.log ?? ""), (done?.log ?? "").slice(0, 200));
+      }
+      await api.call(`/api/backups/uploads/${foreign.id}`, { method: "DELETE" });
+
+      // --- a run whose password the panel no longer has ----------------------------
+      // As after restoring another panel's store: the key row is there, but does
+      // not decrypt with this panel's key.
+      const Database = (await import("better-sqlite3")).default;
+      const store = new Database(path.join(dataDir, "runpanel.db"));
+      const keyRow = store.prepare("SELECT id, secret FROM backup_keys WHERE retired_at IS NOT NULL").get();
+      store.prepare("UPDATE backup_keys SET secret = ? WHERE id = ?").run("bm9uIHNpIGRlY2lmcmE=", keyRow.id);
+      try {
+        const detail = await api.call(`/api/backups/runs/${sealedRun.id}`);
+        r.check("a run whose password the panel lost says so", detail.body?.encryption?.usable === false, JSON.stringify(detail.body?.encryption));
+        const storeArtifact = detail.body?.artifacts?.find((entry) => entry.kind === "panel-store");
+        const payload = {
+          runId: sealedRun.id,
+          confirm: storeArtifact?.refName,
+          targets: [{ artifactId: storeArtifact?.id, action: "restore" }],
+        };
+        const missing = await restoreAndWait(payload);
+        r.check(
+          "its restore asks for the password before starting",
+          missing.started.status === 400 && missing.started.body?.passwordRequired === true,
+          JSON.stringify(missing.started.body)
+        );
+        const wrongPassword = await restoreAndWait({ ...payload, password: SECOND });
+        r.check("a wrong one is refused before starting too", wrongPassword.started.status === 400, JSON.stringify(wrongPassword.started.body));
+        const withPassword = await restoreAndWait({ ...payload, password: FIRST });
+        r.check(
+          "the right one restores it",
+          withPassword.started.status === 202 && withPassword.done?.status === "success",
+          JSON.stringify(withPassword.done?.errorMessage ?? withPassword.started.body)
+        );
+        const lostCheck = await verify(sealedRun.id);
+        r.check(
+          "and its integrity check vouches for the bytes without calling it damaged",
+          lostCheck?.status === "ok" && lostCheck?.depth === "archive",
+          JSON.stringify(lostCheck)
+        );
+      } finally {
+        store.prepare("UPDATE backup_keys SET secret = ? WHERE id = ?").run(keyRow.secret, keyRow.id);
+        store.close();
+      }
+
+      // --- turned off --------------------------------------------------------------
+      const off = await api.call("/api/backups/encryption", { method: "DELETE" });
+      r.check("encryption can be turned off", off.body?.enabled === false && off.body?.changed === true && off.body?.previous === 2, JSON.stringify(off.body));
+      const plainAgain = await api.call(`/api/backups/policies/${sealedPolicy.body?.id}/run`, { method: "POST" });
+      const plainRun = await waitForRun(api, plainAgain.body?.runId);
+      r.check("after which archives are in clear again", plainRun.status === "success" && plainRun.encryption === null, JSON.stringify(plainRun.encryption));
+      const stillOpens = await verify(sealedRun.id);
+      r.check("and the encrypted ones still open here", stillOpens?.status === "ok" && stillOpens?.depth === "full", JSON.stringify(stillOpens));
+    }
+    await api.call(`/api/backups/policies/${sealedPolicy.body?.id}`, { method: "DELETE" });
   } else {
     r.note("store Postgres: il dump richiede Docker, verifico solo la parte di configurazione");
   }
@@ -564,12 +775,10 @@ export async function run({ base, dataDir }) {
     // The runs outlive the policy on purpose: their archives are files, and a
     // cascade would leave them on disk with nothing that knows about them.
     const orphaned = await api.call("/api/backups/runs");
-    r.check(
-      "its runs survive, with the name kept for the history",
-      orphaned.body?.runs?.[0]?.policyName === "Notturno",
-      JSON.stringify(orphaned.body?.runs?.[0])
-    );
-    r.check("but no longer point at a policy", orphaned.body?.runs?.[0]?.policyId === null);
+    // Looked up by name: the encryption runs above are newer than these.
+    const survivor = orphaned.body?.runs?.find((entry) => entry.policyName === "Notturno");
+    r.check("its runs survive, with the name kept for the history", Boolean(survivor), JSON.stringify(orphaned.body?.runs?.[0]));
+    r.check("but no longer point at a policy", survivor?.policyId === null);
   }
 
   // --- a project's volume settings ---------------------------------------------

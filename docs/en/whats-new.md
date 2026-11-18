@@ -56,6 +56,7 @@ History of CPU, memory, disk and network for the server, projects and databases,
 - S3 destinations come with ready-made providers (AWS, Cloudflare R2, Backblaze B2, Hetzner, Wasabi, MinIO), are tested before being saved, can be edited and deleted; S3 errors are explained in Italian.
 - **Verifica integrità** (integrity check) on every archive, and a restore checks the archive before touching anything. An archive uploaded from your computer can be restored too.
 - Each database's page shows its backups, with "Esegui backup ora" (back up now) and restore.
+- **Archive encryption** (Backup page): with a backup password every new archive leaves the server encrypted whole (`.zip.enc`), manual and safety backups included. The panel opens its own archives by itself, even after a password change; an archive from another server asks for its password when you upload it, and `scripts/decrypt-backup.mjs` decrypts one without the panel. Nothing changes until you set it. See [Backups](backups.md#encryption-with-a-password).
 
 ## Notifications
 

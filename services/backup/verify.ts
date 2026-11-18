@@ -2,6 +2,7 @@ import fs from "fs";
 import { getDb, nowIso } from "@/lib/db";
 import { buildDestination } from "./destinations";
 import { verifyArchiveFile, verifyArchiveStream, type IntegrityReport, type MemberFailure } from "./integrity";
+import { panelArchiveOpener } from "./keyring";
 import { resolveArchivePath } from "./paths";
 
 /**
@@ -154,7 +155,9 @@ export async function startRunVerification(runId: string): Promise<VerificationV
       if (destination.type === "local") {
         const file = resolveArchivePath(archivePath);
         if (!fs.existsSync(file)) throw new Error("L'archivio non è più sul disco di questo server.");
-        report = await verifyArchiveFile(file, { expectedSha256: expected, onProgress });
+        // An encrypted archive is opened with the password it was sealed with,
+        // which this panel keeps; one it no longer has is reported, not failed.
+        report = await verifyArchiveFile(file, { expectedSha256: expected, onProgress, open: panelArchiveOpener() });
       } else {
         const stat = await destination.stat(archivePath);
         if (!stat.exists) throw new Error(`L'archivio non c'è più in «${destination.name}».`);
@@ -176,6 +179,9 @@ export async function startRunVerification(runId: string): Promise<VerificationV
 
     job.status = report.ok ? "ok" : "failed";
     job.message = report.message;
+    // On this disk but not opened — an encrypted archive whose password the
+    // panel no longer has: what was checked is the sha256 alone.
+    if (job.depth === "full" && report.members === null) job.depth = "archive";
     job.checkedAt = nowIso();
     job.failures = report.members?.failures ?? [];
     await store(runId, job).catch((err) => console.error("[backup] Verifica non registrata:", err));

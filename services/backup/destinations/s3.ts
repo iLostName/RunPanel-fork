@@ -11,6 +11,7 @@ import {
   type S3Operation,
   type S3Problem,
 } from "@/lib/s3-errors";
+import { archiveContentType } from "../paths";
 import type { Destination } from "../types";
 
 /**
@@ -277,7 +278,8 @@ export function s3Destination(
       let res: Response;
       try {
         res = await request(cfg, "upload", "PUT", key, {
-          headers: { "content-length": String(size), "content-type": "application/zip" },
+          // An encrypted archive is not a zip anyone can open: no viewer should try.
+          headers: { "content-length": String(size), "content-type": archiveContentType(fileName) },
           // Streamed, not buffered: an archive is routinely larger than the heap.
           body: Readable.toWeb(fs.createReadStream(localPath)) as ReadableStream,
           // Required by undici whenever the body is a stream.

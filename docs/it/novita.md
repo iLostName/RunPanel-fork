@@ -56,6 +56,7 @@ Storico di CPU, memoria, disco e rete per il server, i progetti e i database, co
 - Le destinazioni S3 hanno i provider già pronti (AWS, Cloudflare R2, Backblaze B2, Hetzner, Wasabi, MinIO), vengono provate prima di salvarle, si modificano e si eliminano; gli errori di S3 sono spiegati in italiano.
 - **Verifica integrità** su ogni archivio, e il ripristino controlla l'archivio prima di toccare qualcosa. Si può ripristinare anche da un archivio caricato dal computer.
 - La pagina di ogni database mostra i suoi backup, con «Esegui backup ora» e il ripristino.
+- **Cifratura degli archivi** (pagina Backup): con una password dei backup ogni nuovo archivio esce dal server cifrato per intero (`.zip.enc`), anche quelli manuali e di sicurezza. Il pannello apre da solo i suoi archivi, anche dopo un cambio di password; un archivio di un altro server chiede la password quando lo carichi, e `scripts/decrypt-backup.mjs` lo decifra senza il pannello. Finché non la imposti non cambia niente. Vedi [Backup](backups.md#cifratura-con-una-password).
 
 ## Notifiche
 

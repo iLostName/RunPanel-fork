@@ -76,7 +76,48 @@ Gli altri account con il permesso `backup` possono aggiungere destinazioni, veri
 
 Ogni archivio viene costruito prima in `data/backups/staging`, anche per S3: serve spazio libero in locale, e il backup si interrompe se scende sotto 2 GB.
 
-L'archivio è uno zip con `manifest.json`, `LEGGIMI.txt` e `checksums.txt` in formato `sha256sum -c` (per i dump e i volumi; i file del repository non sono elencati). Le variabili dei progetti e le credenziali dei servizi sono cifrate con la chiave di questo server; includere la chiave stessa è una scelta esplicita a parte. Gli archivi non vengono cifrati con una password propria.
+L'archivio è uno zip con `manifest.json`, `LEGGIMI.txt` e `checksums.txt` in formato `sha256sum -c` (per i dump e i volumi; i file del repository non sono elencati). Le variabili dei progetti e le credenziali dei servizi sono cifrate con la chiave di questo server; includere la chiave stessa è una scelta esplicita a parte. Il resto (dump, volumi, codice) è in chiaro, a meno di cifrare l'archivio intero con una password: vedi qui sotto.
+
+## Cifratura con una password
+
+Con la cifratura attiva, ogni archivio esce dal server cifrato per intero con la **password dei backup**: chi ne ha una copia — un bucket, un disco portato via, un download dimenticato — senza la password non legge niente, nemmeno i nomi dei file. Senza, vale quello che c'è sopra: sono cifrate solo variabili e credenziali, con la chiave del pannello.
+
+- **Una password per server**, in **Backup › Cifratura degli archivi**. La imposta il proprietario; gli altri account vedono se è attiva. Vale per ogni nuovo archivio: le pianificazioni, **Esegui backup ora** e i backup di sicurezza presi prima di un ripristino, che vanno sulla destinazione predefinita, spesso un bucket. Per questo è una per server e non una per pianificazione: un interruttore per pianificazione lascerebbe in chiaro proprio quei due.
+- Le pianificazioni esistenti non cambiano finché non imposti la password. Creando una pianificazione, il modulo la propone subito sotto la destinazione, con un avviso quando gli archivi andrebbero fuori dal server in chiaro.
+- La password si scrive due volte, ha almeno 12 caratteri e niente spazi all'inizio o alla fine, e si conferma di averla salvata altrove. **Non si può rileggere**: **Verifica la password** dice solo se quella che hai salvato è giusta.
+- Il pannello la conserva, cifrata con la sua chiave, e apre da solo i propri archivi: verifica, ripristino e download funzionano come prima. **Cambia password** vale dal prossimo archivio, e le password precedenti restano: gli archivi che hanno cifrato si aprono ancora qui. **Disattiva** riporta in chiaro i prossimi archivi; quelli già cifrati restano cifrati.
+- Se la chiave del pannello cambia e la password salvata non si decifra più, i backup **non partono** finché non la imposti di nuovo: meglio nessun archivio che uno in chiaro fuori da qui. Il pannello lo dice nella pagina Backup, e la notifica di backup fallito arriva come sempre.
+- Un archivio cifrato si chiama `….zip.enc`, si scarica così com'è (cifrato) e nella cronologia ha un lucchetto; la pagina del backup dice con quale password, per data.
+
+> **Se perdi la password, perdi i backup che stanno fuori da questo server.** Nessuno, RunPanel compreso, può recuperarla. Tienila in un gestore di password, non sul server che protegge. Se l'hai cambiata, tieni anche quelle di prima finché esistono archivi cifrati con loro: la data della password è scritta in chiaro nell'archivio, e il pannello la mostra quando la chiede.
+
+Le password stanno nello store del pannello. Ripristinare lo store rimette quelle che c'erano il giorno di quel backup: gli archivi cifrati con una password impostata dopo, da lì in poi, la chiedono. Lo stesso vale per uno store portato su un server con un'altra chiave.
+
+### Su un altro server
+
+**Ripristina da un archivio** accetta anche i `.zip.enc`. Uno cifrato da questo pannello si apre da solo. Uno di un altro server si ferma su **serve la password**: scrivi quella in uso il giorno del backup, il pannello la prova sull'archivio (se è sbagliata lo dice subito), poi lo controlla e lo ripristina come gli altri. La password resta con l'archivio caricato, cifrata con la chiave del pannello, e viene cancellata con lui. Lo stesso vale per un backup della lista cifrato con una password che il pannello non ha più, per esempio dopo aver ripristinato lo store di un altro pannello: il dialog del ripristino la chiede.
+
+Dall'API: `POST /api/backups/uploads/{id}/unlock` con `{ "password": "…" }` per un archivio caricato, e il campo `password` in `POST /api/backups/restore` per un backup della lista.
+
+### Senza il pannello
+
+Il `LEGGIMI.txt` dell'archivio sta dentro la cifratura, per questo le istruzioni sono qui. [`scripts/decrypt-backup.mjs`](../../scripts/decrypt-backup.mjs) è un file solo, senza dipendenze: serve Node 18 o successivo, non il pannello né il resto del repository. Copialo accanto all'archivio e:
+
+```sh
+node decrypt-backup.mjs runpanel-20261118-030000-backup-notturno-abc123.zip.enc
+# chiede la password senza mostrarla e scrive runpanel-…-abc123.zip accanto
+
+node decrypt-backup.mjs --check archivio.zip.enc     # controlla password e archivio, senza scrivere niente
+node decrypt-backup.mjs archivio.zip.enc altro.zip   # sceglie il nome dello zip
+node decrypt-backup.mjs --password-file pw.txt archivio.zip.enc
+RUNPANEL_BACKUP_PASSWORD='…' node decrypt-backup.mjs archivio.zip.enc
+```
+
+Ogni blocco viene verificato prima di essere scritto, e lo zip prende il suo nome solo alla fine (fino ad allora è `….zip.part`): una password sbagliata (codice di uscita 2), un archivio danneggiato o troncato (codice 1) non lasciano mai uno zip a metà. Quello che ne esce è lo zip di sempre, con `LEGGIMI.txt` e i comandi per ripristinare a mano; caricato nel pannello, si ripristina anche così.
+
+### Il formato
+
+Per chi vuole leggerlo con altri strumenti: un'intestazione — `RPBKENC`, la versione (1 byte), la lunghezza (uint32 big-endian) e un JSON con i parametri — poi lo zip a blocchi di 64 KiB, ognuno cifrato con AES-256-GCM e seguito dal suo tag di 16 byte. La chiave viene dalla password, normalizzata NFC, con scrypt (N = 2^17, r = 8, p = 1, un sale casuale di 32 byte per ogni archivio) e HKDF-SHA256. Il nonce è il numero del blocco, e i dati associati legano a ogni blocco lo sha256 dell'intestazione, il suo numero e se è l'ultimo: un blocco modificato, spostato o ripetuto, un file troncato o allungato vengono rifiutati. In chiaro restano solo i parametri, un identificativo della password e la data in cui è stata impostata. I dettagli sono in [`services/backup/archive-crypto.ts`](../../services/backup/archive-crypto.ts).
 
 ## Pianificazione e retention
 
@@ -92,6 +133,8 @@ Ogni backup registra lo sha256 dell'archivio, e `checksums.txt` quello di ogni d
 - sul disco locale, per intero: lo sha256 dell'archivio, poi per ogni file il CRC-32, lo sha256 dove è elencato, e ogni `.gz` decompresso fino in fondo — un dump troncato ha comunque un checksum valido di se stesso troncato;
 - in un bucket, scorrendolo una volta per calcolarne lo sha256, senza salvarlo: dimostra che i byte sono quelli scritti; i singoli file vengono controllati di nuovo prima di ogni ripristino.
 
+Un archivio cifrato si controlla allo stesso modo: lo sha256 è quello del file cifrato, e i file vengono letti attraverso la decifratura, che verifica ogni blocco. Se il pannello non ha più la sua password, controlla lo sha256 e dice che il contenuto non si è potuto aprire.
+
 L'esito resta sul backup (uno scudo nella cronologia), con il file che non va e il motivo in modalità esperto. Un archivio danneggiato non si ripara: fai un nuovo backup.
 
 ## Ripristino
@@ -101,7 +144,7 @@ Il ripristino è un solo dialog. È tutto selezionato; ogni voce dice, in una ri
 Prima di fermare, copiare o sovrascrivere qualsiasi cosa:
 
 1. Un archivio su S3 viene scaricato nella cartella di lavoro del ripristino (serve lo spazio libero, più la riserva di 2 GB), con lo sha256 calcolato durante il download e confrontato con quello registrato quando è stato scritto; se non coincide il ripristino si ferma.
-2. I file che il ripristino userà — solo quelli — vengono controllati come fa **Verifica integrità**. Se uno è danneggiato il ripristino si ferma senza aver toccato niente.
+2. I file che il ripristino userà — solo quelli — vengono controllati come fa **Verifica integrità**. Se uno è danneggiato, o la password di un archivio cifrato manca o è sbagliata, il ripristino si ferma senza aver toccato niente. Un archivio cifrato non viene mai decifrato per intero su disco: come per uno zip, il ripristino estrae solo i file che gli servono nella sua cartella di lavoro, che viene cancellata alla fine.
 3. Un **backup di sicurezza** delle destinazioni va sulla destinazione predefinita (etichetta "Sicurezza pre-ripristino", mai tolto dalla retention, si cancella a mano). Se fallisce il ripristino si ferma, a meno che tu non abbia spuntato **Procedi anche senza backup di sicurezza**.
 
 - **Volume**: il progetto si ferma; i suoi container rimasti accesi vengono fermati e riavviati alla fine, mentre un container di un altro progetto che usa il volume blocca il ripristino. I percorsi esclusi restano come sono. Un volume Compose che non esiste più si ricrea con un deploy, poi si ripete il ripristino.
@@ -117,8 +160,8 @@ Il ripristino non confronta le versioni dei motori: un dump di una major riprist
 
 **Ripristina da un archivio**, nella pagina Backup, serve per un archivio che non è nella lista: uno scaricato in precedenza, o i backup di un server che non c'è più. Solo per il proprietario.
 
-1. **Carica** lo `.zip` (trascinalo o sceglilo). Sale a pezzi da 8 MB, ognuno ritentato da solo, così un archivio grande sopravvive a una connessione instabile e il reverse proxy non ha bisogno di limiti particolari. Prima si controlla che ci sia spazio per l'intero archivio più la riserva di 2 GB.
-2. **Controllo**: quando è arrivato tutto, l'archivio viene controllato per intero — deve contenere il `manifest.json` di RunPanel, e ogni file supera i controlli di sopra. Un archivio danneggiato o che non è di RunPanel viene rifiutato con il motivo.
+1. **Carica** lo `.zip`, o il `.zip.enc` se è cifrato (trascinalo o sceglilo). Sale a pezzi da 8 MB, ognuno ritentato da solo, così un archivio grande sopravvive a una connessione instabile e il reverse proxy non ha bisogno di limiti particolari. Prima si controlla che ci sia spazio per l'intero archivio più la riserva di 2 GB.
+2. **Controllo**: quando è arrivato tutto, l'archivio viene controllato per intero — deve contenere il `manifest.json` di RunPanel, e ogni file supera i controlli di sopra. Un archivio danneggiato o che non è di RunPanel viene rifiutato con il motivo. Un archivio cifrato su un altro server prima chiede la sua password (vedi [Su un altro server](#su-un-altro-server)).
 3. **Ripristino**: lo stesso dialog di un backup della lista. Le voci di un altro pannello nominano progetti e servizi che questo non ha: ognuna chiede dove andare, e devono esistere già qui.
 
 Un archivio caricato resta sul server per 24 ore dall'ultimo uso, così un ripristino non riuscito si può ripetere senza ricaricarlo; dalla pagina si può eliminare prima.

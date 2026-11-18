@@ -1,11 +1,14 @@
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
+import { decrypt, encrypt } from "@/lib/crypto";
 import { nowIso } from "@/lib/db";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatWhen } from "@/lib/format";
 import { generateId } from "@/lib/utils";
+import { ArchiveLockedError, SEALED_MAGIC, checkArchivePassword, readSealedHead } from "./archive-crypto";
 import { readArchiveManifest } from "./archive-read";
 import { readArchiveChecksums, verifyMembers, type MemberFailure } from "./integrity";
+import { panelArchiveOpener } from "./keyring";
 import { FREE_SPACE_RESERVE, assertBackupId, freeBytes } from "./paths";
 import type { BackupManifest } from "./types";
 
@@ -24,6 +27,12 @@ import type { BackupManifest } from "./types";
  * When complete it is checked whole — manifest, every member's CRC, sha256 and
  * gzip stream — and only an archive that passes can be restored from. Uploads
  * left alone for a day are removed: they are full copies of someone's data.
+ *
+ * An encrypted archive whose password this panel has (one of its own, sent
+ * back) is checked like any other. One from another server stops at `locked`
+ * until someone types its password: it is tried against the archive's header,
+ * and kept — encrypted with the panel key, in the record, never in an answer
+ * — for the check and the restore that follow, and deleted with the upload.
  */
 
 /** Under the 10 MB `proxy.ts` buffers, with room for a slow link to finish one. */
@@ -31,7 +40,7 @@ export const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 /** An upload nobody has touched for this long is deleted. */
 const UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 
-export type UploadStatus = "uploading" | "checking" | "ready" | "invalid";
+export type UploadStatus = "uploading" | "checking" | "locked" | "ready" | "invalid";
 
 export interface UploadArtifact {
   /** Its index in the manifest: what a restore mapping names. */
@@ -68,7 +77,16 @@ export interface UploadRecord {
   } | null;
   artifacts: UploadArtifact[];
   failures: MemberFailure[];
+  /** Null for a plain zip. `unlocked`: the panel can read it, by its own key or a typed password. */
+  encryption?: { keyCreatedAt: string | null; unlocked: boolean } | null;
 }
+
+/** What is on disk: the record, plus the typed password, encrypted with the panel key. */
+interface StoredUpload extends UploadRecord {
+  secret?: string;
+}
+
+const PASSWORD_PURPOSE = "backup-upload";
 
 function dir(): string {
   return config.backupUploadsDir;
@@ -86,19 +104,32 @@ function recordPath(id: string): string {
   return path.join(dir(), `${assertBackupId(id)}.json`);
 }
 
-function write(record: UploadRecord): void {
+function write(record: StoredUpload): void {
   const file = recordPath(record.id);
   const temp = `${file}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(record), { mode: 0o600 });
   fs.renameSync(temp, file);
 }
 
-export function readUpload(id: string): UploadRecord | null {
+/** The whole record, password included: for this module only. */
+function readRecord(id: string): StoredUpload | null {
   try {
-    return JSON.parse(fs.readFileSync(recordPath(id), "utf8")) as UploadRecord;
+    return JSON.parse(fs.readFileSync(recordPath(id), "utf8")) as StoredUpload;
   } catch {
     return null;
   }
+}
+
+/** What the routes hand out: never the password, not even encrypted. */
+function publicView(record: StoredUpload): UploadRecord {
+  const { secret, ...view } = record;
+  void secret;
+  return view;
+}
+
+export function readUpload(id: string): UploadRecord | null {
+  const record = readRecord(id);
+  return record ? publicView(record) : null;
 }
 
 export function listUploads(): UploadRecord[] {
@@ -159,6 +190,7 @@ export function createUpload(input: { fileName: string; bytes: number }): Upload
     manifest: null,
     artifacts: [],
     failures: [],
+    encryption: null,
   };
   // The record first: a sweep that ran in between must never see the piece
   // file alone and take it for something left behind.
@@ -182,13 +214,13 @@ const writing: Set<string> = (writingRef.__runpanelUploadWrites ??= new Set());
  * answer — is accepted and ignored, so the browser can simply send it again.
  */
 export async function appendChunk(id: string, offset: number, chunk: Buffer): Promise<UploadRecord> {
-  const record = readUpload(id);
+  const record = readRecord(id);
   if (!record) throw new UploadError("Caricamento non trovato", 404);
   if (record.status !== "uploading") throw new UploadError("Questo caricamento è già completo", 409);
   if (!Number.isSafeInteger(offset) || offset < 0) throw new UploadError("Posizione non valida");
   if (chunk.length === 0 || chunk.length > UPLOAD_CHUNK_BYTES) throw new UploadError("Pezzo di dimensione non valida");
 
-  if (offset + chunk.length <= record.received) return record;
+  if (offset + chunk.length <= record.received) return publicView(record);
   if (offset !== record.received) {
     throw new UploadError(`Pezzo fuori ordine: il pannello ne aspetta uno a partire da ${record.received}`, 409);
   }
@@ -214,7 +246,7 @@ export async function appendChunk(id: string, offset: number, chunk: Buffer): Pr
     record.received = offset + chunk.length;
     record.updatedAt = nowIso();
     write(record);
-    return record;
+    return publicView(record);
   } finally {
     writing.delete(id);
   }
@@ -222,9 +254,9 @@ export async function appendChunk(id: string, offset: number, chunk: Buffer): Pr
 
 /** Every piece is in: make it a zip and check it, in the background. */
 export function finishUpload(id: string): UploadRecord {
-  const record = readUpload(id);
+  const record = readRecord(id);
   if (!record) throw new UploadError("Caricamento non trovato", 404);
-  if (record.status !== "uploading") return record;
+  if (record.status !== "uploading") return publicView(record);
   if (record.received !== record.bytes) {
     throw new UploadError(`Mancano ancora ${formatBytes(record.bytes - record.received)} da caricare`, 409);
   }
@@ -236,18 +268,76 @@ export function finishUpload(id: string): UploadRecord {
   write(record);
 
   launchCheck(record);
-  return record;
+  return publicView(record);
 }
 
-const globalRef = globalThis as typeof globalThis & { __runpanelUploadChecks?: Set<string> };
+/**
+ * The password of an encrypted upload from another server: tried against the
+ * archive's header first, so a wrong one is a 400 now and not a failed check
+ * later; then kept with the upload, and the check starts.
+ */
+export async function unlockUpload(id: string, password: string): Promise<UploadRecord> {
+  const record = readRecord(id);
+  if (!record) throw new UploadError("Caricamento non trovato", 404);
+  if (record.status !== "locked") {
+    throw new UploadError(
+      record.status === "checking" ? "Il controllo è già in corso" : "Questo archivio non chiede una password",
+      409
+    );
+  }
+  if (unlocking.has(id)) throw new UploadError("Sto già provando una password per questo archivio", 409);
+  unlocking.add(id);
+  try {
+    if (!(await checkArchivePassword(uploadArchivePath(id), password))) {
+      throw new UploadError(
+        "La password non è quella di questo archivio. Serve la password dei backup in uso sul server che l'ha creato, " +
+          "il giorno del backup: se l'hai cambiata dopo, quella di prima."
+      );
+    }
+    const current = readRecord(id);
+    if (!current) throw new UploadError("Caricamento non trovato", 404);
+    const next: StoredUpload = {
+      ...current,
+      secret: encrypt(password, PASSWORD_PURPOSE),
+      status: "checking",
+      message: null,
+      progress: { done: 0, total: null },
+      updatedAt: nowIso(),
+    };
+    write(next);
+    launchCheck(next);
+    return publicView(next);
+  } finally {
+    unlocking.delete(id);
+  }
+}
+
+/** The password typed for an upload, if any: for the restore that reads it. */
+export function uploadPasswords(id: string): string[] {
+  const record = readRecord(id);
+  if (!record?.secret) return [];
+  try {
+    return [decrypt(record.secret, PASSWORD_PURPOSE)];
+  } catch {
+    // Sealed with a panel key that is gone: the archive simply asks again.
+    return [];
+  }
+}
+
+const globalRef = globalThis as typeof globalThis & {
+  __runpanelUploadChecks?: Set<string>;
+  __runpanelUploadUnlocks?: Set<string>;
+};
 const checking: Set<string> = (globalRef.__runpanelUploadChecks ??= new Set());
+/** One password at a time per upload: each try is a scrypt, deliberately slow. */
+const unlocking: Set<string> = (globalRef.__runpanelUploadUnlocks ??= new Set());
 
 function launchCheck(record: UploadRecord): void {
   if (checking.has(record.id)) return;
   checking.add(record.id);
   void inspect(record)
     .catch((err) => {
-      const current = readUpload(record.id);
+      const current = readRecord(record.id);
       if (!current) return; // deleted meanwhile
       write({
         ...current,
@@ -273,32 +363,73 @@ export function resumeInterruptedChecks(): void {
 /** Is it a RunPanel archive, and is every member whole? */
 async function inspect(record: UploadRecord): Promise<void> {
   const file = uploadArchivePath(record.id);
-  const head = Buffer.alloc(4);
+  const head = Buffer.alloc(SEALED_MAGIC.length);
   const fd = fs.openSync(file, "r");
   try {
-    fs.readSync(fd, head, 0, 4, 0);
+    fs.readSync(fd, head, 0, head.length, 0);
   } finally {
     fs.closeSync(fd);
   }
   const done = (patch: Partial<UploadRecord>) => {
-    const current = readUpload(record.id);
+    const current = readRecord(record.id);
     if (!current) return;
     write({ ...current, ...patch, progress: null, updatedAt: nowIso() });
   };
 
-  if (head.readUInt32LE(0) !== 0x04034b50) {
-    done({ status: "invalid", message: "Non è un archivio ZIP: un backup di RunPanel si scarica dalla sua pagina come file .zip." });
+  const zip = head.readUInt32LE(0) === 0x04034b50;
+  if (!zip && !head.equals(SEALED_MAGIC)) {
+    done({
+      status: "invalid",
+      message:
+        "Non è un archivio di RunPanel: un backup si scarica dalla sua pagina come file .zip, oppure .zip.enc se è cifrato.",
+    });
     return;
   }
 
-  const manifest: BackupManifest | null = await readArchiveManifest(file).catch(() => null);
+  // The panel's own passwords by the key id in the header, then the one typed here.
+  const open = panelArchiveOpener(uploadPasswords(record.id));
+  let encryption: UploadRecord["encryption"] = null;
+  if (!zip) {
+    let sealed: Awaited<ReturnType<typeof readSealedHead>>;
+    try {
+      sealed = await readSealedHead(file);
+    } catch (err) {
+      done({ status: "invalid", message: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+    encryption = { keyCreatedAt: sealed?.header.keyCreatedAt ?? null, unlocked: false };
+  }
+
+  let manifest: BackupManifest | null;
+  try {
+    manifest = await readArchiveManifest({ file, open });
+  } catch (err) {
+    if (err instanceof ArchiveLockedError) {
+      const when = err.keyCreatedAt ? ` impostata il ${formatWhen(err.keyCreatedAt)}` : "";
+      done({
+        status: "locked",
+        encryption,
+        message: `L'archivio è cifrato con la password dei backup${when} sul server che l'ha creato: scrivila per controllarlo e ripristinarlo.`,
+      });
+      return;
+    }
+    // Damaged inside the encryption: the sentence already says so.
+    done({ status: "invalid", encryption, message: err instanceof Error ? err.message : String(err) });
+    return;
+  }
+  if (encryption) encryption = { ...encryption, unlocked: true };
   if (!manifest || !Array.isArray(manifest.artifacts)) {
-    done({ status: "invalid", message: "Non è un backup di RunPanel: manca manifest.json, che ogni archivio del pannello contiene." });
+    done({
+      status: "invalid",
+      encryption,
+      message: "Non è un backup di RunPanel: manca manifest.json, che ogni archivio del pannello contiene.",
+    });
     return;
   }
   if (manifest.schemaVersion !== 1) {
     done({
       status: "invalid",
+      encryption,
       message: `L'archivio è in un formato più recente (versione ${String(manifest.schemaVersion)}): aggiorna il pannello per ripristinarlo.`,
     });
     return;
@@ -329,7 +460,7 @@ async function inspect(record: UploadRecord): Promise<void> {
     storeDriver: manifest.panel?.storeDriver ?? null,
   };
 
-  const checksums = await readArchiveChecksums(file);
+  const checksums = await readArchiveChecksums(file, open);
   for (const artifact of artifacts) {
     if (artifact.checksum && artifact.entryPath && !checksums.has(artifact.entryPath)) {
       checksums.set(artifact.entryPath, artifact.checksum);
@@ -339,11 +470,12 @@ async function inspect(record: UploadRecord): Promise<void> {
   let lastWrite = 0;
   const report = await verifyMembers(file, {
     checksums,
+    open,
     onProgress: (done) => {
       // A progress bar, not a journal: the record is rewritten a few times a second at most.
       if (Date.now() - lastWrite < 500) return;
       lastWrite = Date.now();
-      const current = readUpload(record.id);
+      const current = readRecord(record.id);
       if (current) write({ ...current, progress: { done, total: null } });
     },
   });
@@ -352,6 +484,7 @@ async function inspect(record: UploadRecord): Promise<void> {
     const first = report.failures[0];
     done({
       status: "invalid",
+      encryption,
       manifest: summary,
       artifacts,
       failures: report.failures.slice(0, 20),
@@ -362,6 +495,7 @@ async function inspect(record: UploadRecord): Promise<void> {
 
   done({
     status: "ready",
+    encryption,
     manifest: summary,
     artifacts,
     failures: [],
@@ -380,7 +514,9 @@ export function uploadArtifacts(id: string): Map<string, UploadArtifact> {
     throw new Error(
       record.status === "invalid"
         ? `L'archivio caricato non ha superato il controllo: ${record.message ?? "è danneggiato"}`
-        : "L'archivio caricato non è ancora stato controllato"
+        : record.status === "locked"
+          ? "L'archivio caricato è cifrato: scrivi prima la sua password"
+          : "L'archivio caricato non è ancora stato controllato"
     );
   }
   return new Map(record.artifacts.map((artifact) => [artifact.id, artifact]));
@@ -388,7 +524,7 @@ export function uploadArtifacts(id: string): Map<string, UploadArtifact> {
 
 /** Touch it, so a restore just finished — or failed and to be retried — keeps it a day longer. */
 export function touchUpload(id: string): void {
-  const record = readUpload(id);
+  const record = readRecord(id);
   if (record) write({ ...record, updatedAt: nowIso() });
 }
 

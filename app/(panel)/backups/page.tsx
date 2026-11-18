@@ -13,6 +13,7 @@ import { LinkButton } from "@/components/ui/LinkButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DeleteButton } from "@/components/ui/DangerAction";
 import { DestinationsPanel } from "./_components/DestinationsPanel";
+import { EncryptionPanel } from "./_components/EncryptionPanel";
 import { Hint } from "@/components/ui/Hint";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatTile } from "@/components/ui/StatTile";
@@ -426,6 +427,9 @@ export default function BackupsPage() {
           onChanged={refreshAll}
         />
 
+        {/* Next to where the archives go: a bucket is where a password matters most. */}
+        <EncryptionPanel key={target} memberId={target} />
+
         <Panel padding="flush">
           <div className="p-4 sm:p-5">
             <PanelHeader
@@ -480,6 +484,18 @@ export default function BackupsPage() {
                           />
                         </span>
                       )}
+                      {run.hasArchive && run.encryption && (
+                        <span
+                          className={run.encryption.usable ? "text-muted" : "text-warning"}
+                          title={
+                            run.encryption.usable
+                              ? `Cifrato con la password dei backup${run.encryption.keyCreatedAt ? ` del ${formatWhen(run.encryption.keyCreatedAt)}` : ""}`
+                              : "Cifrato con una password che questo pannello non ha più: per ripristinarlo ti verrà chiesta"
+                          }
+                        >
+                          <Icon icon="solar:lock-password-linear" width={14} aria-label="Archivio cifrato" />
+                        </span>
+                      )}
                     </div>
                     <p className="text-muted mt-0.5 truncate text-xs">
                       {formatWhen(run.startedAt)} · {triggerLabel(run.trigger)} ·{" "}
@@ -525,8 +541,9 @@ export default function BackupsPage() {
         <Hint tone="warn" title="Gli archivi contengono segreti">
           Le variabili e le credenziali dei database vengono salvate cifrate con la chiave di questo
           pannello: un archivio portato altrove resta illeggibile senza quella chiave, a meno che tu
-          non abbia scelto di includerla. Sul disco locale gli archivi stanno in{" "}
-          <code>data/backups</code>, leggibili solo dal pannello.
+          non abbia scelto di includerla. Dump, volumi e codice sono cifrati solo con la cifratura
+          degli archivi attiva. Sul disco locale gli archivi stanno in <code>data/backups</code>,
+          leggibili solo dal pannello.
         </Hint>
       </div>
 

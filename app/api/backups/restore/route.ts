@@ -4,7 +4,7 @@ import { restoreProblem } from "@/lib/backup-access";
 import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { restoreRequestSchema } from "@/lib/validation";
-import { RestoreBusyError, startRestore } from "@/services/backup/restore";
+import { RestoreBusyError, restorePasswordProblem, startRestore } from "@/services/backup/restore";
 import { activeBackupRunId } from "@/services/backup/runner";
 import { readUpload } from "@/services/backup/uploads";
 
@@ -82,6 +82,10 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+
+      // An archive sealed with a password this panel no longer has.
+      const locked = await restorePasswordProblem(data.runId, data.password);
+      if (locked) return NextResponse.json({ error: locked, passwordRequired: true }, { status: 400 });
     } else if (data.uploadId) {
       // An uploaded archive is named by its own manifest, read and checked when
       // it finished arriving: the same confirmation as a run of the catalogue,
@@ -94,7 +98,9 @@ export async function POST(request: NextRequest) {
             error:
               upload.status === "invalid"
                 ? `L'archivio caricato non ha superato il controllo: ${upload.message ?? "è danneggiato"}`
-                : "L'archivio caricato non è ancora stato controllato: attendi che il controllo finisca",
+                : upload.status === "locked"
+                  ? "L'archivio caricato è cifrato: scrivi prima la sua password, poi il pannello lo controlla"
+                  : "L'archivio caricato non è ancora stato controllato: attendi che il controllo finisca",
           },
           { status: 409 }
         );
@@ -127,6 +133,8 @@ export async function POST(request: NextRequest) {
         uploadId: data.uploadId,
         mappings: data.targets,
         skipSafetyBackup: data.skipSafetyBackup,
+        // An upload carries its own: it was given when the upload was unlocked.
+        password: data.runId ? data.password : undefined,
       });
 
       // The failure is already recorded on the restore row; this only keeps Node

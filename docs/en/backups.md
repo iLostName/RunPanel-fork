@@ -76,7 +76,48 @@ Other accounts holding the `backup` permission can add destinations, check them,
 
 Every archive is first built in `data/backups/staging`, S3 included: local free space is needed, and the backup stops if it falls under 2 GB.
 
-The archive is a zip with `manifest.json`, `LEGGIMI.txt` and a `checksums.txt` in `sha256sum -c` format (for dumps and volumes; repository files are not listed). Project variables and service credentials are encrypted with this server's key; including the key itself is a separate, explicit choice. Archives are not encrypted with a password of their own.
+The archive is a zip with `manifest.json`, `LEGGIMI.txt` and a `checksums.txt` in `sha256sum -c` format (for dumps and volumes; repository files are not listed). Project variables and service credentials are encrypted with this server's key; including the key itself is a separate, explicit choice. The rest (dumps, volumes, code) is in clear, unless the whole archive is encrypted with a password: see below.
+
+## Encryption with a password
+
+With encryption on, every archive leaves the server encrypted whole with the **backup password**: whoever holds a copy — a bucket, a disk that walked away, a forgotten download — reads nothing without the password, not even the file names. Without it, what is said above holds: only variables and credentials are encrypted, with the panel's key.
+
+- **One password per server**, in **Backup › Cifratura degli archivi** (archive encryption). The owner sets it; other accounts see whether it is on. It applies to every new archive: schedules, **Esegui backup ora** (back up now) and the safety backups taken before a restore, which go to the default destination, often a bucket. That is why it is one per server rather than one per schedule: a per-schedule switch would leave exactly those two in clear.
+- Existing schedules do not change until you set the password. When you create a schedule, the form offers it right under the destination, with a warning when the archives would leave the server in clear.
+- The password is typed twice, has at least 12 characters and no space at either end, and you confirm you saved it somewhere else. **It cannot be read back**: **Verifica la password** (check the password) only says whether the one you saved is right.
+- The panel keeps it, encrypted with its own key, and opens its own archives by itself: checking, restoring and downloading work as before. **Cambia password** (change password) applies from the next archive, and the previous passwords are kept: the archives they encrypted still open here. **Disattiva** (turn off) brings the next archives back in clear; those already encrypted stay encrypted.
+- If the panel's key changes and the stored password no longer decrypts, backups **do not run** until you set it again: better no archive than one in clear outside this server. The Backup page says so, and the failed-backup notification goes out as usual.
+- An encrypted archive is named `….zip.enc`, downloads as it is (encrypted) and has a padlock in the history; the run's page says which password, by date.
+
+> **If you lose the password, you lose the backups that are outside this server.** Nobody, RunPanel included, can recover it. Keep it in a password manager, not on the server it protects. If you changed it, keep the earlier ones too while archives encrypted with them exist: the password's date is written in clear in the archive, and the panel shows it when it asks.
+
+The passwords live in the panel's store. Restoring the store brings back the ones there were on the day of that backup: from then on, archives encrypted with a password set later ask for it. The same goes for a store moved to a server with another key.
+
+### On another server
+
+**Ripristina da un archivio** (restore from an archive) accepts `.zip.enc` files too. One encrypted by this panel opens by itself. One from another server stops at **serve la password** (password needed): type the one in use on the day of the backup, the panel tries it on the archive (a wrong one is refused at once), then checks and restores it like any other. The password stays with the uploaded archive, encrypted with the panel's key, and is deleted with it. The same goes for a run in the list encrypted with a password the panel no longer has, for instance after restoring another panel's store: the restore dialog asks for it.
+
+From the API: `POST /api/backups/uploads/{id}/unlock` with `{ "password": "…" }` for an uploaded archive, and the `password` field of `POST /api/backups/restore` for a run in the list.
+
+### Without the panel
+
+The archive's `LEGGIMI.txt` is inside the encryption, which is why the instructions are here. [`scripts/decrypt-backup.mjs`](../../scripts/decrypt-backup.mjs) is a single file with no dependencies: it needs Node 18 or later, not the panel nor the rest of the repository. Copy it next to the archive and:
+
+```sh
+node decrypt-backup.mjs runpanel-20261118-030000-backup-notturno-abc123.zip.enc
+# asks for the password without echoing it and writes runpanel-…-abc123.zip next to it
+
+node decrypt-backup.mjs --check archive.zip.enc      # checks password and archive, writes nothing
+node decrypt-backup.mjs archive.zip.enc other.zip    # picks the zip's name
+node decrypt-backup.mjs --password-file pw.txt archive.zip.enc
+RUNPANEL_BACKUP_PASSWORD='…' node decrypt-backup.mjs archive.zip.enc
+```
+
+Every chunk is verified before it is written, and the zip only gets its name at the end (until then it is `….zip.part`): a wrong password (exit status 2), a damaged or truncated archive (status 1) never leave half a zip behind. What comes out is the usual zip, with `LEGGIMI.txt` and the commands to restore by hand; uploaded to a panel, it restores like that too. The script's messages are in Italian, like the panel.
+
+### The format
+
+For anyone reading it with other tools: a header — `RPBKENC`, the version (1 byte), the length (uint32 big-endian) and a JSON with the parameters — then the zip in 64 KiB chunks, each encrypted with AES-256-GCM and followed by its 16-byte tag. The key comes from the password, NFC-normalised, through scrypt (N = 2^17, r = 8, p = 1, a random 32-byte salt per archive) and HKDF-SHA256. The nonce is the chunk number, and the associated data binds to every chunk the sha256 of the header, its number and whether it is the last one: a chunk altered, moved or repeated, a file cut short or extended, is refused. Only the parameters, an identifier of the password and the date it was set are in clear. The details are in [`services/backup/archive-crypto.ts`](../../services/backup/archive-crypto.ts).
 
 ## Schedule and retention
 
@@ -92,6 +133,8 @@ Every run records the archive's sha256, and `checksums.txt` the sha256 of each d
 - on the local disk, completely: the archive's sha256, then every member's CRC-32, its sha256 where listed, and every `.gz` decompressed to the end — a dump cut short still has a valid checksum of its own short self;
 - in a bucket, by streaming it once through its sha256, without storing it: that proves the bytes are the ones written; the members are checked again before any restore.
 
+An encrypted archive is checked the same way: the sha256 is the encrypted file's, and the members are read through the decryption, which verifies every chunk. If the panel no longer has its password, it checks the sha256 and says the content could not be opened.
+
 The result stays on the run (a shield in the history), with the member that failed and why in expert mode. A damaged archive is not repaired: take a new backup.
 
 ## Restore
@@ -101,7 +144,7 @@ Restoring is one dialog. Everything is selected; each item says, in a line, what
 Before anything is stopped, copied or overwritten:
 
 1. An archive on S3 is downloaded into the restore's working folder (free space is needed, plus the 2 GB reserve), hashed on the way in and compared with the sha256 recorded when it was written; a mismatch stops the restore.
-2. The members the restore will use — only those — are checked as **Verifica integrità** does. A damaged one stops the restore with nothing touched.
+2. The members the restore will use — only those — are checked as **Verifica integrità** does. A damaged one, or a missing or wrong password for an encrypted archive, stops the restore with nothing touched. An encrypted archive is never decrypted whole to disk: as with a zip, the restore extracts only the members it needs into its working folder, which is removed at the end.
 3. A **safety backup** of the targets goes to the default destination (labelled "Sicurezza pre-ripristino", never removed by retention, deleted by hand). If it fails the restore stops, unless you ticked **Procedi anche senza backup di sicurezza** (go on without a safety backup).
 
 - **Volume**: the project stops; its containers still running are stopped and restarted at the end, while a container of another project using the volume blocks the restore. Excluded paths are left as they are. A Compose volume that no longer exists is recreated by a deploy, then the restore is repeated.
@@ -117,8 +160,8 @@ Restore does not compare engine versions: a dump from one major restored onto an
 
 **Ripristina da un archivio** (restore from an archive), on the Backup page, is for an archive that is not in the list: one downloaded earlier, or the backups of a server that is gone. Owner only.
 
-1. **Upload** the `.zip` (drag it or pick it). It goes up in 8 MB pieces, each retried on its own, so a large archive survives a flaky link and the reverse proxy needs no special limit. Free space for the whole archive plus the 2 GB reserve is checked first.
-2. **Check**: once in, the archive is checked whole — it must carry a RunPanel `manifest.json`, and every member passes the checks above. A damaged or foreign archive is refused with the reason.
+1. **Upload** the `.zip`, or the `.zip.enc` if it is encrypted (drag it or pick it). It goes up in 8 MB pieces, each retried on its own, so a large archive survives a flaky link and the reverse proxy needs no special limit. Free space for the whole archive plus the 2 GB reserve is checked first.
+2. **Check**: once in, the archive is checked whole — it must carry a RunPanel `manifest.json`, and every member passes the checks above. A damaged or foreign archive is refused with the reason. An archive encrypted on another server asks for its password first (see [On another server](#on-another-server)).
 3. **Restore**: the same dialog as for a run in the list. Items from another panel name projects and services this one does not have: each asks where to go, and they must exist here first.
 
 An uploaded archive stays on the server for 24 hours after its last use, so a failed restore can be retried without uploading it again; it can be deleted sooner from the page.

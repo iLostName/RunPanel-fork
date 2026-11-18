@@ -23,6 +23,7 @@ import {
   TASK_TIMEOUT_MIN_SEC,
 } from "./tasks-rules";
 import { hasRunnableLine } from "./tasks-shell";
+import { MAX_BACKUP_PASSWORD, backupPasswordProblem } from "./backup-password";
 
 
 
@@ -1180,6 +1181,28 @@ export const destinationDefaultSchema = z
   .strict();
 
 /**
+ * The backup password, as it is set: the rules of lib/backup-password.ts, so
+ * the form and the route refuse the same things with the same sentence.
+ */
+export const backupEncryptionSchema = z
+  .object({
+    password: z.string().superRefine((value, ctx) => {
+      const problem = backupPasswordProblem(value);
+      if (problem) ctx.addIssue({ code: "custom", message: problem });
+    }),
+  })
+  .strict();
+
+/**
+ * A password typed to be tried, not set: against the one in use, an uploaded
+ * archive, or a run whose password this panel does not have. Only bounded —
+ * an archive from another server may have been sealed under other rules.
+ */
+export const backupPasswordAttemptSchema = z
+  .object({ password: z.string().min(1, "Scrivi la password").max(MAX_BACKUP_PASSWORD) })
+  .strict();
+
+/**
  * A restore request.
  *
  * `confirm` carries what the operator typed. It is checked in the browser too,
@@ -1205,6 +1228,8 @@ export const restoreRequestSchema = z
     /** Off unless the operator went out of their way. */
     skipSafetyBackup: z.boolean().optional(),
     confirm: z.string().min(1).max(200),
+    /** For a run encrypted with a password this panel no longer has. */
+    password: z.string().min(1).max(MAX_BACKUP_PASSWORD).optional(),
   })
   .refine((value) => Boolean(value.runId) !== Boolean(value.uploadId), {
     message: "Indica una run del catalogo oppure un archivio caricato, non entrambi",

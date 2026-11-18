@@ -15,16 +15,20 @@ import { CheckboxField } from "@/components/ui/CheckboxField";
 import { useResource } from "@/lib/hooks/useResource";
 import { SchedulePicker } from "@/components/ui/SchedulePicker";
 import { providerLabel } from "./providers";
+import { BackupPasswordDialog } from "./EncryptionPanel";
 import type {
   BackupTarget,
   DestinationView,
+  EncryptionStatus,
   PolicyView,
   ProjectInclude,
   TargetCatalog,
 } from "@/components/backups/types";
 import { serviceDisplayName } from "@/lib/service-name";
 import { ServerPicker } from "@/components/cluster/ServerBits";
-import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
+import { useMe } from "@/lib/hooks/useMe";
+import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
+import { formatWhen } from "@/lib/format";
 
 /**
  * Creating and editing a schedule.
@@ -127,6 +131,10 @@ export function PolicyForm({ policy }: Props) {
   const router = useRouter();
   const catalog = useResource<TargetCatalog>(api("/api/backups/targets"));
   const destinations = useResource<{ destinations: DestinationView[] }>(api("/api/backups/destinations"));
+  const encryption = useResource<EncryptionStatus>(api("/api/backups/encryption"));
+  const [settingPassword, setSettingPassword] = useState(false);
+  const { selected } = useNode();
+  const me = useMe();
 
   const [initial] = useState(() => initialSelection(policy));
 
@@ -307,6 +315,9 @@ export function PolicyForm({ policy }: Props) {
 
   const services = catalog.data?.services ?? [];
   const projects = catalog.data?.projects ?? [];
+  const chosen = (destinations.data?.destinations ?? []).find((d) => d.id === destinationId);
+  const offsite = chosen ? chosen.type !== "local" : false;
+  const encrypted = encryption.data?.enabled === true;
 
   return (
     <div className="space-y-4">
@@ -345,6 +356,55 @@ export function PolicyForm({ policy }: Props) {
           {!policy && <ServerPicker description="La pianificazione gira su questo server e salva i suoi progetti e servizi." />}
         </div>
       </Panel>
+
+      {/*
+        Right under where the archives go, because that is what decides it: an
+        archive leaving for a bucket in clear is the case the password exists
+        for. The password belongs to the server, not to this schedule, so
+        setting it here is said to apply to every archive.
+      */}
+      {encryption.data && (
+        <Panel>
+          <PanelHeader
+            title="Cifratura"
+            description={
+              encrypted
+                ? `Gli archivi saranno cifrati con la password dei backup impostata il ${formatWhen(encryption.data.since)}, come ogni archivio di questo server. Si cambia dalla pagina Backup.`
+                : offsite
+                  ? undefined
+                  : "Gli archivi resteranno in chiaro sul disco di questo server. Se li copi altrove, o se il disco può finire in mani altrui, cifrali con una password."
+            }
+            actions={
+              !encrypted && me.isOwner ? (
+                // Secondary even for a bucket: the one primary here is saving the schedule.
+                <Button size="sm" variant="secondary" onPress={() => setSettingPassword(true)}>
+                  <Icon icon="solar:lock-password-linear" width={15} aria-hidden />
+                  Imposta una password
+                </Button>
+              ) : undefined
+            }
+          />
+          {encryption.data.unreadable && (
+            <Hint tone="warn" className="mt-3" title="La password dei backup non si legge più">
+              Finché il proprietario non la imposta di nuovo dalla pagina Backup, i backup non partono.
+            </Hint>
+          )}
+          {!encrypted && offsite && (
+            <Hint tone="warn" className="mt-3" title="Questi archivi lasceranno il server in chiaro">
+              Andranno su «{chosen?.name}»: chi può leggere quella destinazione legge anche i database, i volumi e il codice
+              dei progetti. Con la password dei backup servono l&apos;archivio e la password insieme.
+              {!me.isOwner && " La cifratura la attiva il proprietario del pannello."}
+            </Hint>
+          )}
+        </Panel>
+      )}
+      <BackupPasswordDialog
+        memberId={selected}
+        replacing={false}
+        isOpen={settingPassword}
+        onOpenChange={setSettingPassword}
+        onSaved={() => void encryption.refresh()}
+      />
 
       <Panel>
         <PanelHeader
@@ -464,6 +524,9 @@ export function PolicyForm({ policy }: Props) {
                   Con la chiave dentro, l&apos;archivio si decifra da solo: è quello che serve per
                   ripartire su una macchina nuova, ed è anche quello che lo rende un dump completo di
                   credenziali. Trattalo come tratteresti <Code>data/.secret</Code>.
+                  {encrypted
+                    ? " Con la cifratura degli archivi attiva, per aprirlo serve comunque la password dei backup."
+                    : " Con la cifratura degli archivi attiva, per aprirlo servirebbe anche la password dei backup."}
                 </Hint>
               )}
             </div>
