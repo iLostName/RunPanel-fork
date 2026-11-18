@@ -10,11 +10,13 @@ import { ThemeModePicker } from "@/components/ui/ThemeModePicker";
 import { ExpertModeToggle } from "@/components/ui/ExpertModeToggle";
 import { SessionList } from "@/components/ui/SessionList";
 import { useMe } from "@/lib/hooks/useMe";
+import { TwoFactorPanel } from "./_components/TwoFactorPanel";
 
 /**
- * Yours: how you sign in, where you are signed in, how the panel looks in this
- * browser. What the panel does for everyone lives in the Pannello tab
- * (`/settings`), which used to be the bottom half of this page.
+ * Yours: how you sign in (password and the second step), where you are signed
+ * in, how the panel looks in this browser. What the panel does for everyone
+ * lives in the Pannello tab (`/settings`), which used to be the bottom half of
+ * this page.
  */
 export default function AccountPage() {
   const me = useMe();
@@ -137,7 +139,9 @@ export default function AccountPage() {
           </div>
         </Panel>
 
-        <Section title="Dispositivi" summary="Sessioni attive su questo account">
+        <TwoFactorPanel />
+
+        <Section title="Dispositivi" summary="Dove sei entrato con questo account">
           <SessionList />
         </Section>
 
