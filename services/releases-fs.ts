@@ -366,6 +366,39 @@ async function copyTree(from: string, to: string, signal?: AbortSignal): Promise
   }
 }
 
+/**
+ * Move a file or folder, across disks if need be.
+ *
+ * A rename when both ends are on one filesystem: instant, and nothing is ever
+ * half there. A project folder moved to another disk (services/project-repo.ts)
+ * makes it EXDEV, and then the content is copied next to the destination, the
+ * copy renamed into place on that disk, and only then the source removed — a
+ * crash in the middle leaves the source whole and, at worst, a stray copy
+ * beside the destination. Only for something nothing is writing to: the
+ * version it comes from has stopped.
+ */
+async function moveAcross(from: string, to: string): Promise<void> {
+  try {
+    fs.renameSync(from, to);
+    return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+  }
+  const temporary = `${to}.runpanel-${crypto.randomBytes(4).toString("hex")}`;
+  if (fs.lstatSync(from).isDirectory()) {
+    if (!(await copyTree(from, temporary))) throw new Error("la copia su un altro disco non è riuscita");
+  } else {
+    await fs.promises.copyFile(from, temporary);
+  }
+  try {
+    fs.renameSync(temporary, to);
+  } catch (err) {
+    await fs.promises.rm(temporary, { recursive: true, force: true }).catch(() => {});
+    throw err;
+  }
+  await fs.promises.rm(from, { recursive: true, force: true });
+}
+
 function digestOf(file: string): string | null {
   try {
     return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
@@ -589,11 +622,13 @@ function linkState(target: string): "absent" | "link" | "real" {
  * Hand what the outgoing version wrote to the project folder, once it has
  * stopped for good: see `planPromotion` for what moves and why.
  *
- * A move is a rename, so it is instant and leaves nothing half-copied. Where it
- * cannot be one — the project folder moved to another disk — the file stays in
- * its version, which is then kept on disk rather than removed. The outgoing
- * version gets a link where the file was, so a rollback to it still finds it;
- * the incoming one gets a link too, unless its own build made something there.
+ * A move is a rename where it can be, so it is instant and leaves nothing
+ * half-copied; across disks — a project folder moved elsewhere — a copy that
+ * replaces the source only once complete (`moveAcross`). A move that fails
+ * leaves the file in its version, which is then kept on disk rather than
+ * removed. The outgoing version gets a link where the file was, so a rollback
+ * to it still finds it; the incoming one gets a link too, unless its own build
+ * made something there.
  */
 export async function promote(opts: {
   root: string;
@@ -639,15 +674,15 @@ export async function promote(opts: {
       if (step.action === "replace") {
         aside = at(path.join(opts.root, ".displaced", stamp), step.path);
         fs.mkdirSync(path.dirname(aside), { recursive: true });
-        fs.renameSync(destination, aside);
+        await moveAcross(destination, aside);
       }
       // Asked again right before: rename(2) silently replaces a file that has
       // appeared at the destination since the facts were gathered.
       if (lexists(destination)) throw new Error("nella cartella del progetto è comparso un file con lo stesso nome");
-      fs.renameSync(source, destination);
+      await moveAcross(source, destination);
     } catch (err) {
       // The stale copy goes back where it was if the live one could not take its place.
-      if (aside && !lexists(destination) && lexists(aside)) fs.renameSync(aside, destination);
+      if (aside && !lexists(destination) && lexists(aside)) await moveAcross(aside, destination).catch(() => {});
       log(`ATTENZIONE: ${step.path} resta nella versione ${from.id}: ${err instanceof Error ? err.message : String(err)}`);
       result.kept.push(step.path);
       continue;
