@@ -236,6 +236,7 @@ async function consider(
     name: target.name,
     outcome,
     ok: error === null,
+    id: target.id,
   });
 
   return error === null ? "restarted" : "failed";

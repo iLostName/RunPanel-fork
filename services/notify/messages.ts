@@ -264,6 +264,43 @@ export function render(message: NotifyMessage, footer?: Html): string {
   return clamp(parts.join("\n\n") as Html);
 }
 
+const LEVEL_RANK: Record<NotifyLevel, number> = { info: 0, ok: 1, warn: 2, danger: 3 };
+
+/**
+ * Several messages joined into one, for a channel that received them close
+ * together (see `lib/notify-throttle.ts`).
+ *
+ * Titles only. The details are in the panel's notification centre, and a
+ * digest that repeated every body would be the flood it exists to prevent. It
+ * takes the colour of the worst thing in it, so twenty "service stopped" and
+ * one "Docker is back" still reads as trouble.
+ */
+export function digest(items: readonly Pick<NotifyMessage, "level" | "title">[], dropped = 0): NotifyMessage {
+  const level = items.reduce<NotifyLevel>((worst, item) => (LEVEL_RANK[item.level] > LEVEL_RANK[worst] ? item.level : worst), "info");
+  const lines: Html[] = items.map((item) => html`${ICONS[item.level]} ${bold(item.title)}`);
+  if (dropped > 0) lines.push(html`…e ${dropped === 1 ? html`un altro` : html`altri ${dropped}`}.`);
+  lines.push(html`I dettagli sono nel centro notifiche del pannello.`);
+  return {
+    level,
+    title: `${items.length + dropped} avvisi da RunPanel`,
+    body: lines.join("\n") as Html,
+  };
+}
+
+/**
+ * The same event, said again after a quiet period during which it kept
+ * happening: how many times, so a project that fell once and one that has
+ * fallen every minute since do not read the same.
+ */
+export function withRepeats(message: NotifyMessage, repeats: number): NotifyMessage {
+  if (repeats <= 0) return message;
+  const note =
+    repeats === 1
+      ? html`Dall'avviso precedente era successo un'altra volta.`
+      : html`Dall'avviso precedente era successo altre ${repeats} volte.`;
+  return { ...message, body: (message.body ? `${message.body}\n${note}` : note) as Html };
+}
+
 // --- The catalogue ---------------------------------------------------------
 
 export type DeployTrigger = "manual" | "webhook" | "poll";
@@ -276,8 +313,12 @@ export type NotifyEvent =
       runtime: string;
     }
   | { key: "service.crashed"; name: string; container: string }
-  /** A scheduled restart that ran, or tried to. Skips are not announced. */
-  | { key: "restart.scheduled"; kind: "project" | "service"; name: string; outcome: string; ok: boolean }
+  /**
+   * A scheduled restart that ran, or tried to. Skips are not announced. `id` is
+   * the project's or the service's, which is how the notification centre knows
+   * who may see it: names are not unique.
+   */
+  | { key: "restart.scheduled"; kind: "project" | "service"; name: string; outcome: string; ok: boolean; id?: string }
   /** `up` is the direction: false when it went away, true when it came back. */
   | { key: "docker.down"; up: boolean; detail?: string }
   /**
