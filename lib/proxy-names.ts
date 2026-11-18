@@ -54,6 +54,19 @@ export function hostnameFor(subdomain: string, domain: string): string | null {
 }
 
 /**
+ * The `www.` twin of a name, which can redirect to it: `www.esempio.it` for the
+ * domain itself, the domain itself for `www.esempio.it`. Any other subdomain
+ * has none — `www.app.esempio.it` is two levels down, which neither one label
+ * nor the wildcard record covers — and neither does a twin too long for DNS.
+ */
+export function wwwTwin(subdomain: string, domain: string): { subdomain: string; hostname: string } | null {
+  if (subdomain === "www") return { subdomain: "", hostname: domain };
+  if (subdomain !== "") return null;
+  const hostname = hostnameFor("www", domain);
+  return hostname ? { subdomain: "www", hostname } : null;
+}
+
+/**
  * The DNS zone a domain lives in, out of the ones an account holds: the domain
  * itself or its closest parent. `clienti.esempio.it` is in `esempio.it`, and
  * so is `esempio.it`; `altroesempio.it` is not.

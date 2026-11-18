@@ -687,6 +687,12 @@ export interface ProjectHostsTable {
   auth_user: string | null;
   /** SHA-512 crypt of the password — never the password itself. */
   auth_hash: string | null;
+  /**
+   * The id of another of the project's names this one only redirects to: the
+   * `www.` twin of the domain itself, or the reverse. Null: it serves the app.
+   * Removing that name removes this one with it.
+   */
+  redirect_to: string | null;
   created_at: string;
   updated_at: string;
 }

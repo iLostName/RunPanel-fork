@@ -147,6 +147,14 @@ export interface SiteInput {
    * or a password would stop a certificate from renewing.
    */
   auth: { user: string; hash: string } | null;
+  /**
+   * The name only sends its visitors on to another — `www.esempio.it` to
+   * `esempio.it`, or the reverse — keeping the path. `https` is whether the
+   * other name has its certificate yet, so nobody is sent to a warning page.
+   * The challenge and the routing check stay, for this name's own certificate.
+   * Absent or null: the name serves the app.
+   */
+  redirect?: { hostname: string; https: boolean } | null;
 }
 
 /**
@@ -167,6 +175,10 @@ function assertSite(input: SiteInput): void {
   if (!TOKEN.test(input.checkToken)) throw new Error("Token di verifica non valido");
   if (input.auth && (!AUTH_USER.test(input.auth.user) || !AUTH_HASH.test(input.auth.hash))) {
     throw new Error("Credenziali non valide per nginx");
+  }
+  if (input.redirect) {
+    if (!HOSTNAME.test(input.redirect.hostname)) throw new Error(`Nome non valido per nginx: ${input.redirect.hostname}`);
+    if (input.redirect.hostname === input.hostname) throw new Error(`${input.hostname} non può rimandare a se stesso`);
   }
   if (input.certificate) {
     for (const file of [input.certificate.fullchain, input.certificate.privkey]) {
@@ -220,6 +232,11 @@ function proxyLocation(input: SiteInput): string[] {
   ];
 }
 
+/** A `location /` that only sends the visitor on, with the path and query they asked for. */
+function redirectLocation(target: string): string[] {
+  return ["    location / {", `        return 301 ${target}$request_uri;`, "    }"];
+}
+
 /**
  * One name's server blocks.
  *
@@ -227,6 +244,10 @@ function proxyLocation(input: SiteInput): string[] {
  * where the panel's routing check lands, and neither is behind the allow list —
  * a restriction must not be able to stop a certificate from renewing. Once a
  * certificate exists, port 80 only redirects and the app moves to 443.
+ *
+ * A name that redirects to another serves no app at all: both ports send the
+ * visitor straight to the other name, in one hop rather than through its own
+ * HTTPS first.
  */
 export function renderSite(input: SiteInput): string {
   assertSite(input);
@@ -237,6 +258,10 @@ export function renderSite(input: SiteInput): string {
   const realIp = input.cloudflare
     ? [...CLOUDFLARE_RANGES.map((range) => `    set_real_ip_from ${range};`), "    real_ip_header CF-Connecting-IP;", ""]
     : [];
+  const elsewhere = input.redirect
+    ? redirectLocation(`${input.redirect.https ? "https" : "http"}://${input.redirect.hostname}`)
+    : null;
+  const app = elsewhere ?? proxyLocation(input);
 
   const http = [
     "server {",
@@ -256,9 +281,7 @@ export function renderSite(input: SiteInput): string {
     `        return 200 "${input.checkToken}";`,
     "    }",
     "",
-    ...(input.certificate
-      ? ["    location / {", "        return 301 https://$host$request_uri;", "    }"]
-      : proxyLocation(input)),
+    ...(input.certificate ? (elsewhere ?? redirectLocation("https://$host")) : app),
     "}",
   ];
 
@@ -276,7 +299,7 @@ export function renderSite(input: SiteInput): string {
         `    ssl_certificate_key ${input.certificate.privkey};`,
         "    ssl_protocols TLSv1.2 TLSv1.3;",
         "",
-        ...proxyLocation(input),
+        ...app,
         "}",
       ]
     : [];

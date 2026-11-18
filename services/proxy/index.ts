@@ -1,14 +1,18 @@
 import crypto from "crypto";
 import dns from "dns";
 import fs from "fs";
-import os from "os";
 import path from "path";
 import { getDb, nowIso } from "@/lib/db";
 import { getEnv } from "@/lib/env";
 import { getSetting } from "@/lib/settings";
+import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
+import { generateId } from "@/lib/utils";
 import { listenPort, readAccess } from "@/lib/access-columns";
 import { compileRules } from "@/lib/ip-access";
+import { checkDns, routingCouldHelp, type DnsCheck, type DnsState } from "@/lib/dns-check";
 import type { ProjectHostsTable } from "@/lib/db/schema";
+import { certificateState, explainCertificateError } from "./certificate";
+import { isCloudflareAddress, resolvePublicly, serverAddresses, type KnownAddresses } from "./dns";
 import {
   PREVIOUS_SITES_DIR,
   STAGED_SITES_DIR,
@@ -44,6 +48,8 @@ import {
 } from "./render";
 import { cloudflareToken, cloudflareZones, linkDomains, type CloudflareZone } from "./cloudflare";
 
+export { publicAddresses, serverAddresses } from "./dns";
+
 /**
  * Domains, end to end: the store says which names exist, this makes nginx and
  * certbot agree.
@@ -56,18 +62,44 @@ import { cloudflareToken, cloudflareZones, linkDomains, type CloudflareZone } fr
 
 export const ACME_EMAIL_SETTING = "proxy_acme_email";
 
+/** The last DNS verdict taken for a name, by the page or by the sweep. */
+interface DnsSeen {
+  state: DnsState;
+  ready: boolean;
+  at: number;
+}
+
 const globalRef = globalThis as typeof globalThis & {
   __runpanelProxyChain?: Promise<unknown>;
   __runpanelProxyIssuing?: Set<string>;
+  __runpanelProxyDnsSeen?: Map<string, DnsSeen>;
+  __runpanelProxyDnsChecks?: Map<string, Promise<HostDnsReport>>;
   __runpanelProxyRenewTimer?: NodeJS.Timeout;
   __runpanelProxyRenewFirst?: NodeJS.Timeout;
+  __runpanelProxyDnsTimer?: NodeJS.Timeout;
 };
 
 /** certbot only renews what is within 30 days of expiry; twice a day is what its own timer does. */
 const RENEW_EVERY_MS = 12 * 60 * 60 * 1000;
 const RENEW_FIRST_MS = 5 * 60 * 1000;
 
+/**
+ * How often a name still waiting for its record is looked up again: often
+ * while it is new and someone is probably at their DNS provider, then less, so
+ * a name nobody finished setting up costs two queries an hour, not thirty.
+ */
+const DNS_SWEEP_MS = 2 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+
+function dnsRecheckAfter(ageMs: number): number {
+  if (ageMs < 60 * MINUTE_MS) return 2 * MINUTE_MS;
+  if (ageMs < 24 * 60 * MINUTE_MS) return 10 * MINUTE_MS;
+  return 60 * MINUTE_MS;
+}
+
 const issuing = (globalRef.__runpanelProxyIssuing ??= new Set<string>());
+const dnsSeen = (globalRef.__runpanelProxyDnsSeen ??= new Map<string, DnsSeen>());
+const dnsChecks = (globalRef.__runpanelProxyDnsChecks ??= new Map<string, Promise<HostDnsReport>>());
 
 /**
  * One apply at a time. Two overlapping ones would rename the same directory
@@ -99,6 +131,10 @@ export function isIssuing(hostId: string): boolean {
 
 /** One name as the pages show it. */
 export function hostView(row: ProjectHostsTable & { project_name?: string }) {
+  // A request in flight in this process outranks whatever the row says.
+  const status = issuing.has(row.id) ? "issuing" : row.status;
+  const certificate = certificateState(status, row.cert_expires_at);
+  const seen = status === "pending" ? dnsSeen.get(row.id) : undefined;
   return {
     id: row.id,
     hostname: row.hostname,
@@ -106,19 +142,85 @@ export function hostView(row: ProjectHostsTable & { project_name?: string }) {
     domainId: row.domain_id,
     projectId: row.project_id,
     projectName: row.project_name ?? null,
-    // A request in flight in this process outranks whatever the row says.
-    status: issuing.has(row.id) ? "issuing" : row.status,
+    status,
+    /** `status` and the expiry read together: what a badge next to the name says. */
+    certificate: certificate.state,
+    certificateDaysLeft: certificate.daysLeft,
     lastError: row.last_error,
+    /** `lastError` in plain words, when Let's Encrypt's own have a better reading. */
+    explanation: status === "error" ? explainCertificateError(row.last_error) : null,
     applyError: row.apply_error,
     certExpiresAt: row.cert_expires_at,
     publicAccess: row.public_access === 1,
     // Who the password is for; the hash never leaves the server.
     authUser: row.auth_hash ? row.auth_user : null,
+    /** The name it sends its visitors on to — the www twin of another of the project's names — or null. */
+    redirectTo: row.redirect_to,
+    /** What the last look at its DNS found, while it waits for a certificate. */
+    dns: seen ? { state: seen.state, ready: seen.ready } : null,
     createdAt: row.created_at,
   };
 }
 
 export type HostView = ReturnType<typeof hostView>;
+
+/**
+ * Why a name cannot be given to a project, or null. Which project holds it is
+ * not said: it may be one the account cannot see.
+ */
+export async function addressProblem(hostname: string): Promise<string | null> {
+  const db = await getDb();
+  if (await db.selectFrom("project_hosts").select("id").where("hostname", "=", hostname).executeTakeFirst()) {
+    return `${hostname} è già assegnato.`;
+  }
+  const panelUrl = await getSetting(PANEL_PUBLIC_URL_SETTING);
+  if (panelUrl && URL.canParse(panelUrl) && new URL(panelUrl).hostname.toLowerCase() === hostname) {
+    return `${hostname} è l'indirizzo del pannello.`;
+  }
+  return null;
+}
+
+/** A new name as the store keeps it: pending, with its own token, and no password. */
+export function newHostRow(input: {
+  projectId: string;
+  domainId: string;
+  subdomain: string;
+  hostname: string;
+  publicAccess: boolean;
+  redirectTo?: string | null;
+}): ProjectHostsTable {
+  const now = nowIso();
+  return {
+    id: generateId(),
+    project_id: input.projectId,
+    domain_id: input.domainId,
+    subdomain: input.subdomain,
+    hostname: input.hostname,
+    public_access: input.publicAccess ? 1 : 0,
+    check_token: newCheckToken(),
+    status: "pending",
+    last_error: null,
+    apply_error: null,
+    cert_expires_at: null,
+    auth_user: null,
+    auth_hash: null,
+    redirect_to: input.redirectTo ?? null,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+/**
+ * After names were added: their certificates once their DNS is right, or —
+ * with nginx up but no certbot — at least their blocks, served over HTTP.
+ * Without nginx they wait for the Domains page, whose setup asks for them.
+ */
+export async function serveNewHosts(hostIds: string[]): Promise<ProxyProbe> {
+  const found = await proxyProbe();
+  if (found.state === "ready") issueWhenReady(hostIds);
+  else if (canApply(found)) applyProxySoon();
+  return found;
+}
 
 function lastLines(output: string, count = 3): string {
   return output.split(/\r?\n/).filter(Boolean).slice(-count).join(" ").slice(0, 400);
@@ -139,6 +241,7 @@ async function loadHosts() {
       "project_hosts.check_token",
       "project_hosts.status",
       "project_hosts.project_id",
+      "project_hosts.redirect_to",
       "projects.port",
       "projects.access_mode",
       "projects.access_allow",
@@ -213,17 +316,23 @@ function certificateExpiry(fullchain: string): string | null {
  * going straight there keeps the sites up while the panel restarts. So the
  * allow list has to be nginx's job — otherwise a restricted project would be
  * one domain away from open to everyone.
+ *
+ * A twin that only redirects gets neither the allow list nor the password:
+ * it hands out nothing but the other name, which applies both.
  */
 function siteFor(
   found: ProxyProbe,
   row: HostRow,
   withoutCertificate: boolean,
-  claimed: Map<number, string | null>
+  claimed: Map<number, string | null>,
+  redirect: SiteInput["redirect"] = null
 ): SiteInput | string {
   if (!row.port) return "Il progetto non ha una porta: non c'è niente da servire.";
   const access = readAccess(row);
   const allow =
-    access.mode === "restricted" && !row.public_access ? compileRules(access.allow).map((rule) => rule.text) : null;
+    access.mode === "restricted" && !row.public_access && !redirect
+      ? compileRules(access.allow).map((rule) => rule.text)
+      : null;
   const upstreamPort = listenPort(row, row.port);
   const conflict = upstreamConflict(claimed, row.project_id, upstreamPort);
   if (conflict) return conflict;
@@ -237,7 +346,8 @@ function siteFor(
     ipv6: found.ipv6,
     http2: found.nginx.http2,
     cloudflare: row.cloudflare === 1,
-    auth: row.auth_user && row.auth_hash ? { user: row.auth_user, hash: row.auth_hash } : null,
+    auth: row.auth_user && row.auth_hash && !redirect ? { user: row.auth_user, hash: row.auth_hash } : null,
+    redirect,
   };
 }
 
@@ -273,6 +383,10 @@ export interface ApplyResult {
 async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
   const [rows, claimed] = await Promise.all([loadHosts(), claimedPorts()]);
   const ours = new Set(rows.map((row) => row.hostname));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  // The names that serve the app first: a twin's block says where it sends
+  // visitors, and over which scheme, so it is written after its target's.
+  const ordered = [...rows.filter((row) => !row.redirect_to), ...rows.filter((row) => row.redirect_to)];
   /** Not served at all, and why. */
   const left = new Map<string, string>();
   /** Served over HTTP only, because nginx could not load the certificate. */
@@ -284,13 +398,31 @@ async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
   // and nothing gets applied over it.
   for (let attempt = 0; attempt <= rows.length; attempt++) {
     const files = new Map<string, string>();
-    for (const row of rows) {
+    const written = new Map<string, SiteInput>();
+    for (const row of ordered) {
       if (left.has(row.hostname)) continue;
-      const site = siteFor(found, row, httpOnly.has(row.hostname), claimed);
+      let redirect: SiteInput["redirect"] = null;
+      if (row.redirect_to) {
+        const target = byId.get(row.redirect_to);
+        const targetSite = target ? written.get(target.id) : undefined;
+        if (!target || !targetSite) {
+          // Sending visitors to a name nginx does not serve would be a redirect into nothing.
+          left.set(
+            row.hostname,
+            target
+              ? `Rimanda a ${target.hostname}, che ora non è servito: si sistema da solo quando torna.`
+              : "Rimandava a un indirizzo che non c'è più: rimuovilo."
+          );
+          continue;
+        }
+        redirect = { hostname: target.hostname, https: targetSite.certificate !== null };
+      }
+      const site = siteFor(found, row, httpOnly.has(row.hostname), claimed, redirect);
       if (typeof site === "string") {
         left.set(row.hostname, site);
         continue;
       }
+      written.set(row.id, site);
       files.set(siteFileName(row.hostname), renderSite(site));
       if (site.auth) files.set(htpasswdFileName(row.hostname), renderHtpasswd(site.auth));
     }
@@ -323,16 +455,16 @@ async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
     }
 
     for (const name of conflicts) {
-      left.set(name, "Questo nome lo serve già un'altra configurazione di nginx: toglilo da lì o scegline un altro.");
+      left.set(name, "Questo indirizzo lo serve già un'altra configurazione di nginx: toglilo da lì o scegline un altro.");
     }
     for (const name of certificates) {
       httpOnly.set(
         name,
-        "nginx non riesce a caricare il certificato di questo nome, quindi è servito in HTTP. Rimuovi il nome e riassegnalo per averne uno nuovo."
+        "nginx non riesce a caricare il certificato di questo indirizzo, quindi è servito in HTTP. Rimuovi l'indirizzo e aggiungilo di nuovo per averne uno nuovo."
       );
     }
     for (const name of blocks) {
-      left.set(name, `nginx rifiuta il blocco di questo nome: ${lastLines(test.output, 1)}`);
+      left.set(name, `nginx rifiuta il blocco di questo indirizzo: ${lastLines(test.output, 1)}`);
     }
   }
   return { ok: false, message: "nginx ha rifiutato la configurazione." };
@@ -379,27 +511,6 @@ export function applyProxySoon(): void {
   });
 }
 
-/**
- * The addresses a wildcard record could point at: this machine's own, minus
- * loopback, private ranges, CGNAT/Tailscale and link-local. Empty behind NAT,
- * where the public address belongs to the router and the page says so.
- */
-export function publicAddresses(): string[] {
-  const out: string[] = [];
-  for (const entries of Object.values(os.networkInterfaces())) {
-    for (const entry of entries ?? []) {
-      if (entry.internal) continue;
-      const a = entry.address.toLowerCase();
-      const isPrivate =
-        entry.family === "IPv4"
-          ? /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(a)
-          : /^(fe[89ab]|f[cd]|::1$)/.test(a);
-      if (!isPrivate && !out.includes(entry.address)) out.push(entry.address);
-    }
-  }
-  return out;
-}
-
 export interface RoutingCheck {
   reaches: boolean;
   addresses: string[];
@@ -415,7 +526,7 @@ export interface RoutingCheck {
  * without hairpinning) fails this and still gets its certificate, because
  * Let's Encrypt asks from outside.
  */
-export async function checkRouting(hostname: string, token: string): Promise<RoutingCheck> {
+export async function checkRouting(hostname: string, token: string, timeoutMs = 5_000): Promise<RoutingCheck> {
   let addresses: string[] = [];
   try {
     addresses = (await dns.promises.lookup(hostname, { all: true })).map((entry) => entry.address);
@@ -425,7 +536,7 @@ export async function checkRouting(hostname: string, token: string): Promise<Rou
 
   try {
     const res = await fetch(`http://${hostname}${CHECK_PATH}`, {
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(timeoutMs),
       redirect: "manual",
       cache: "no-store",
     });
@@ -444,6 +555,132 @@ export async function checkRouting(hostname: string, token: string): Promise<Rou
       addresses,
       detail: `${hostname} risolve a ${addresses.join(", ")}, ma da qui non risponde. Se il server è dietro NAT può essere normale.`,
     };
+  }
+}
+
+export interface HostDnsReport {
+  hostId: string;
+  hostname: string;
+  check: DnsCheck;
+  server: KnownAddresses;
+  /** Who answered: the public resolvers, or this machine's own when those were out of reach. */
+  via: "public" | "system";
+  resolvers: string[];
+  /** The routing check's answer, when it was asked. */
+  reaches: boolean | null;
+  checkedAt: string;
+}
+
+/** What a look at a name's DNS needs to know about it. */
+export interface DnsSubject {
+  id: string;
+  hostname: string;
+  check_token: string;
+  apply_error: string | null;
+  /** 0 | 1, from its domain. */
+  cloudflare: number;
+}
+
+async function takeDnsReport(subject: DnsSubject, found: ProxyProbe, fresh: boolean): Promise<HostDnsReport> {
+  const [answers, server] = await Promise.all([resolvePublicly(subject.hostname), serverAddresses(fresh)]);
+  const input = {
+    a: answers.a,
+    aaaa: answers.aaaa,
+    server,
+    cloudflareLinked: subject.cloudflare === 1,
+    isCloudflareAddress,
+  };
+  let check = checkDns(input);
+  let reaches: boolean | null = null;
+  // Only a name nginx serves can hand its token back.
+  if (routingCouldHelp(check) && canApply(found) && !subject.apply_error) {
+    reaches = (await checkRouting(subject.hostname, subject.check_token, 4_000)).reaches;
+    if (reaches) check = checkDns({ ...input, reaches });
+  }
+  dnsSeen.set(subject.id, { state: check.state, ready: check.ready, at: Date.now() });
+  return {
+    hostId: subject.id,
+    hostname: subject.hostname,
+    check,
+    server,
+    via: answers.via,
+    resolvers: answers.servers,
+    reaches,
+    checkedAt: nowIso(),
+  };
+}
+
+/**
+ * Look a name up now. Two pages polling the same name share one look instead
+ * of doubling the queries; nothing is kept once it is answered, so the next
+ * question gets a new answer.
+ */
+export function hostDnsReport(subject: DnsSubject, found: ProxyProbe, fresh = false): Promise<HostDnsReport> {
+  const running = dnsChecks.get(subject.id);
+  if (running) return running;
+  const report = takeDnsReport(subject, found, fresh).finally(() => dnsChecks.delete(subject.id));
+  dnsChecks.set(subject.id, report);
+  return report;
+}
+
+async function loadDnsSubjects(hostIds?: string[]) {
+  const db = await getDb();
+  let query = db
+    .selectFrom("project_hosts")
+    .innerJoin("domains", "domains.id", "project_hosts.domain_id")
+    .select([
+      "project_hosts.id",
+      "project_hosts.hostname",
+      "project_hosts.check_token",
+      "project_hosts.apply_error",
+      "project_hosts.status",
+      "project_hosts.created_at",
+      "domains.cloudflare",
+    ]);
+  if (hostIds) query = query.where("project_hosts.id", "in", hostIds);
+  return query.execute();
+}
+
+/**
+ * Ask for these names' certificates once their DNS leads here, in the
+ * background. A name that is not ready yet stays pending and the sweep looks
+ * again, so adding an address before its record exists no longer spends one
+ * of the failed validations Let's Encrypt allows per name and hour.
+ */
+export function issueWhenReady(hostIds: string[]): void {
+  if (hostIds.length === 0) return;
+  void (async () => {
+    const found = await proxyProbe();
+    if (found.state !== "ready") return;
+    // The HTTP blocks first: the routing check below needs them live.
+    await applyProxy();
+    for (const subject of await loadDnsSubjects(hostIds)) {
+      if (subject.status !== "pending" || issuing.has(subject.id)) continue;
+      const report = await hostDnsReport(subject, found);
+      if (report.check.ready) issueCertificate(subject.id);
+    }
+  })().catch((err) => console.warn(`[proxy] ${err instanceof Error ? err.message : String(err)}`));
+}
+
+/** Every name waiting for its first certificate, looked at when it is due. */
+async function sweepWaiting(): Promise<void> {
+  const found = await proxyProbe();
+  if (found.state !== "ready") return;
+  const now = Date.now();
+  for (const [id, seen] of dnsSeen) {
+    if (now - seen.at > 24 * 60 * MINUTE_MS) dnsSeen.delete(id);
+  }
+  for (const subject of await loadDnsSubjects()) {
+    if (subject.status !== "pending" || subject.apply_error || issuing.has(subject.id)) continue;
+    const age = now - Date.parse(subject.created_at);
+    const seen = dnsSeen.get(subject.id);
+    if (seen && now - seen.at < dnsRecheckAfter(Number.isNaN(age) ? 0 : age)) {
+      // A page looked a moment ago: its answer is as good as one taken now.
+      if (seen.ready) issueCertificate(subject.id);
+      continue;
+    }
+    const report = await hostDnsReport(subject, found);
+    if (report.check.ready) issueCertificate(subject.id);
   }
 }
 
@@ -551,12 +788,15 @@ export function issueCertificate(hostId: string): void {
     .finally(() => issuing.delete(hostId));
 }
 
-/** Every name still waiting for its first certificate — after the proxy is set up, for instance. */
+/**
+ * Every name still waiting for its first certificate — after the proxy is set
+ * up, for instance. Each is asked for once its DNS leads here.
+ */
 export async function issuePending(): Promise<number> {
   if ((await proxyProbe()).state !== "ready") return 0;
   const db = await getDb();
   const rows = await db.selectFrom("project_hosts").select("id").where("status", "=", "pending").execute();
-  for (const row of rows) issueCertificate(row.id);
+  issueWhenReady(rows.map((row) => row.id));
   return rows.length;
 }
 
@@ -684,12 +924,15 @@ async function renew(): Promise<void> {
   if (!applied.ok) console.warn(`[proxy] ${applied.message}`);
 }
 
+/** The renewals, and the look at names still waiting for their DNS record. */
 export function startProxyRenewal(): void {
   if (globalRef.__runpanelProxyRenewTimer) return;
   globalRef.__runpanelProxyRenewTimer = setInterval(() => void renew().catch(() => undefined), RENEW_EVERY_MS);
   globalRef.__runpanelProxyRenewTimer.unref?.();
   globalRef.__runpanelProxyRenewFirst = setTimeout(() => void renew().catch(() => undefined), RENEW_FIRST_MS);
   globalRef.__runpanelProxyRenewFirst.unref?.();
+  globalRef.__runpanelProxyDnsTimer = setInterval(() => void sweepWaiting().catch(() => undefined), DNS_SWEEP_MS);
+  globalRef.__runpanelProxyDnsTimer.unref?.();
 }
 
 /**

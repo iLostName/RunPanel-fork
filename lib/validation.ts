@@ -1062,6 +1062,8 @@ export const createHostSchema = z.object({
   domainId: z.string().min(1).max(32),
   subdomain: subdomainSchema,
   publicAccess: z.boolean().optional(),
+  /** Also the `www.` twin (or, for `www`, the domain itself), redirecting to this name. */
+  www: z.boolean().optional(),
 });
 
 export const HOST_USER_RULE = "Lettere, numeri e . _ @ -, fino a 64 caratteri";
@@ -1073,10 +1075,12 @@ export const hostAuthSchema = z.object({
   password: z.string().min(HOST_PASSWORD_MIN, `Almeno ${HOST_PASSWORD_MIN} caratteri`).max(128, "Al massimo 128 caratteri"),
 });
 
-/** Either or both; `auth: null` takes the password away. */
+/** Any of them; `auth: null` takes the password away, `www: false` the twin that redirects here. */
 export const updateHostSchema = z
-  .object({ publicAccess: z.boolean().optional(), auth: hostAuthSchema.nullable().optional() })
-  .refine((body) => body.publicAccess !== undefined || body.auth !== undefined, { message: "Niente da cambiare" });
+  .object({ publicAccess: z.boolean().optional(), auth: hostAuthSchema.nullable().optional(), www: z.boolean().optional() })
+  .refine((body) => body.publicAccess !== undefined || body.auth !== undefined || body.www !== undefined, {
+    message: "Niente da cambiare",
+  });
 
 export const hostActionSchema = z.object({ action: z.literal("retry") });
 
