@@ -27,6 +27,34 @@ export interface PolicyView {
   lastRunAt: string | null;
   nextRunAt: string | null;
   lastStatus: string | null;
+  /** Every destination, in order; the first is `destinationId`. Absent from a server on an older version. */
+  destinations?: PolicyDestinationView[];
+}
+
+export interface PolicyDestinationView {
+  destinationId: string;
+  destinationName: string | null;
+  destinationType: string | null;
+  /** Null: the policy's own rule. Every field null: keep every copy. */
+  retention: { count: number | null; days: number | null; bytes: number | null } | null;
+}
+
+/** One copy of a run's archive, on one destination. */
+export interface CopyView {
+  id: string;
+  /** Null once the destination is deleted. */
+  destinationId: string | null;
+  destinationName: string;
+  destinationType: string;
+  /** On this server's disk: read first. */
+  local: boolean;
+  position: number;
+  status: "pending" | "uploading" | "done" | "failed";
+  ref: string | null;
+  bytes: number | null;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
 }
 
 export interface RunView {
@@ -49,6 +77,8 @@ export interface RunView {
   verification?: { status: "ok" | "failed"; checkedAt: string } | null;
   /** Null for an archive in clear; absent from a server on an older version. */
   encryption?: RunEncryption | null;
+  /** Every copy of the archive, in the policy's order. Absent from a server on an older version. */
+  copies?: CopyView[];
 }
 
 /** How an archive is encrypted: with which password (by when it was set), and whether this panel still has it. */
@@ -91,8 +121,10 @@ export interface DestinationView {
   createdAt: string;
   /** Where an S3 destination writes; null for the local disk. Never the keys. */
   target?: { endpoint: string; region: string; bucket: string; prefix: string | null; pathStyle: boolean } | null;
-  /** The policies writing here that this account can see. */
-  usedBy?: { id: string; name: string }[];
+  /** A local destination's folder of its own; null for the panel's archive folder. */
+  directory?: string | null;
+  /** The policies writing here that this account can see; `primary` when it is their first destination. */
+  usedBy?: { id: string; name: string; primary?: boolean }[];
   /** All of them, seen or not. */
   usedByCount?: number;
   archives?: number;
@@ -127,6 +159,38 @@ export function destinationPhrase(type: string | null | undefined, name: string 
   // A server on an older version sends the name without the type: say the name.
   return type === "local" ? "sul disco di questo server" : `su ${name}`;
 }
+
+/**
+ * Where a policy's copies go, as the end of the same sentence: "sul disco di
+ * questo server e su Backblaze", "… e su altre 2 destinazioni". With several
+ * local destinations, each is named: "this server's disk" twice says nothing.
+ */
+export function destinationsPhrase(list: readonly { destinationType: string | null; destinationName: string | null }[]): string {
+  if (list.length === 0) return "destinazione non più configurata";
+  const locals = list.filter((entry) => entry.destinationType === "local").length;
+  const phrase = (entry: (typeof list)[number]) =>
+    locals > 1 && entry.destinationType === "local" && entry.destinationName
+      ? `su «${entry.destinationName}»`
+      : destinationPhrase(entry.destinationType, entry.destinationName);
+  if (list.length === 1) return phrase(list[0]);
+  if (list.length === 2) return `${phrase(list[0])} e ${phrase(list[1])}`;
+  return `${phrase(list[0])} e su altre ${list.length - 1} destinazioni`;
+}
+
+/** A policy's destinations, from a server that may predate copies. */
+export function policyDestinations(policy: PolicyView): PolicyDestinationView[] {
+  return policy.destinations && policy.destinations.length > 0
+    ? policy.destinations
+    : [{ destinationId: policy.destinationId, destinationName: policy.destinationName, destinationType: policy.destinationType, retention: null }];
+}
+
+/** How a copy's state reads as a status badge: the panel's one vocabulary. */
+export const COPY_STATUS: Record<CopyView["status"], string> = {
+  pending: "pending",
+  uploading: "uploading",
+  done: "success",
+  failed: "failed",
+};
 
 const INCLUDE_WORDS: Record<ProjectInclude, string> = {
   config: "configurazione",
