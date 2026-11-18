@@ -9,13 +9,21 @@ import type {
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
 import { formatBytes, formatWhen } from "@/lib/format";
-import { S3Failure } from "@/lib/s3-errors";
+import { copiesLabel, countCopies, primaryCopy, runOutcome } from "@/lib/backup-copies";
 import { panelVersion } from "@/lib/version";
 import { opsEvents } from "../events";
 import { notify } from "../notify";
 import { isDockerAvailable } from "../docker/cli";
 import { writeArchive } from "./archive";
-import { loadDestination } from "./destinations";
+import {
+  copyReport,
+  noCopyMessage,
+  pendingCopyRows,
+  planCopies,
+  runCopies,
+  sendCopies,
+  type CopyRecord,
+} from "./copies";
 import { DumpSkipped, dumpServiceDatabase } from "./dumpers";
 import { sealForNewArchive } from "./keyring";
 import { dumpPanelStore } from "./panel-store";
@@ -61,7 +69,13 @@ import { isPanelClosing, PANEL_CLOSING_MESSAGE } from "../project-lock";
 export interface RunRequest {
   trigger: BackupTrigger;
   targets: BackupTarget[];
-  destinationId: string;
+  /**
+   * Where the archive goes, in order: the first is the primary, every other a
+   * copy of the same file (services/backup/copies.ts).
+   */
+  destinationIds?: string[];
+  /** One destination: the same as `destinationIds: [destinationId]`. */
+  destinationId?: string;
   policyId?: string | null;
   policyName?: string | null;
   includeSecretKey?: boolean;
@@ -136,9 +150,11 @@ export async function startBackup(
   // Anything that throws before the run exists must give the claim back.
   let db: Awaited<ReturnType<typeof getDb>>;
   let log: ReturnType<typeof backupLog>;
+  let plan: Awaited<ReturnType<typeof planCopies>>;
   try {
     db = await getDb();
     log = backupLog(runId);
+    plan = await planCopies(request.destinationIds ?? (request.destinationId ? [request.destinationId] : []));
   } catch (err) {
     release();
     throw err;
@@ -150,27 +166,37 @@ export async function startBackup(
     opsEvents.emit(runId, { type: "backup:log", line });
   };
 
-  // The flag is already up: a failed write must not leave it there forever.
+  // The run and the copies it will make, together: the page that opens on
+  // the id shows from the first second where the archive is going. The flag
+  // is already up: a failed write must not leave it there forever.
   await db
-    .insertInto("backup_runs")
-    .values({
-      id: runId,
-      policy_id: request.policyId ?? null,
-      policy_name: request.policyName ?? null,
-      trigger: request.trigger,
-      status: "running",
-      destination_id: request.destinationId,
-      archive_path: null,
-      archive_bytes: null,
-      checksum: null,
-      manifest: null,
-      error_message: null,
-      pinned: request.pinned ? 1 : 0,
-      started_at: startedAt.toISOString(),
-      finished_at: null,
-      heartbeat_at: startedAt.toISOString(),
+    .transaction()
+    .execute(async (trx) => {
+      await trx
+        .insertInto("backup_runs")
+        .values({
+          id: runId,
+          policy_id: request.policyId ?? null,
+          policy_name: request.policyName ?? null,
+          trigger: request.trigger,
+          status: "running",
+          // The primary, as before copies: what every older reader looks at.
+          destination_id: plan.planned[0]?.destination.id ?? null,
+          archive_path: null,
+          archive_bytes: null,
+          checksum: null,
+          manifest: null,
+          error_message: null,
+          pinned: request.pinned ? 1 : 0,
+          started_at: startedAt.toISOString(),
+          finished_at: null,
+          heartbeat_at: startedAt.toISOString(),
+        })
+        .execute();
+      if (plan.planned.length > 0) {
+        await trx.insertInto("backup_run_copies").values(pendingCopyRows(runId, plan.planned, startedAt.toISOString())).execute();
+      }
     })
-    .execute()
     .catch((err: unknown) => {
       release();
       throw err;
@@ -178,7 +204,7 @@ export async function startBackup(
 
   opsEvents.emit(runId, { type: "backup:status", status: "running" });
 
-  const done = execute({ runId, request, startedAt, emit, log }).finally(release);
+  const done = execute({ runId, request, startedAt, emit, log, missing: plan.missing }).finally(release);
 
   return { runId, done };
 }
@@ -195,9 +221,11 @@ interface ExecuteArgs {
   startedAt: Date;
   emit: (line: string) => void;
   log: { flush: () => void };
+  /** Destinations asked for that no longer exist. */
+  missing: string[];
 }
 
-async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): Promise<RunSummary> {
+async function execute({ runId, request, startedAt, emit, log, missing }: ExecuteArgs): Promise<RunSummary> {
   const db = await getDb();
 
   // A run that hangs on an unresponsive engine should look hung, not finished.
@@ -221,6 +249,7 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
   fs.mkdirSync(ctx.stagingDir, { recursive: true });
 
   let summary: RunSummary = { runId, status: "failed", ok: 0, failed: 0, skipped: 0, bytes: 0 };
+  let copies: CopyRecord[] = [];
 
   try {
     const free = freeBytes();
@@ -231,6 +260,17 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
     }
 
     emit(`Backup ${runId} — ${request.policyName ?? "esecuzione manuale"}`);
+
+    // Before any dump: an archive with nowhere to go is an hour of dumps for
+    // nothing, found out at the end.
+    if (missing.length > 0) {
+      emit(missing.length === 1 ? "Una destinazione non esiste più: la salto" : `${missing.length} destinazioni non esistono più: le salto`);
+    }
+    copies = await runCopies(runId);
+    if (copies.length === 0) throw new Error("Nessuna destinazione configurata per questo backup");
+    if (copies.length > 1) {
+      emit(`${copies.length} copie: ${copies.map((copy) => `«${copy.name}»`).join(", ")}`);
+    }
 
     // Before any dump: a password that is on but cannot be read stops the run
     // now, not after an hour of copying, and never lets the archive out in clear.
@@ -303,38 +343,53 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
         ? `Creo l'archivio cifrato con la password dei backup${seal.keyCreatedAt ? ` del ${formatWhen(seal.keyCreatedAt)}` : ""} (${files.length} file)…`
         : `Creo l'archivio (${files.length} file)…`
     );
-    // Written into staging first, then handed to the destination: for the local
-    // destination that hand-off is a rename on the same filesystem, so the
-    // archive appears in the catalogue whole or not at all.
+    // Written once into staging — encrypted, when a password is set — and the
+    // same file then handed to every destination in turn. Each one leaves it
+    // in place (on this disk a local destination links it: atomic and free),
+    // and it goes with the staging directory once they have all finished.
     const staged = path.join(ctx.stagingDir, fileName);
     const archive = await writeArchive(staged, files, manifest, { seal });
 
-    const destination = await loadDestination(request.destinationId);
-    if (destination.type !== "local") emit(`Carico l'archivio su «${destination.name}» (${formatBytes(archive.bytes)})…`);
-    let stored: { ref: string; bytes: number };
-    try {
-      stored = await destination.put(archive.absolutePath, fileName);
-    } catch (err) {
-      // The sentence a person acts on goes into the run; the provider's own
-      // code and words, for whoever reads the log, go there.
-      if (err instanceof S3Failure && err.problem.detail) emit(`  dettaglio: ${err.problem.detail}`);
-      throw new Error(
-        `Salvataggio su «${destination.name}» non riuscito: ${err instanceof Error ? err.message : String(err)}`
+    // Before the first copy leaves: a panel that stops halfway through the
+    // copies finds at the next boot an archive it can still describe, and
+    // the copies that did arrive (lib/db/index.ts, `recoverFromCrash`).
+    await db
+      .updateTable("backup_runs")
+      .set({
+        checksum: archive.sha256,
+        encryption_key_id: seal?.keyId ?? null,
+        manifest: JSON.stringify(manifest),
+        heartbeat_at: nowIso(),
+      })
+      .where("id", "=", runId)
+      .execute();
+
+    copies = await sendCopies({
+      runId,
+      file: archive.absolutePath,
+      fileName,
+      bytes: archive.bytes,
+      emit,
+      signal: request.signal,
+    });
+    const count = countCopies(copies);
+    if (count.done === 0) throw new Error(noCopyMessage(copies));
+    if (count.failed > 0) {
+      emit(
+        `${copiesLabel(count)} salvate: l'archivio è al sicuro, ma ${count.failed === 1 ? "una copia non è arrivata" : `${count.failed} copie non sono arrivate`}. Si possono riprovare dalla pagina di questo backup.`
       );
     }
-    emit(`Archivio pronto: ${formatBytes(stored.bytes)} — ${stored.ref}`);
 
-    const status: BackupRunStatus = failed.length > 0 ? "partial" : "success";
+    const status = runOutcome(failed.length, count) as BackupRunStatus;
+    const primary = primaryCopy(copies);
 
     await db
       .updateTable("backup_runs")
       .set({
         status,
-        archive_path: stored.ref,
-        archive_bytes: stored.bytes,
-        checksum: archive.sha256,
-        encryption_key_id: seal?.keyId ?? null,
-        manifest: JSON.stringify(manifest),
+        archive_path: primary?.ref ?? null,
+        archive_bytes: primary?.bytes ?? archive.bytes,
+        destination_id: primary?.destination_id ?? copies[0]?.destination_id ?? null,
         finished_at: nowIso(),
         heartbeat_at: nowIso(),
         error_message: failed.length > 0 ? `${failed.length} elementi non salvati` : null,
@@ -350,13 +405,13 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
       ok: ok.length,
       failed: failed.length,
       skipped: skipped.length,
-      bytes: stored.bytes,
+      bytes: primary?.bytes ?? archive.bytes,
     };
 
     // Only after a success, and never the newest one: a disk that is full must
     // not be able to delete the last good backup while trying to make room.
     const pruned = await applyRetention(request.policyId ?? null);
-    if (pruned > 0) emit(`Retention: rimossi ${pruned} archivi più vecchi`);
+    if (pruned.copies > 0) emit(`Retention: ${retentionLine(pruned)}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     emit(`ERRORE: ${message}`);
@@ -372,6 +427,16 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
       })
       .where("id", "=", runId)
       .execute();
+
+    // Copies that never got their turn say why, instead of waiting for ever.
+    await db
+      .updateTable("backup_run_copies")
+      .set({ status: "failed", error_message: "Il backup si è fermato prima di questa copia", finished_at: nowIso() })
+      .where("run_id", "=", runId)
+      .where("status", "in", ["pending", "uploading"])
+      .execute()
+      .catch(() => {});
+    copies = await runCopies(runId).catch(() => copies);
 
     opsEvents.emit(runId, { type: "backup:status", status: "failed", message });
   } finally {
@@ -398,10 +463,20 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
       bytes: summary.bytes,
       durationMs: Date.now() - startedAt.getTime(),
       error: summary.error ?? null,
+      // Only once there was an archive to copy: a run that failed before has
+      // nothing to say about its copies that the error does not already say.
+      ...(summary.status !== "failed" ? { copies: copyReport(copies) } : {}),
     });
   }
 
   return summary;
+}
+
+function retentionLine(pruned: { copies: number; runs: number }): string {
+  if (pruned.copies === pruned.runs) {
+    return pruned.runs === 1 ? "rimosso l'archivio più vecchio" : `rimossi ${pruned.runs} archivi più vecchi`;
+  }
+  return `${pruned.copies === 1 ? "rimossa una copia più vecchia" : `rimosse ${pruned.copies} copie più vecchie`}, ognuna con la conservazione della sua destinazione`;
 }
 
 // --- Turning selectors into work --------------------------------------------

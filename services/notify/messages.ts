@@ -371,6 +371,12 @@ export type NotifyEvent =
       bytes: number;
       durationMs: number | null;
       error: string | null;
+      /**
+       * The archive's copies, one per destination of the policy. A copy that
+       * did not arrive turns a clean night into a warning: the backup exists,
+       * in one place fewer than asked. Absent from a run that failed.
+       */
+      copies?: { total: number; saved: number; failed: { name: string; error: string }[] };
     }
   | {
       key: "panel.update";
@@ -734,6 +740,8 @@ export function describe(event: NotifyEvent): NotifyMessage {
     }
 
     case "backup.finished": {
+      const copies = event.copies && event.copies.total > 1 ? event.copies : null;
+      const lostCopies = event.copies?.failed ?? [];
       const details = join([
         textLine("Pianificazione", event.policy),
         line(
@@ -746,9 +754,30 @@ export function describe(event: NotifyEvent): NotifyMessage {
         ),
         line("Dimensione", bytes(event.bytes)),
         line("Durata", duration(event.durationMs)),
+        copies ? line("Copie", html`${copies.saved} su ${copies.total}`) : null,
       ]);
 
+      // Each copy that did not arrive, with the first line of why: the
+      // destination's name and its error both come from outside, so escaped.
+      const missing =
+        lostCopies.length > 0
+          ? join([
+              ...lostCopies.map((copy) => html`${bold(copy.name)}: ${code(firstLine(copy.error, 200))}`),
+              html`L'archivio è al sicuro nelle altre destinazioni. Dalla pagina del backup puoi riprovare la copia quando la destinazione torna raggiungibile.`,
+            ])
+          : null;
+
       if (event.status === "success") {
+        if (missing) {
+          return {
+            level: "warn",
+            title:
+              lostCopies.length === 1
+                ? "Backup completato, ma una copia non è stata salvata"
+                : `Backup completato, ma ${lostCopies.length} copie non sono state salvate`,
+            body: join([details, missing]),
+          };
+        }
         return { level: "ok", title: "Backup completato", body: details };
       }
 
@@ -759,6 +788,7 @@ export function describe(event: NotifyEvent): NotifyMessage {
           body: join([
             details,
             html`L'archivio esiste ma non contiene tutto: controlla quali artefatti mancano prima di contarci.`,
+            missing,
           ]),
         };
       }
