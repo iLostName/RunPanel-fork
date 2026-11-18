@@ -7,13 +7,11 @@ import { Icon } from "@iconify/react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Code, Hint } from "@/components/ui/Hint";
 import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
-import { DOCKER_TEMPLATES, dockerTemplate } from "./_data/catalog";
 import { AppForm } from "@/components/AppForm";
 import { DatabaseForm } from "./_components/DatabaseForm";
-import { TemplateForm } from "./_components/TemplateForm";
 import { useServerHref } from "@/lib/hooks/useNode";
 
-type Choice = { kind: "app" } | { kind: "database" } | { kind: "template"; id: string };
+type Choice = { kind: "app" } | { kind: "database" };
 
 /**
  * Picks what to add, then hands off to the matching form.
@@ -24,10 +22,12 @@ type Choice = { kind: "app" } | { kind: "database" } | { kind: "template"; id: s
  * services impossible to create even though the schema and the API had always
  * accepted them.
  *
- * App and the Docker templates are a different matter: both PATCH the project's
- * own app configuration rather than creating a service, so they genuinely need
- * one. They stay on the page as links to where that choice lives, because a
- * card that disappears teaches nothing about where Nginx went.
+ * App is a different matter: it PATCHes the project's own app configuration
+ * rather than creating a service, so it genuinely needs one.
+ *
+ * The Nginx, Apache and Caddy cards are gone: they wrote a `dockerTemplate` into
+ * the project's configuration that nothing ever read, so choosing one changed
+ * nothing. Ready-made apps come back with the app catalogue.
  */
 export default function NewServicePage() {
   const searchParams = useSearchParams();
@@ -51,14 +51,7 @@ export default function NewServicePage() {
   }
 
   if (choice) {
-    const title =
-      choice.kind === "app"
-        ? "Aggiungi un'app"
-        : choice.kind === "database"
-          ? projectId
-            ? "Aggiungi un database"
-            : "Nuovo database"
-          : dockerTemplate(choice.id)?.label ?? "Template";
+    const title = choice.kind === "app" ? "Aggiungi un'app" : "Aggiungi un database";
 
     return (
       <>
@@ -74,9 +67,6 @@ export default function NewServicePage() {
 
         {choice.kind === "app" && projectId && <AppForm projectId={projectId} />}
         {choice.kind === "database" && <DatabaseForm projectId={projectId || undefined} />}
-        {choice.kind === "template" && projectId && dockerTemplate(choice.id) && (
-          <TemplateForm projectId={projectId} template={dockerTemplate(choice.id)!} />
-        )}
       </>
     );
   }
@@ -96,13 +86,6 @@ export default function NewServicePage() {
       icon: "solar:code-linear",
       onSelect: () => setChoice({ kind: "app" }),
     },
-    ...DOCKER_TEMPLATES.map((tpl) => ({
-      key: tpl.id,
-      title: tpl.label,
-      description: tpl.description,
-      icon: tpl.icon,
-      onSelect: () => setChoice({ kind: "template", id: tpl.id }),
-    })),
   ];
 
   return (
@@ -117,7 +100,7 @@ export default function NewServicePage() {
         all&apos;app come <Code>DATABASE_URL</Code> al prossimo deploy, senza credenziali da copiare.
       </Hint>
 
-      <ChoiceGroup label="Cosa aggiungere" className="gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <ChoiceGroup label="Cosa aggiungere" className="gap-3 sm:grid-cols-2">
         {cards.map((card) => (
           <ChoiceCard
             key={card.key}
