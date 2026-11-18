@@ -6,6 +6,7 @@ import { addCollection } from "@iconify/react";
 import { useRouter } from "next/navigation";
 import { Toaster } from "sonner";
 import { ErrorDetailsDialog } from "@/components/ErrorDetailsDialog";
+import { PwaRuntime } from "@/components/pwa/PwaRuntime";
 import { solarSubset } from "@/lib/icons.generated";
 import { DEFAULT_ACCENT, type AccentPreset } from "@/lib/themes";
 import { expertCookie } from "@/lib/expert-mode";
@@ -147,6 +148,8 @@ export function Providers({
         />
         {/* What a long error's "Dettagli" opens: see lib/toast.ts. */}
         <ErrorDetailsDialog />
+        {/* The service worker and the installed app's behaviour. */}
+        <PwaRuntime />
       </RouterProvider>
     </AccentContext.Provider>
     </ExpertModeContext.Provider>
