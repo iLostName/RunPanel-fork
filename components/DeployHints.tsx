@@ -132,10 +132,10 @@ export function ServiceLinkHint({ projectId }: { projectId?: string }) {
       Crea un database da{" "}
       {projectId ? (
         <Link href={href(`/services/new?projectId=${projectId}`)} className="text-accent hover:underline">
-          Aggiungi al progetto → Database
+          Aggiungi un database
         </Link>
       ) : (
-        <>Servizi → Nuovo servizio</>
+        <>Database › Nuovo database</>
       )}{" "}
       e al deploy successivo la sua connection URL entra nell&apos;ambiente dell&apos;app da sola:{" "}
       <Code>DATABASE_URL</Code> per PostgreSQL e MySQL, <Code>REDIS_URL</Code> per Redis,{" "}
