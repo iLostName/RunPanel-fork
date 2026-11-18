@@ -61,6 +61,7 @@ Sempre da **Backup dei volumi**, per ogni volume si escludono percorsi relativi 
 
 - **Disco locale**: sempre `data/backups/archives/<anno>/<mese>`, file 0600. Creato al primo avvio; il percorso non si cambia. Un archivio che sta solo sulla macchina che protegge si perde con lei: per questo c'è S3.
 - **S3-compatibile**: Amazon S3, Cloudflare R2, Backblaze B2, Hetzner Object Storage, Wasabi, e MinIO o un server tuo. Scegliendo il servizio si riempiono endpoint e indirizzamento; di solito resta da cambiare solo la regione. Bucket, chiavi e un prefisso facoltativo completano; la configurazione è cifrata. `https://` ovunque, `http://` solo verso un indirizzo privato. L'oggetto si chiama `<prefisso>/<file>`, caricato in un'unica richiesta: su AWS vale il limite di 5 GB per oggetto. Dopo il caricamento il pannello rilegge la dimensione conservata dal bucket, e se non torna il backup fallisce.
+- **Telegram**: un canale privato creato dal pannello, o i tuoi Messaggi salvati, attraverso il tuo account. Gli archivi più grandi di un file Telegram vengono divisi in parti. Vedi [Telegram](#telegram) qui sotto.
 
 Una destinazione nuova, o una che modifichi, viene **provata prima di essere salvata**: un oggetto di prova viene scritto, riletto e cancellato. Se la verifica non riesce non si salva niente e si dice perché; **Salva comunque** serve per un bucket che da qui, apposta, non si raggiunge. **Verifica** nella lista ripete la stessa prova quando vuoi. Un bucket in cui la chiave non può cancellare viene accettato con un avviso: è una protezione voluta contro i ransomware, ma la retention non potrà togliere gli archivi vecchi.
 
@@ -74,7 +75,33 @@ Dalla lista il proprietario può anche:
 
 Gli altri account con il permesso `backup` possono aggiungere destinazioni, verificarle, rinominarle ed eliminarne una vuota, ma non cambiare dove scrive una esistente né quale sia la predefinita: entrambe le cose sposterebbero gli archivi di tutti, quelli del proprietario compresi.
 
-Ogni archivio viene costruito prima in `data/backups/staging`, anche per S3: serve spazio libero in locale, e il backup si interrompe se scende sotto 2 GB.
+Ogni archivio viene costruito prima in `data/backups/staging`, anche per S3 e Telegram: serve spazio libero in locale, e il backup si interrompe se scende sotto 2 GB.
+
+### Telegram
+
+Gli archivi vanno su Telegram attraverso il **tuo account**, non un bot: un bot carica al massimo 50 MB, un account fino a 2 GB per file, 4 GB con Telegram Premium.
+
+**Le chiavi.** Telegram chiede che ogni programma usi le proprie, e il pannello non ne ha di sue:
+
+1. Apri [my.telegram.org](https://my.telegram.org) e accedi con il numero dell'account che terrà i backup: il codice arriva nell'app di Telegram.
+2. Scegli **API development tools** e crea un'app: nome e titolo a piacere (per esempio *RunPanel*), piattaforma *Other*; URL e descrizione possono restare vuoti.
+3. In **Backup › Destinazioni › Aggiungi › Telegram** copia **api_id** e **api_hash**.
+
+**Il collegamento.** Con il **codice QR**: sul telefono apri Telegram › Impostazioni › Dispositivi › Collega dispositivo e inquadralo (si rinnova da solo ogni 30 secondi). Oppure con il **numero di telefono**: Telegram manda un codice nell'app o per SMS. Se l'account ha la verifica in due passaggi, il pannello chiede anche quella password. Il collegamento resta in sospeso sul server, dieci minuti per completarlo e venti per salvare; la sessione che ne esce finisce solo nella configurazione cifrata della destinazione e non passa mai dal browser. Un collegamento abbandonato viene chiuso, anche su Telegram. Avviarne uno richiede gli stessi permessi che servono per aggiungere una destinazione; i tentativi sono limitati, perché Telegram blocca per ore un account che chiede troppi codici.
+
+**Dove.** Un **canale privato** che il pannello crea per questo server quando salvi («RunPanel · backup di» seguito dal nome del server, si può cambiare), oppure i tuoi **Messaggi salvati**. La chat si sceglie creando la destinazione e poi non cambia: gli archivi sono lì. Non eliminare né modificare a mano i loro messaggi: il pannello li ritrova dal numero del messaggio.
+
+**Le parti.** Un file su Telegram ha al massimo 4000 pezzi da 512 KiB, 8000 con Premium: 2000 e 4000 MiB. A ogni backup il pannello legge dall'account se è Premium — un abbonamento può scadere — e dalla configurazione di Telegram il numero di pezzi, e tiene un margine di 20 MiB: parti fino a 1980 MiB, o 3980 MiB con Premium. Un archivio più grande viene diviso in parti, caricate come documenti separati (`….zip.enc.001`, `.002`…), lette dal file dell'archivio senza copie temporanee. Ogni parte ha una didascalia con il nome dell'archivio, la parte («Parte 2 di 3»), la dimensione e lo sha256. Il riferimento salvato con il backup elenca i messaggi in ordine: ripristino, verifica e download riscaricano le parti in sequenza e le ricompongono nell'archivio di sempre, controllando lo sha256 di ognuna. Senza il pannello si scaricano le parti dalla chat e si uniscono con `cat nome.zip.enc.* > nome.zip.enc` (su Windows `copy /b nome.zip.enc.001 + nome.zip.enc.002 nome.zip.enc`).
+
+Nel log del backup ci sono l'account, se è Premium, in quante parti va l'archivio, l'avanzamento e le attese che Telegram chiede (FLOOD_WAIT): fino a 15 minuti il pannello aspetta e riprende da solo, oltre il backup fallisce e il successivo riprova. Una connessione caduta viene ritentata pezzo per pezzo. Se una parte non va su, quelle già caricate vengono cancellate: nella chat restano solo archivi interi. Dopo il caricamento il pannello rilegge da Telegram la dimensione di ogni parte, e se non torna il backup fallisce. **Verifica** collega l'account, dice se è Premium e quanto può essere grande una parte, poi scrive, rilegge e cancella un piccolo file nella chat.
+
+**Sicurezza.**
+
+- La sessione apre **tutto l'account**: chi la ottenesse potrebbe leggere e scrivere ogni chat. È cifrata con la chiave del pannello come ogni altro segreto e serve solo ai backup; se preferisci, usa un account Telegram dedicato. In Telegram › Impostazioni › Dispositivi compare come «RunPanel su» seguito dal nome del server: chiudendola da lì, il backup successivo fallisce con «Sessione chiusa dall'app di Telegram, o scaduta: ricollega l'account».
+- Le chat cloud di Telegram **non sono cifrate end-to-end**: Telegram può leggere quello che carichi. Attiva la [cifratura con una password](#cifratura-con-una-password); quando è spenta, il modulo della destinazione la propone.
+- Eliminare la destinazione chiude anche la sessione su Telegram; gli archivi restano nella chat.
+
+**Ricollegare.** Con la sessione chiusa, **Modifica › Ricollega l'account** rifà il collegamento (lasciando vuoto l'api_hash resta quello salvato) e la vecchia sessione viene chiusa. Un altro account è accettato solo se raggiunge ancora gli archivi: per un canale deve esserne amministratore, per i Messaggi salvati la destinazione deve essere ancora vuota. Il proprietario ricollega, come per le chiavi di S3.
 
 L'archivio è uno zip con `manifest.json`, `LEGGIMI.txt` e `checksums.txt` in formato `sha256sum -c` (per i dump e i volumi; i file del repository non sono elencati). Le variabili dei progetti e le credenziali dei servizi sono cifrate con la chiave di questo server; includere la chiave stessa è una scelta esplicita a parte. Il resto (dump, volumi, codice) è in chiaro, a meno di cifrare l'archivio intero con una password: vedi qui sotto.
 
@@ -131,7 +158,7 @@ Per chi vuole leggerlo con altri strumenti: un'intestazione — `RPBKENC`, la ve
 Ogni backup registra lo sha256 dell'archivio, e `checksums.txt` quello di ogni dump e volume. **Verifica integrità**, nella pagina di un backup, rilegge l'archivio in background:
 
 - sul disco locale, per intero: lo sha256 dell'archivio, poi per ogni file il CRC-32, lo sha256 dove è elencato, e ogni `.gz` decompresso fino in fondo — un dump troncato ha comunque un checksum valido di se stesso troncato;
-- in un bucket, scorrendolo una volta per calcolarne lo sha256, senza salvarlo: dimostra che i byte sono quelli scritti; i singoli file vengono controllati di nuovo prima di ogni ripristino.
+- in un bucket o su Telegram, scorrendolo una volta per calcolarne lo sha256, senza salvarlo: dimostra che i byte sono quelli scritti; i singoli file vengono controllati di nuovo prima di ogni ripristino. Su Telegram si controlla anche lo sha256 di ogni parte.
 
 Un archivio cifrato si controlla allo stesso modo: lo sha256 è quello del file cifrato, e i file vengono letti attraverso la decifratura, che verifica ogni blocco. Se il pannello non ha più la sua password, controlla lo sha256 e dice che il contenuto non si è potuto aprire.
 
@@ -143,7 +170,7 @@ Il ripristino è un solo dialog. È tutto selezionato; ogni voce dice, in una ri
 
 Prima di fermare, copiare o sovrascrivere qualsiasi cosa:
 
-1. Un archivio su S3 viene scaricato nella cartella di lavoro del ripristino (serve lo spazio libero, più la riserva di 2 GB), con lo sha256 calcolato durante il download e confrontato con quello registrato quando è stato scritto; se non coincide il ripristino si ferma.
+1. Un archivio su S3 o su Telegram viene scaricato nella cartella di lavoro del ripristino (serve lo spazio libero, più la riserva di 2 GB), con lo sha256 calcolato durante il download e confrontato con quello registrato quando è stato scritto; se non coincide il ripristino si ferma. Le parti di un archivio diviso vengono riscaricate in ordine e ricomposte; se ne manca una, il ripristino dice quale prima di scaricare alcunché.
 2. I file che il ripristino userà — solo quelli — vengono controllati come fa **Verifica integrità**. Se uno è danneggiato, o la password di un archivio cifrato manca o è sbagliata, il ripristino si ferma senza aver toccato niente. Un archivio cifrato non viene mai decifrato per intero su disco: come per uno zip, il ripristino estrae solo i file che gli servono nella sua cartella di lavoro, che viene cancellata alla fine.
 3. Un **backup di sicurezza** delle destinazioni va sulla destinazione predefinita (etichetta "Sicurezza pre-ripristino", mai tolto dalla retention, si cancella a mano). Se fallisce il ripristino si ferma, a meno che tu non abbia spuntato **Procedi anche senza backup di sicurezza**.
 

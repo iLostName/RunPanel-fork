@@ -56,7 +56,7 @@ PostgreSQL, MySQL, Redis and MongoDB provisioned as labelled containers with the
 <td valign="top">
 
 ### 💾 Backups that restore
-Scheduled dumps of the databases, of the panel's own store, and of project configuration and volumes, into a single verifiable zip, on local disk or an S3-compatible bucket, optionally encrypted with a password of your own.
+Scheduled dumps of the databases, of the panel's own store, and of project configuration and volumes, into a single verifiable zip, on local disk, an S3-compatible bucket or Telegram (through your own account, split into parts to fit), optionally encrypted with a password of your own.
 
 </td>
 <td valign="top">
@@ -368,7 +368,7 @@ Everything lives in `.env` (see `.env.example` for the annotated version) and is
 - Several accounts with permissions per project, service, folder and resource, checked by the server on every route and every stream; a test fails when a new route does not declare what it protects ([Users and permissions](docs/en/users.md))
 - `proxy.ts` refuses `/api` requests without a session before they reach a handler, in addition to each handler's own check; the exceptions are listed in [Architecture](docs/en/architecture.md)
 - Calls between linked servers carry an HMAC-SHA256 over method, path, body, user and time, keyed with a cluster secret encrypted at rest; each signature is accepted once, within five minutes ([More than one server](docs/en/multi-server.md))
-- Project variables, service credentials, registry and backup credentials, the GitHub token, notification channel secrets and the SMTP password encrypted at rest (AES-256-GCM)
+- Project variables, service credentials, registry and backup credentials (Telegram sessions included, which never reach the browser), the GitHub token, notification channel secrets and the SMTP password encrypted at rest (AES-256-GCM)
 - Backup archives can be encrypted whole with a backup password (scrypt and chunked AES-256-GCM that catches a truncated, reordered or altered file), so a copy in a bucket or on a lost disk exposes nothing; a dependency-free script decrypts one without the panel ([Backups](docs/en/backups.md#encryption-with-a-password))
 - No `RUNPANEL_*` variable reaches deployed projects: the encryption key, the store's credentials and the setup token stay with the panel
 - Webhook signatures verified with HMAC-SHA256 and a constant-time compare
