@@ -132,6 +132,10 @@ export function sshUserProblem(value: string): string | null {
   return /^[A-Za-z0-9._@+-]+$/.test(user) ? null : "Il nome utente può contenere lettere, numeri e . _ - @ +";
 }
 
+/** A host key as it is pinned: `type base64`, the types OpenSSH writes into known_hosts. */
+export const SSH_HOST_KEY_PATTERN =
+  /^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,3}$/;
+
 // --- rclone remotes -------------------------------------------------------------
 
 /** A remote's name in a pasted rclone configuration: `[gdrive]`, `[nas-crypt]`. */

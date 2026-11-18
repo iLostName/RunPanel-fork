@@ -25,6 +25,18 @@ import {
 import { hasRunnableLine } from "./tasks-shell";
 import { MAX_BACKUP_PASSWORD, backupPasswordProblem } from "./backup-password";
 import {
+  DEFAULT_REMOTE_FOLDER,
+  MAX_REMOTE_FOLDER,
+  RCLONE_REMOTE_PATTERN,
+  SSH_HOST_KEY_PATTERN,
+  normalizeRemoteFolder,
+  normalizeSshHost,
+  remoteFolderProblem,
+  sshHostProblem,
+  sshUserProblem,
+} from "./backup-remote";
+import { RCLONE_PROVIDERS, parseRcloneSections, parseRcloneToken } from "./rclone-config";
+import {
   MAX_PAGE_PROJECTS,
   MESSAGE_MAX,
   PUBLIC_NAME_MAX,
@@ -1076,8 +1088,8 @@ export const taskSchema = z.object({
 
 export const taskUpdateSchema = taskSchema.partial();
 
-/** Only `local` is implemented; adding a transport means adding it here too. */
-export const destinationTypes = ["local", "s3"] as const;
+/** Every transport; adding one means adding it here too, and its schemas below. */
+export const destinationTypes = ["local", "s3", "sftp", "webdav", "rclone"] as const;
 
 /**
  * An S3-compatible destination's configuration.
@@ -1127,6 +1139,176 @@ export const s3ConfigSchema = z.object({
   forcePathStyle: z.boolean().optional(),
 });
 
+// --- The remote destinations: SFTP, WebDAV, rclone ------------------------------
+//
+// Two schemas each. The *input* is what the form may send — every field
+// optional, unknown fields refused — and is merged over the stored config on
+// an edit. The *config* is what gets stored, validated whole after the merge
+// (services/backup/destinations/kinds.ts does both), so half a configuration
+// is a 400 now and never a failed backup at 03:00.
+
+/** A remote folder: no `.` or `..`, no control characters; tidied as it is stored. */
+function remoteFolder(allowAbsolute: boolean) {
+  return z
+    .string()
+    .max(MAX_REMOTE_FOLDER)
+    .superRefine((value, ctx) => {
+      const problem = remoteFolderProblem(value, { allowAbsolute });
+      if (problem) ctx.addIssue({ code: "custom", message: problem });
+    })
+    .transform((value) => normalizeRemoteFolder(value, { allowAbsolute }));
+}
+
+/**
+ * HTTPS, or HTTP towards a private address — the rule and the reasons of
+ * `s3ConfigSchema.endpoint` — and without credentials, a query or a fragment
+ * in it: the user and the password have their fields, and a `?` would be
+ * sent with every request.
+ */
+const remoteHttpUrl = z
+  .string()
+  .max(2048)
+  .url("Scrivi l'indirizzo per intero, con https:// davanti")
+  .superRefine((raw, ctx) => {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return;
+    }
+    if (!(url.protocol === "https:" || (url.protocol === "http:" && isBlockedRepoHost(url.hostname)))) {
+      ctx.addIssue({ code: "custom", message: "Serve https://, oppure http:// verso un indirizzo privato" });
+    }
+    if (url.username || url.password) ctx.addIssue({ code: "custom", message: "Scrivi utente e password nei loro campi, non nell'indirizzo" });
+    if (url.search || url.hash) ctx.addIssue({ code: "custom", message: "L'indirizzo non può contenere ? o #" });
+  });
+
+const sshHost = z
+  .string()
+  .max(253)
+  .transform(normalizeSshHost)
+  .superRefine((value, ctx) => {
+    const problem = sshHostProblem(value);
+    if (problem) ctx.addIssue({ code: "custom", message: problem });
+  });
+
+const sshUser = z
+  .string()
+  .max(64)
+  .transform((value) => value.trim())
+  .superRefine((value, ctx) => {
+    const problem = sshUserProblem(value);
+    if (problem) ctx.addIssue({ code: "custom", message: problem });
+  });
+
+const sshPort = z.number("La porta è un numero").int("La porta è un numero").min(1, "Porta da 1 a 65535").max(65535, "Porta da 1 a 65535");
+
+/** An SFTP destination as stored: the key pair is the panel's own (POST …/ssh-key). */
+export const sftpConfigSchema = z.object({
+  host: sshHost,
+  port: sshPort,
+  username: sshUser,
+  folder: remoteFolder(true).default(DEFAULT_REMOTE_FOLDER),
+  privateKey: z
+    .string()
+    .max(16 * 1024)
+    .refine((value) => value.includes("-----BEGIN OPENSSH PRIVATE KEY-----"), "Genera la chiave della destinazione"),
+  publicKey: z.string().max(4096).optional(),
+  /** Pinned on first use; null until then. */
+  hostKey: z.string().regex(SSH_HOST_KEY_PATTERN, "Chiave del server non valida").nullable().optional(),
+});
+
+export const sftpConfigInput = z
+  .object({
+    host: z.string().max(253).optional(),
+    port: z.number().int().optional(),
+    username: z.string().max(64).optional(),
+    folder: z.string().max(MAX_REMOTE_FOLDER).optional(),
+    /** The pair from POST /api/backups/destinations/ssh-key, sealed: the private half never travels in clear. */
+    keyToken: z.string().max(8192).optional(),
+    /** The host key "Verifica" learned; "" forgets the pinned one, so the next check learns it again. */
+    hostKey: z.string().max(4096).optional(),
+  })
+  .strict();
+
+export const webdavConfigSchema = z.object({
+  url: remoteHttpUrl,
+  username: z.string().trim().min(1, "Scrivi il nome utente").max(256),
+  password: z.string().min(1, "Scrivi la password").max(1024),
+  folder: remoteFolder(false).default(DEFAULT_REMOTE_FOLDER),
+});
+
+export const webdavConfigInput = z
+  .object({
+    url: z.string().max(2048).optional(),
+    username: z.string().max(256).optional(),
+    /** Empty or absent: keep the stored one. */
+    password: z.string().max(1024).optional(),
+    folder: z.string().max(MAX_REMOTE_FOLDER).optional(),
+  })
+  .strict();
+
+export const rcloneConfigSchema = z
+  .object({
+    provider: z.enum(RCLONE_PROVIDERS),
+    token: z.string().max(16 * 1024).optional(),
+    driveId: z.string().max(256).optional(),
+    driveType: z.enum(["personal", "business", "documentLibrary"]).optional(),
+    sections: z.string().max(64 * 1024).optional(),
+    remote: z.string().regex(RCLONE_REMOTE_PATTERN, "Nome di remote non valido").optional(),
+    folder: remoteFolder(true).default(DEFAULT_REMOTE_FOLDER),
+  })
+  .superRefine((value, ctx) => {
+    if (value.provider === "expert") {
+      const parsed = parseRcloneSections(value.sections ?? "");
+      if ("error" in parsed) {
+        ctx.addIssue({ code: "custom", message: parsed.error, path: ["sections"] });
+      } else if (value.remote && !parsed.sections.some((section) => section.name === value.remote)) {
+        ctx.addIssue({ code: "custom", message: `Il remote «${value.remote}» non è tra quelli incollati`, path: ["remote"] });
+      }
+      return;
+    }
+    const token = parseRcloneToken(value.token ?? "");
+    if ("error" in token) ctx.addIssue({ code: "custom", message: token.error, path: ["token"] });
+    if (value.provider === "onedrive" && (!value.driveId || !value.driveType)) {
+      ctx.addIssue({ code: "custom", message: "Manca l'unità OneDrive: incolla di nuovo il token", path: ["driveId"] });
+    }
+  });
+
+export const rcloneConfigInput = z
+  .object({
+    provider: z.enum(RCLONE_PROVIDERS).optional(),
+    /** Empty or absent: keep the stored one. */
+    token: z.string().max(16 * 1024).optional(),
+    /** Empty or absent: keep the stored one. */
+    sections: z.string().max(64 * 1024).optional(),
+    remote: z.string().max(64).optional(),
+    folder: z.string().max(MAX_REMOTE_FOLDER).optional(),
+  })
+  .strict();
+
+/** What the form may send for an S3 destination; merged over the stored config on an edit. */
+export const s3ConfigInput = z
+  .object({
+    endpoint: z.string().max(2048).optional(),
+    region: z.string().max(64).optional(),
+    bucket: z.string().max(255).optional(),
+    accessKeyId: z.string().max(255).optional(),
+    /** Empty or absent: keep the stored one. */
+    secretAccessKey: z.string().max(255).optional(),
+    prefix: z.string().max(255).optional(),
+    forcePathStyle: z.boolean().optional(),
+  })
+  .strict();
+
+/** The input schema of each type that has a configuration. */
+export const destinationConfigInputs = {
+  s3: s3ConfigInput,
+  sftp: sftpConfigInput,
+  webdav: webdavConfigInput,
+  rclone: rcloneConfigInput,
+} as const;
+
 export const destinationSchema = z
   .object({
     name: z.string().min(1).max(60),
@@ -1140,31 +1322,29 @@ export const destinationSchema = z
   .refine((value) => value.type !== "s3" || s3ConfigSchema.safeParse(value.config ?? {}).success, {
     message: "Configurazione S3 incompleta o non valida",
     path: ["config"],
-  });
+  })
+  // The other remote types: the shape here, the whole once the route has
+  // unsealed the key or looked up the drive (kinds.ts).
+  .refine(
+    (value) => {
+      if (value.type === "local" || value.type === "s3") return true;
+      return destinationConfigInputs[value.type].safeParse(value.config ?? {}).success;
+    },
+    { message: "Configurazione non valida", path: ["config"] }
+  );
 
 /**
  * Editing a destination. The type is not here on purpose: an archive's path
  * means one thing on a disk and another in a bucket, so a destination that
  * changed type would point every archive it holds at nothing. `config` is
- * merged over the stored one and validated whole with `s3ConfigSchema`, so an
- * empty secret keeps the stored secret instead of erasing it.
+ * checked against the input schema of the destination's own type, merged over
+ * the stored one and validated whole (`s3ConfigSchema` for S3), so an empty
+ * secret keeps the stored secret instead of erasing it.
  */
 export const destinationUpdateSchema = z
   .object({
     name: z.string().trim().min(1).max(60).optional(),
-    config: z
-      .object({
-        endpoint: z.string().max(2048).optional(),
-        region: z.string().max(64).optional(),
-        bucket: z.string().max(255).optional(),
-        accessKeyId: z.string().max(255).optional(),
-        /** Empty or absent: keep the stored one. */
-        secretAccessKey: z.string().max(255).optional(),
-        prefix: z.string().max(255).optional(),
-        forcePathStyle: z.boolean().optional(),
-      })
-      .strict()
-      .optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
 
