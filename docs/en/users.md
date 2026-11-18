@@ -12,6 +12,45 @@ With [several servers](multi-server.md) the accounts are the same everywhere and
 
 You sign in with email and password. The panel sends no email: the address is only your login name.
 
+## Two-step verification
+
+With **Verifica in due passaggi** (two-step verification) on, signing in also asks for the 6-digit code an authenticator app on your phone shows, a new one every 30 seconds: a stolen password alone does not get in.
+
+**Turning it on**, in **Impostazioni › Account**:
+
+1. **Attiva**, then your password.
+2. Scan the QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Bitwarden or any other), or type the key shown under it.
+3. Type the code the app shows. Only a correct code turns it on, so a scan that did not work cannot lock you out.
+4. Save the **10 recovery codes** (**Codici di recupero**): copy them or download them as a text file. They are shown once.
+
+**Signing in** then takes the password, then the code. Without the phone, use a recovery code instead: each works once. **Ricorda questo dispositivo** skips the code on that browser for 30 days; the account page can forget every remembered browser at once, and they are forgotten anyway when the password is changed or reset.
+
+**Nuovi codici di recupero** makes ten new ones (after the password) and voids all the old ones. **Disattiva** needs the password and a code, from the app or a recovery code: an open session alone is not enough.
+
+Wrong codes are limited for each account: after five in a quarter of an hour, or twenty in a day, it has to wait before trying again, and five on the same sign-in mean typing the password again. Every failure is in the activity log. A link to choose a new password does not sign in an account with two-step verification: after it, the person signs in with the new password and the code.
+
+Whoever manages users can turn it off for an account that has lost both the phone and the recovery codes, from that account's page; never for the owner. With [several servers](multi-server.md) it is per panel: turn it on on each panel you sign in to.
+
+API tokens do not ask for the code: a token is a credential of its own, created from a signed-in browser. The token pages and two-step verification itself cannot be reached with a token.
+
+Technical details: TOTP (RFC 6238) with HMAC-SHA-1, 6 digits and a 30-second step, accepting one step either side and never the same code twice. The key is stored encrypted with the panel's secret key, the recovery codes only as salted scrypt hashes. A store restored without its secret key cannot check the app's codes any more: sign in with a recovery code, then turn it off and on again.
+
+## Devices
+
+**Impostazioni › Account › Dispositivi** lists where you are signed in, with the address and the last activity. **Disconnetti** ends one session; **Esci da tutti gli altri dispositivi** ends all of them except the one you are using. Whoever manages users sees and ends the sessions of an account from its page.
+
+## If the owner is locked out
+
+Nobody can reset the owner from the panel. On the server, from the panel's directory, as the user the panel runs as:
+
+```bash
+node scripts/reset-owner.mjs
+```
+
+The script prints which database it opened and the owner's email, asks you to type that email to confirm, then a new password (Enter generates one and prints it once). If two-step verification is on, it asks whether to turn it off too (`--disable-2fa` answers yes, `--keep-2fa` no). In one go it sets the password, signs the owner out everywhere, forgets the remembered devices, clears the sign-in limits and writes the reset in the activity log.
+
+It finds the database like the panel does: `RUNPANEL_DB_DRIVER`, `RUNPANEL_DATA_DIR`, `RUNPANEL_DB_FILE`, `RUNPANEL_DATABASE_URL` and the other `RUNPANEL_PG_*` variables, from the environment and then from the `.env` files of the panel's directory. If the panel gets them elsewhere (systemd `Environment=` lines, Docker), run the script where they are set (`docker exec -it <container> node scripts/reset-owner.mjs`) or pass `--data-dir`, `--db-file` or `--database-url`. `--help` lists the options. With several servers the new password reaches the other panels at the next sync; two-step verification is turned off only on the server where the script runs.
+
 ## Inviting someone
 
 In **Accessi › Utenti › Invita utente** (access, users, invite user) type the email and choose how long the link lasts: 1 hour, 24 hours, 7 days or any duration up to 30 days. The panel shows the link **once** and you send it to the person yourself. The link works once: the person picks a password and is in.
@@ -66,7 +105,9 @@ Removing a grant, disabling or deleting an account, closing a session: it takes 
 
 ## Activity log
 
-**Accessi › Registro attività** lists who did what: successful and failed sign-ins, invitations, permission changes, deploys, restarts, changes to variables and settings, terminals opened, backups, restores, updates, deletions. It filters by category and period. Each account sees only entries about resources it can see, and security entries only those who manage users. With several servers each server keeps its own log, and the page shows the selected server's.
+**Accessi › Registro attività** lists who did what: successful and failed sign-ins, invitations, permission changes, deploys, restarts, changes to variables and settings, terminals opened, backups, restores, updates, deletions. It filters by category, period, person, action and what it was done to (a project, a database, a folder, a user, an area of the panel); the filters stay in the address, so a filtered view can be bookmarked. **Vedi attività** on a user's page, and in the **Altro** menu of a project, opens it already filtered. Each account sees only entries about resources it can see, and security entries only those who manage users. With several servers each server keeps its own log, and the page shows the selected server's.
+
+**Esporta CSV** downloads what the filters show, newest first, up to 100,000 entries: date and time in the panel's time zone and in UTC, person, action, category, resource, detail and address. The file opens in a spreadsheet with a double click: `;` as separator (what a spreadsheet set to Italian expects), UTF-8, and any cell that would start a formula (`=`, `+`, `-`, `@`) written as text. In expert mode there is also a version with `,`. Each export is itself recorded in the log.
 
 The owner chooses which categories to record (Sicurezza, Deploy, Configurazione, Terminale, Backup, Sistema, Eliminazioni; security is always on) and for how many days to keep them, 1 to 3650 (90 by default). Entries hold names, never secret values, and a failed log write never blocks the action it describes.
 
