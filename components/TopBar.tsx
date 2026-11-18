@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import { CRUMBS_WITHOUT_PAGE, NAV_SECTIONS, SEGMENT_LABELS, isActiveNav } from "@/lib/nav";
 import { SearchButton } from "@/components/SearchButton";
 import { UserMenu } from "@/components/UserMenu";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useCrumbLabels } from "@/lib/hooks/useCrumbLabel";
 import { ServerSelector } from "@/components/ServerSelector";
 import { useNode, useServerHref } from "@/lib/hooks/useNode";
@@ -112,6 +113,7 @@ export function TopBar() {
       <div className="flex shrink-0 items-center gap-2">
         <SearchButton />
         <ServerSelector className="hidden lg:block" />
+        <NotificationBell />
         <UserMenu />
       </div>
     </header>

@@ -32,7 +32,11 @@ export const PERMISSION_GROUPS: { title: string; items: { key: GlobalPermission;
   {
     title: "Impostazioni del server",
     items: [
-      { key: "notifications", label: "Notifiche", description: "Il bot Telegram e cosa notifica." },
+      {
+        key: "notifications",
+        label: "Notifiche",
+        description: "I canali di notifica (email, Telegram, webhook…) e cosa inviano: ricevono gli avvisi di tutti i progetti.",
+      },
       { key: "updates", label: "Aggiornamenti", description: "Controlla e installa le nuove versioni del pannello." },
       {
         key: "host",

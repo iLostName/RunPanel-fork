@@ -158,7 +158,6 @@ async function shortReply(res: Response): Promise<string | null> {
     } catch {
       /* plain text, as Slack answers */
     }
-    // eslint-disable-next-line no-control-regex
     const line = detail.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
     return line ? (line.length > 160 ? `${line.slice(0, 159)}…` : line) : null;
   } catch {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -12,6 +13,7 @@ import { AccentPicker } from "@/components/ui/AccentPicker";
 import { LoadError } from "@/components/ui/LoadError";
 import { RegistryList } from "@/components/ui/RegistryList";
 import { NotificationSettings } from "@/components/ui/NotificationSettings";
+import { MailSettings } from "@/components/notifications/MailSettings";
 import { useCan, useMe } from "@/lib/hooks/useMe";
 import {
   DEFAULT_POLL_INTERVAL,
@@ -58,6 +60,8 @@ export default function PanelSettingsPage() {
   const me = useMe();
   const canNotify = useCan("notifications");
   const canRegistries = useCan("registries");
+  // `?open=notifications` comes from the bell's "Dove ricevere gli avvisi".
+  const openSection = useSearchParams()?.get("open") ?? null;
 
   const [pollingInterval, setPollingInterval] = useState("5");
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -273,10 +277,22 @@ export default function PanelSettingsPage() {
 
         {canNotify && (
           <Section
-            title="Notifiche Telegram"
-            summary="Crash, esiti dei deploy, backup e aggiornamenti, su un bot"
+            title="Notifiche"
+            summary="Dove mandare gli avvisi: email, Telegram, Discord, Slack, ntfy o un webhook"
+            defaultExpanded={openSection === "notifications"}
           >
             <NotificationSettings />
+          </Section>
+        )}
+
+        {/* The owner's alone: the same server will carry password resets. */}
+        {me.isOwner && (
+          <Section
+            title="Server di posta"
+            summary="Per le notifiche via email, e in futuro per inviti e recupero della password"
+            defaultExpanded={openSection === "mail"}
+          >
+            <MailSettings />
           </Section>
         )}
 
