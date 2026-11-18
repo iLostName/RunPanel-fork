@@ -16,6 +16,16 @@ Un progetto vive sul server su cui è stato creato: con [più server](multi-serv
 
 Un progetto vuoto, da configurare a mano, si crea dallo stesso wizard in modalità esperto.
 
+## Catalogo di app
+
+**Nuovo progetto › Da un modello**, oppure **Installa un'app pronta** dalla ricerca (Ctrl K), apre un catalogo di app pronte: n8n, WordPress (con MariaDB), Uptime Kuma, Umami (con PostgreSQL), Ghost (con MySQL), Vaultwarden, Gitea e MinIO, con la ricerca e le categorie. Per installarne una servono **Creare progetti** e **Accesso all'host**, come per qualsiasi sorgente.
+
+La pagina di installazione fa solo le domande dell'app, già compilate: il nome, una porta libera, il fuso orario, un indirizzo facoltativo su un dominio configurato (obbligatorio per Vaultwarden, la cui cassaforte si apre solo in HTTPS). Password e chiavi le genera il server e le mostra una volta sola, alla fine, con il pulsante per copiarle; dopo stanno solo nelle variabili del progetto. In **Avanzate** ci sono la porta, il nome del server che l'app scrive nei propri link finché non ha un indirizzo, il file compose esattamente come verrà scritto, le variabili e i volumi.
+
+Il resto lo fa una sola richiesta, tutto o niente. Controlla Docker e Compose; rifiuta un nome di cui restano i dati di un'installazione precedente (eliminare un progetto Compose ne conserva i volumi con nome, e un nuovo stack li riuserebbe senza dire niente); sceglie o verifica le porte confrontandole con quelle del pannello e con quello che è in ascolto sulla macchina; poi scrive `compose.yaml` nella cartella del progetto e salva insieme progetto, variabili (cifrate) e indirizzo. Se qualcosa non riesce, quello che era stato creato viene tolto. Poi parte il primo deploy, seguito dal vivo, e la pagina elenca cosa fare quando l'app è online: di solito aprirla e creare l'account amministratore prima che possa farlo qualcun altro.
+
+Quello che viene installato è un normale progetto Compose. Ogni valore che il file sostituisce è una variabile del progetto (`${NOME:-…}`), passata a Compose a ogni deploy e mai scritta nei file del progetto; `PORT` è la porta del progetto. I dati stanno in volumi con nome, che un nuovo deploy ritrova come li aveva lasciati e che i backup del progetto includono quando scegli anche i volumi. Il file si cambia da **File**, i valori da **Variabili**, poi si rifà il deploy; se più avanti l'app riceve un indirizzo, aggiorna anche `APP_URL` (e `APP_HOST`, dove c'è). MinIO usa `pgsty/minio`, la continuazione di MinIO portata avanti dalla comunità: l'immagine ufficiale non viene più pubblicata.
+
 ## La pagina del progetto
 
 - **Panoramica** (si apre qui): lo stato in una frase con la prossima cosa da fare (scegliere la sorgente, fare il primo deploy, correggere un deploy fallito, riavviare), l'ultimo deploy, le risorse, gli indirizzi, i database collegati e cosa manca per un progetto affidabile.
