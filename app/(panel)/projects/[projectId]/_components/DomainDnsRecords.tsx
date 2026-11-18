@@ -10,8 +10,18 @@ import { cn } from "@/lib/utils";
 import type { DnsState, FamilyCheck } from "@/lib/dns-check";
 import type { HostDnsReport } from "@/services/proxy";
 
-/** One name as the DNS endpoint answers it. */
-export type DnsName = HostDnsReport & { subdomain: string; domain: string; cloudflare: boolean; redirectTo: string | null };
+/**
+ * One name as the DNS endpoint answers it. `zoneKnown` is false for the
+ * panel's own name typed whole, on a domain the panel does not manage: what
+ * the record is called relative to its zone is then the reader's to say.
+ */
+export type DnsName = HostDnsReport & {
+  subdomain: string;
+  domain: string;
+  cloudflare: boolean;
+  redirectTo: string | null;
+  zoneKnown?: boolean;
+};
 
 const VERDICT: Record<DnsState, { label: string; tone: BadgeTone; icon: string }> = {
   ok: { label: "Punta a questo server", tone: "success", icon: "solar:check-circle-linear" },
@@ -62,7 +72,7 @@ function familyLine(family: FamilyCheck, optional: boolean): { icon: string; cla
 function RecordRow({ type, name, family }: { type: "A" | "AAAA"; name: DnsName; family: FamilyCheck }) {
   const optional = type === "AAAA" && family.expected.length > 0;
   const line = familyLine(family, optional);
-  const relative = name.subdomain === "" ? "@" : name.subdomain;
+  const relative = name.zoneKnown === false ? name.hostname : name.subdomain === "" ? "@" : name.subdomain;
   const value = family.expected[0];
 
   return (
@@ -133,7 +143,12 @@ export function DomainDnsRecords({ name }: { name: DnsName }) {
         <FieldHint key={note}>{note}</FieldHint>
       ))}
       <FieldHint>
-        {name.subdomain === "" ? (
+        {name.zoneKnown === false ? (
+          <>
+            Qui c&apos;è il nome per esteso: molti provider vogliono solo la parte prima del dominio (per{" "}
+            <Code>pannello.esempio.it</Code> basta <Code>pannello</Code>).
+          </>
+        ) : name.subdomain === "" ? (
           <>
             Il nome <Code>@</Code> è il dominio stesso, <Code>{name.domain}</Code>: alcuni provider lo vogliono vuoto.
           </>

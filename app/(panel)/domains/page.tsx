@@ -21,6 +21,7 @@ import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { formatWhen } from "@/lib/format";
+import { instantDomainAddress } from "@/lib/proxy-names";
 import { DOMAIN_RULE, domainNameSchema } from "@/lib/validation";
 import type { ProxyProbe } from "@/services/proxy/host";
 import type { HostView } from "@/services/proxy";
@@ -49,6 +50,8 @@ interface DomainsData {
   };
   domains: { id: string; name: string; cloudflare: boolean; hostCount: number; created_at: string }[];
   hosts: HostView[];
+  /** The panel's own HTTPS name; absent from a server on an older panel. */
+  panelHost?: Pick<HostView, "hostname" | "status" | "certificate" | "certificateDaysLeft" | "applyError"> | null;
 }
 
 export default function DomainsPage() {
@@ -255,7 +258,14 @@ export default function DomainsPage() {
                         {domain.cloudflare && <Badge icon="solar:cloud-linear">Cloudflare</Badge>}
                       </p>
                       <p className="text-muted text-xs">
-                        Record DNS: <Code>*.{domain.name}</Code> → {target}
+                        {instantDomainAddress(domain.name) ? (
+                          // sslip.io answers for it: there is no record to create, and no HTTPS.
+                          <>Indirizzi di prova: nessun record da creare, solo HTTP</>
+                        ) : (
+                          <>
+                            Record DNS: <Code>*.{domain.name}</Code> → {target}
+                          </>
+                        )}
                         {" · "}
                         {domain.hostCount === 0
                           ? "nessun indirizzo"
@@ -313,6 +323,26 @@ export default function DomainsPage() {
             description="Si aggiungono dalla pagina di ogni progetto, in Impostazioni › Indirizzi"
             className="px-4 pt-4"
           />
+          {/* The panel's own name is one nginx serves too, and a name no project can take. */}
+          {data?.panelHost && (
+            <div className="border-border mt-2 flex flex-col gap-1 border-b px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <a
+                  href={`${data.panelHost.certificate === "active" || data.panelHost.certificate === "expiring" ? "https" : "http"}://${data.panelHost.hostname}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-foreground font-mono text-sm hover:underline"
+                >
+                  {data.panelHost.hostname}
+                </a>
+                <AddressBadge host={{ ...data.panelHost, explanation: null, lastError: null, dns: null }} />
+                <Link href={href("/settings")} className="text-muted hover:text-foreground text-xs">
+                  il pannello stesso
+                </Link>
+              </div>
+              {data.panelHost.applyError && <p className="text-danger text-xs">{data.panelHost.applyError}</p>}
+            </div>
+          )}
           {(data?.hosts.length ?? 0) === 0 ? (
             <EmptyState
               icon="solar:link-round-linear"

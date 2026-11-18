@@ -43,7 +43,9 @@ Si aggiungono da **Impostazioni › Pannello › Registry privati**. Le credenzi
 
 ## Metterlo su internet
 
-Termina il TLS davanti al pannello e digli dietro quanti proxy si trova:
+Il modo più semplice lo fa il pannello stesso: **Impostazioni › Pannello › Metti il pannello su HTTPS** lo mette dietro l'nginx che gestisce già per i progetti, con un certificato di Let's Encrypt (vedi [Domini](domains.md#il-pannello-stesso-in-https)). La sua porta resta aperta, quindi lì lascia `RUNPANEL_TRUSTED_PROXY_HOPS` a `0` finché alla porta non arriva solo nginx: altrimenti chi la usa direttamente sceglierebbe da solo l'indirizzo che il pannello vede.
+
+Con un proxy tuo, termina il TLS davanti al pannello e digli dietro quanti proxy si trova:
 
 ```bash
 RUNPANEL_TRUSTED_PROXY_HOPS=1

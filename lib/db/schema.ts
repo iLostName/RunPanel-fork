@@ -815,6 +815,31 @@ export interface ProjectHostsTable {
 }
 
 /**
+ * The panel's own name over HTTPS (migration 040). At most one row; the
+ * columns shared with `project_hosts` mean the same there and here.
+ */
+export interface PanelHostsTable {
+  id: string;
+  /** Canonical, like a project's name — and never one of theirs. */
+  hostname: string;
+  /** Served at `/.well-known/runpanel-check`, on 80 and on 443. */
+  check_token: string;
+  status: ProjectHostStatus;
+  last_error: string | null;
+  apply_error: string | null;
+  cert_expires_at: string | null;
+  /**
+   * What the panel's public address setting held before the owner adopted this
+   * name, put back when it is turned off. Null: never adopted. '': it was empty.
+   */
+  previous_public_url: string | null;
+  /** When the owner adopted it as the public address: how long HSTS has been ramping up. */
+  adopted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
  * One reading of a host, project or service over time, or the average of
  * several — see migration 033 and `lib/metrics-math.ts`. Uptime checks live
  * here too, under the scope `'uptime'` (migration 034).
@@ -899,6 +924,7 @@ export interface Database {
   backup_verifications: BackupVerificationsTable;
   domains: DomainsTable;
   project_hosts: ProjectHostsTable;
+  panel_hosts: PanelHostsTable;
   metric_samples: MetricSamplesTable;
   uptime_incidents: UptimeIncidentsTable;
 }

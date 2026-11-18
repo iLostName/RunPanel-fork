@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
+import { loadPanelHost, panelDomain } from "@/services/proxy/panel-store";
 
 type Params = { params: Promise<{ domainId: string }> };
 
@@ -32,6 +33,15 @@ export async function DELETE(request: NextRequest, { params }: Params) {
         {
           error: `${domain.name} serve ancora ${count === 1 ? "un nome" : `${count} nomi`}: toglili prima dai progetti.`,
         },
+        { status: 409 }
+      );
+    }
+    // The panel's own name renews through its domain — over Cloudflare's DNS,
+    // when it is linked — so the domain stays while the name does.
+    const panel = await loadPanelHost();
+    if (panel && (await panelDomain(panel.hostname))?.id === domainId) {
+      return NextResponse.json(
+        { error: `${domain.name} serve l'indirizzo HTTPS del pannello, ${panel.hostname}: disattivalo prima da Impostazioni › Pannello.` },
         { status: 409 }
       );
     }

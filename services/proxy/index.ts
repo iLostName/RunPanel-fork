@@ -11,8 +11,10 @@ import { generateId } from "@/lib/utils";
 import { listenPort, readAccess } from "@/lib/access-columns";
 import { compileRules } from "@/lib/ip-access";
 import { checkDns, routingCouldHelp, unmatchedAddresses, type DnsCheck, type DnsState } from "@/lib/dns-check";
-import type { ProjectHostsTable } from "@/lib/db/schema";
+import { isInstantHostname, isPanelAddress } from "@/lib/proxy-names";
+import type { PanelHostsTable, ProjectHostStatus, ProjectHostsTable } from "@/lib/db/schema";
 import { certificateState, explainCertificateError } from "./certificate";
+import { loadPanelHost, panelDomain, panelHostById, setPanelHost } from "./panel-store";
 import { isCloudflareAddress, isPublicAddress, resolvePublicly, serverAddresses, type KnownAddresses } from "./dns";
 import {
   PREVIOUS_SITES_DIR,
@@ -38,13 +40,16 @@ import {
   certificatePaths,
   conflictingNames,
   htpasswdFileName,
+  panelHstsMaxAge,
   renderCloudflareHook,
   renderHtpasswd,
+  renderPanelSite,
   renderSite,
   renewalChallenge,
   renewalConfPath,
   siteFileName,
   type Challenge,
+  type PanelSiteInput,
   type SiteInput,
 } from "./render";
 import { cloudflareToken, cloudflareZones, linkDomains, type CloudflareZone } from "./cloudflare";
@@ -72,6 +77,8 @@ interface DnsSeen {
 
 const globalRef = globalThis as typeof globalThis & {
   __runpanelProxyChain?: Promise<unknown>;
+  /** The panel's name and HSTS as the last apply tried to write them — see `sweepWaiting`. */
+  __runpanelPanelHstsTried?: { hostname: string; maxAge: number | null } | null;
   __runpanelProxyIssuing?: Set<string>;
   __runpanelProxyDnsSeen?: Map<string, DnsSeen>;
   __runpanelProxyDnsChecks?: Map<string, Promise<HostDnsReport>>;
@@ -165,6 +172,34 @@ export function hostView(row: ProjectHostsTable & { project_name?: string }) {
 
 export type HostView = ReturnType<typeof hostView>;
 
+/** The panel's own name as its settings section shows it: the same certificate states as a project's. */
+export function panelHostView(row: PanelHostsTable) {
+  const status = issuing.has(row.id) ? "issuing" : row.status;
+  const certificate = certificateState(status, row.cert_expires_at);
+  const seen = status === "pending" ? dnsSeen.get(row.id) : undefined;
+  return {
+    id: row.id,
+    hostname: row.hostname,
+    status,
+    certificate: certificate.state,
+    certificateDaysLeft: certificate.daysLeft,
+    lastError: row.last_error,
+    explanation: status === "error" ? explainCertificateError(row.last_error) : null,
+    applyError: row.apply_error,
+    certExpiresAt: row.cert_expires_at,
+    dns: seen ? { state: seen.state, ready: seen.ready } : null,
+    /**
+     * What nginx answers at `/.well-known/runpanel-check` for this name — on
+     * port 80 to anyone already — so the owner's browser can tell it reached
+     * this server and not another one.
+     */
+    checkToken: row.check_token,
+    createdAt: row.created_at,
+  };
+}
+
+export type PanelHostView = ReturnType<typeof panelHostView>;
+
 /**
  * Why a name cannot be given to a project, or null. Which project holds it is
  * not said: it may be one the account cannot see.
@@ -174,9 +209,29 @@ export async function addressProblem(hostname: string): Promise<string | null> {
   if (await db.selectFrom("project_hosts").select("id").where("hostname", "=", hostname).executeTakeFirst()) {
     return `${hostname} è già assegnato.`;
   }
+  if (await db.selectFrom("panel_hosts").select("id").where("hostname", "=", hostname).executeTakeFirst()) {
+    return `${hostname} è l'indirizzo HTTPS del pannello.`;
+  }
   const panelUrl = await getSetting(PANEL_PUBLIC_URL_SETTING);
   if (panelUrl && URL.canParse(panelUrl) && new URL(panelUrl).hostname.toLowerCase() === hostname) {
     return `${hostname} è l'indirizzo del pannello.`;
+  }
+  return null;
+}
+
+/**
+ * Why a name cannot be the panel's own, or null. Unlike a project's, the
+ * panel's current public address is no reason: moving from
+ * `http://pannello.esempio.it:3000` to `https://pannello.esempio.it` is the
+ * very thing this is for.
+ */
+export async function panelAddressProblem(hostname: string): Promise<string | null> {
+  if (isInstantHostname(hostname)) {
+    return "Per il pannello serve un tuo dominio: gli indirizzi di prova come sslip.io restano senza HTTPS.";
+  }
+  const db = await getDb();
+  if (await db.selectFrom("project_hosts").select("id").where("hostname", "=", hostname).executeTakeFirst()) {
+    return `${hostname} è già l'indirizzo di un progetto: scegline un altro, o toglilo prima dal progetto.`;
   }
   return null;
 }
@@ -277,6 +332,7 @@ export async function claimedPorts(): Promise<Map<number, string | null>> {
     claimed.set(port, claimed.has(port) && claimed.get(port) !== owner ? null : owner);
   };
   claim(getEnv().port, null);
+  claim(panelListenPort(), null);
   for (const service of services) {
     claim(service.port, null);
     claim(service.access_port, null);
@@ -291,9 +347,25 @@ export async function claimedPorts(): Promise<Map<number, string | null>> {
 /** Why a project may not be proxied to `port`, or null when the port is its own. */
 export function upstreamConflict(claimed: Map<number, string | null>, projectId: string, port: number): string | null {
   if (!claimed.has(port) || claimed.get(port) === projectId) return null;
-  return port === getEnv().port
+  return port === getEnv().port || port === panelListenPort()
     ? "La porta del progetto è quella del pannello: un nome non può pubblicarlo."
     : `La porta ${port} appartiene a un altro progetto o servizio: un nome può servire solo il proprio.`;
+}
+
+/**
+ * The port the panel really listens on, which its own name is proxied to.
+ *
+ * Next records it once it is listening, and that beats `PORT`: a panel started
+ * with `next start -p 4000` and no `PORT` would otherwise send nginx to 3000.
+ */
+export function panelListenPort(): number {
+  const origin = process.env.__NEXT_PRIVATE_ORIGIN;
+  if (origin && URL.canParse(origin)) {
+    const url = new URL(origin);
+    const port = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+    if (Number.isInteger(port) && port > 0 && port < 65536) return port;
+  }
+  return getEnv().port;
 }
 
 function certificateOnDisk(hostname: string): { fullchain: string; privkey: string } | null {
@@ -381,9 +453,51 @@ export interface ApplyResult {
   message: string;
 }
 
+/** The panel's own name as the apply needs it. */
+interface PanelSite {
+  row: PanelHostsTable;
+  cloudflare: boolean;
+  /** It is the panel's public address: HSTS goes on. */
+  adopted: boolean;
+}
+
+async function loadPanelSite(): Promise<PanelSite | null> {
+  const row = await loadPanelHost();
+  if (!row) return null;
+  const [domain, publicUrl] = await Promise.all([panelDomain(row.hostname), getSetting(PANEL_PUBLIC_URL_SETTING)]);
+  return { row, cloudflare: domain?.cloudflare ?? false, adopted: isPanelAddress(publicUrl, row.hostname) };
+}
+
+/**
+ * The panel's block. No allow list and no password: the panel's sign-in is
+ * the gate, exactly as on its own port — a second gate here would only be one
+ * more way to lock its owner out.
+ */
+function panelSiteFor(found: ProxyProbe, panel: PanelSite, withoutCertificate: boolean): PanelSiteInput {
+  return {
+    hostname: panel.row.hostname,
+    upstreamPort: panelListenPort(),
+    certificate: withoutCertificate ? null : certificateOnDisk(panel.row.hostname),
+    checkToken: panel.row.check_token,
+    ipv6: found.ipv6,
+    http2: found.nginx.http2,
+    cloudflare: panel.cloudflare,
+    hstsMaxAge: panelHstsMaxAge(panel.adopted, panel.row.adopted_at),
+  };
+}
+
+const PANEL_TAKEN = "È l'indirizzo HTTPS del pannello: scegline un altro per il progetto.";
+
 async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
-  const [rows, claimed] = await Promise.all([loadHosts(), claimedPorts()]);
-  const ours = new Set(rows.map((row) => row.hostname));
+  const [allRows, claimed, panel] = await Promise.all([loadHosts(), claimedPorts(), loadPanelSite()]);
+  const panelName = panel?.row.hostname ?? null;
+  if (!panel) globalRef.__runpanelPanelHstsTried = null;
+  // A project's name that is also the panel's — a restored backup, two
+  // requests that crossed — is the project's to give up: the panel's block is
+  // a way in, and both would be one file.
+  const shadowed = new Set(allRows.filter((row) => row.hostname === panelName).map((row) => row.id));
+  const rows = allRows.filter((row) => !shadowed.has(row.id));
+  const ours = new Set([...rows.map((row) => row.hostname), ...(panelName ? [panelName] : [])]);
   const byId = new Map(rows.map((row) => [row.id, row]));
   // The names that serve the app first: a twin's block says where it sends
   // visitors, and over which scheme, so it is written after its target's.
@@ -397,9 +511,19 @@ async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
   // aside and tries again, so one broken name cannot hold back the rest. A
   // refusal it blames on nothing of ours is the operator's nginx being broken,
   // and nothing gets applied over it.
-  for (let attempt = 0; attempt <= rows.length; attempt++) {
+  for (let attempt = 0; attempt <= ours.size; attempt++) {
     const files = new Map<string, string>();
     const written = new Map<string, SiteInput>();
+    if (panel && panelName && !left.has(panelName)) {
+      try {
+        const site = panelSiteFor(found, panel, httpOnly.has(panelName));
+        globalRef.__runpanelPanelHstsTried = { hostname: panelName, maxAge: site.certificate ? site.hstsMaxAge : null };
+        files.set(siteFileName(panelName), renderPanelSite(site));
+      } catch (err) {
+        // A row the renderer refuses must not take every project's name down with it.
+        left.set(panelName, `Il blocco del pannello non è valido: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     for (const row of ordered) {
       if (left.has(row.hostname)) continue;
       let redirect: SiteInput["redirect"] = null;
@@ -440,7 +564,8 @@ async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
         return { ok: false, message: `nginx non si è ricaricato: ${lastLines(reload.output)}` };
       }
       swap.commit();
-      await recordApplied(rows, left, httpOnly);
+      await recordApplied(allRows, left, httpOnly, shadowed);
+      if (panel) await recordPanelApplied(panel.row, left, httpOnly);
       return {
         ok: true,
         message: left.size === 0 ? "Configurazione applicata." : `Applicata, tranne ${[...left.keys()].join(", ")}.`,
@@ -461,7 +586,9 @@ async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
     for (const name of certificates) {
       httpOnly.set(
         name,
-        "nginx non riesce a caricare il certificato di questo indirizzo, quindi è servito in HTTP. Rimuovi l'indirizzo e aggiungilo di nuovo per averne uno nuovo."
+        name === panelName
+          ? "nginx non riesce a caricare il certificato del pannello: disattiva l'HTTPS del pannello e riattivalo per averne uno nuovo. Il pannello intanto resta sul suo indirizzo di sempre."
+          : "nginx non riesce a caricare il certificato di questo indirizzo, quindi è servito in HTTP. Rimuovi l'indirizzo e aggiungilo di nuovo per averne uno nuovo."
       );
     }
     for (const name of blocks) {
@@ -472,11 +599,16 @@ async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
 }
 
 /** What the apply did to each name, and the certificate each one has on disk now. */
-async function recordApplied(rows: HostRow[], left: Map<string, string>, httpOnly: Map<string, string>): Promise<void> {
+async function recordApplied(
+  rows: HostRow[],
+  left: Map<string, string>,
+  httpOnly: Map<string, string>,
+  shadowed: ReadonlySet<string> = new Set()
+): Promise<void> {
   const db = await getDb();
   const now = nowIso();
   for (const row of rows) {
-    const reason = left.get(row.hostname) ?? httpOnly.get(row.hostname) ?? null;
+    const reason = shadowed.has(row.id) ? PANEL_TAKEN : (left.get(row.hostname) ?? httpOnly.get(row.hostname) ?? null);
     const certificate = reason ? null : certificateOnDisk(row.hostname);
     const update: Partial<ProjectHostsTable> = { apply_error: reason, updated_at: now };
     if (certificate) {
@@ -487,6 +619,19 @@ async function recordApplied(rows: HostRow[], left: Map<string, string>, httpOnl
     }
     await db.updateTable("project_hosts").set(update).where("id", "=", row.id).execute();
   }
+}
+
+/** The same for the panel's own name. A row turned off meanwhile updates nothing, and its block goes at the next apply. */
+async function recordPanelApplied(row: PanelHostsTable, left: Map<string, string>, httpOnly: Map<string, string>): Promise<void> {
+  const reason = left.get(row.hostname) ?? httpOnly.get(row.hostname) ?? null;
+  const certificate = reason ? null : certificateOnDisk(row.hostname);
+  const update: Partial<PanelHostsTable> = { apply_error: reason };
+  if (certificate) {
+    Object.assign(update, { status: "active", last_error: null, cert_expires_at: certificateExpiry(certificate.fullchain) });
+  } else if (row.status === "active") {
+    Object.assign(update, { status: "pending", cert_expires_at: null });
+  }
+  await setPanelHost(row.id, update);
 }
 
 /** Make nginx serve exactly what the store says. Safe to call after any change. */
@@ -704,16 +849,72 @@ export function issueWhenReady(hostIds: string[]): void {
     // The HTTP blocks first: the routing check below needs them live.
     await applyProxy();
     for (const subject of await loadDnsSubjects(hostIds)) {
-      if (subject.status !== "pending" || issuing.has(subject.id)) continue;
+      // An instant name stays on HTTP: there is no certificate to wait for.
+      if (subject.status !== "pending" || issuing.has(subject.id) || isInstantHostname(subject.hostname)) continue;
       const report = await hostDnsReport(subject, found);
       if (report.check.ready) issueCertificate(subject.id);
     }
   })().catch((err) => console.warn(`[proxy] ${err instanceof Error ? err.message : String(err)}`));
 }
 
+/** The panel's name as the DNS check needs it, with its domain's Cloudflare link read now. */
+export async function panelDnsSubject(row: PanelHostsTable): Promise<DnsSubject> {
+  const domain = await panelDomain(row.hostname);
+  return {
+    id: row.id,
+    hostname: row.hostname,
+    check_token: row.check_token,
+    apply_error: row.apply_error,
+    cloudflare: domain?.cloudflare ? 1 : 0,
+  };
+}
+
+/** The same gate for the panel's own name: its block now, its certificate once its record leads here. */
+export function issuePanelWhenReady(): void {
+  void (async () => {
+    const found = await proxyProbe();
+    if (found.state !== "ready") return;
+    await applyProxy();
+    const row = await loadPanelHost();
+    if (!row || row.status !== "pending" || issuing.has(row.id)) return;
+    const report = await hostDnsReport(await panelDnsSubject(row), found);
+    if (report.check.ready) issuePanelCertificate();
+  })().catch((err) => console.warn(`[proxy] ${err instanceof Error ? err.message : String(err)}`));
+}
+
+/**
+ * Whether a name still waiting is due for another look, and the look: the
+ * answer a page took a moment ago is as good as one taken now.
+ */
+async function lookAgain(subject: DnsSubject, createdAt: string, found: ProxyProbe, now: number): Promise<boolean> {
+  const age = now - Date.parse(createdAt);
+  const seen = dnsSeen.get(subject.id);
+  if (seen && now - seen.at < dnsRecheckAfter(Number.isNaN(age) ? 0 : age)) return seen.ready;
+  return (await hostDnsReport(subject, found)).check.ready;
+}
+
+/**
+ * The panel's HSTS follows its public address setting, which can also change
+ * from the settings form or the API without anything here being told — and
+ * steps up a week after adoption. Whenever what the block would say now is
+ * not what the last apply tried to write, apply again: within one sweep.
+ * Compared with what was tried rather than what succeeded, so an nginx that
+ * refuses every apply is not asked again every two minutes.
+ */
+async function syncPanelHsts(found: ProxyProbe): Promise<void> {
+  const panel = await loadPanelSite();
+  // Set aside by the last apply — its certificate unreadable, its name served elsewhere: another changes nothing.
+  if (!panel || panel.row.apply_error) return;
+  const site = panelSiteFor(found, panel, false);
+  const want = site.certificate ? site.hstsMaxAge : null;
+  const tried = globalRef.__runpanelPanelHstsTried;
+  if (!tried || tried.hostname !== panel.row.hostname || tried.maxAge !== want) applyProxySoon();
+}
+
 /** Every name waiting for its first certificate, looked at when it is due. */
 async function sweepWaiting(): Promise<void> {
   const found = await proxyProbe();
+  if (canApply(found)) await syncPanelHsts(found).catch(() => undefined);
   if (found.state !== "ready") return;
   const now = Date.now();
   for (const [id, seen] of dnsSeen) {
@@ -721,15 +922,13 @@ async function sweepWaiting(): Promise<void> {
   }
   for (const subject of await loadDnsSubjects()) {
     if (subject.status !== "pending" || subject.apply_error || issuing.has(subject.id)) continue;
-    const age = now - Date.parse(subject.created_at);
-    const seen = dnsSeen.get(subject.id);
-    if (seen && now - seen.at < dnsRecheckAfter(Number.isNaN(age) ? 0 : age)) {
-      // A page looked a moment ago: its answer is as good as one taken now.
-      if (seen.ready) issueCertificate(subject.id);
-      continue;
-    }
-    const report = await hostDnsReport(subject, found);
-    if (report.check.ready) issueCertificate(subject.id);
+    // Nothing to wait for, and sslip.io need not be asked about it every hour.
+    if (isInstantHostname(subject.hostname)) continue;
+    if (await lookAgain(subject, subject.created_at, found, now)) issueCertificate(subject.id);
+  }
+  const panel = await loadPanelHost();
+  if (panel && panel.status === "pending" && !panel.apply_error && !issuing.has(panel.id)) {
+    if (await lookAgain(await panelDnsSubject(panel), panel.created_at, found, now)) issuePanelCertificate();
   }
 }
 
@@ -762,30 +961,81 @@ function readText(file: string): string {
   }
 }
 
-async function issue(hostId: string): Promise<void> {
-  const found = await proxyProbe();
-  if (found.state !== "ready") {
-    await setHost(hostId, { status: "error", last_error: found.detail });
+/**
+ * What a certificate request needs to know of, and do to, the name it is for:
+ * a project's, or the panel's own. One request, two stores.
+ */
+interface IssueTarget {
+  id: string;
+  /** The name as it is now, with its domain's Cloudflare link; null once it is gone. */
+  load(): Promise<{ hostname: string; check_token: string; cloudflare: number } | null>;
+  /** Why the last apply left it out: null when it is served, undefined when it is gone. */
+  applyError(): Promise<string | null | undefined>;
+  set(values: { status: ProjectHostStatus; last_error: string | null }): Promise<void>;
+}
+
+function projectTarget(hostId: string): IssueTarget {
+  return {
+    id: hostId,
+    async load() {
+      const db = await getDb();
+      const row = await db
+        .selectFrom("project_hosts")
+        .innerJoin("domains", "domains.id", "project_hosts.domain_id")
+        .select(["project_hosts.hostname", "project_hosts.check_token", "domains.cloudflare"])
+        .where("project_hosts.id", "=", hostId)
+        .executeTakeFirst();
+      return row ?? null;
+    },
+    async applyError() {
+      const db = await getDb();
+      const row = await db.selectFrom("project_hosts").select("apply_error").where("id", "=", hostId).executeTakeFirst();
+      return row ? row.apply_error : undefined;
+    },
+    set: (values) => setHost(hostId, values),
+  };
+}
+
+function panelTarget(id: string): IssueTarget {
+  return {
+    id,
+    async load() {
+      const row = await panelHostById(id);
+      if (!row) return null;
+      const domain = await panelDomain(row.hostname);
+      return { hostname: row.hostname, check_token: row.check_token, cloudflare: domain?.cloudflare ? 1 : 0 };
+    },
+    async applyError() {
+      const row = await panelHostById(id);
+      return row ? row.apply_error : undefined;
+    },
+    set: (values) => setPanelHost(id, values),
+  };
+}
+
+async function issue(target: IssueTarget): Promise<void> {
+  const row = await target.load();
+  if (!row) return;
+  // Under a shared service no certificate is asked for — see `isInstantHostname`.
+  // Back to pending, which is what the page reads as "HTTP only".
+  if (isInstantHostname(row.hostname)) {
+    await target.set({ status: "pending", last_error: null });
     return;
   }
 
-  const db = await getDb();
-  const row = await db
-    .selectFrom("project_hosts")
-    .innerJoin("domains", "domains.id", "project_hosts.domain_id")
-    .selectAll("project_hosts")
-    .select("domains.cloudflare")
-    .where("project_hosts.id", "=", hostId)
-    .executeTakeFirst();
-  if (!row) return;
-  await setHost(hostId, { status: "issuing", last_error: null });
+  const found = await proxyProbe();
+  if (found.state !== "ready") {
+    await target.set({ status: "error", last_error: found.detail });
+    return;
+  }
+  await target.set({ status: "issuing", last_error: null });
 
   // The HTTP block has to be live before Let's Encrypt comes for the challenge.
   const applied = await applyProxy();
-  const served = await db.selectFrom("project_hosts").select("apply_error").where("id", "=", hostId).executeTakeFirst();
-  if (!served) return;
-  if (!applied.ok || served.apply_error) {
-    await setHost(hostId, { status: "error", last_error: served.apply_error ?? applied.message });
+  const served = await target.applyError();
+  if (served === undefined) return;
+  if (!applied.ok || served) {
+    await target.set({ status: "error", last_error: served ?? applied.message });
     return;
   }
 
@@ -794,7 +1044,7 @@ async function issue(hostId: string): Promise<void> {
   const challenge: Challenge = row.cloudflare === 1 ? "cloudflare" : "http";
   const env = challenge === "cloudflare" ? await cloudflareEnv() : null;
   if (challenge === "cloudflare" && !env) {
-    await setHost(hostId, {
+    await target.set({
       status: "error",
       last_error: "Il dominio è su Cloudflare, ma il pannello non ha più il token: ricollegalo dalla pagina Domini.",
     });
@@ -804,21 +1054,32 @@ async function issue(hostId: string): Promise<void> {
   const email = (await getSetting(ACME_EMAIL_SETTING))?.trim() || null;
   const result = await certbot(found, certbotIssueArgs(row.hostname, email, challenge), env ?? undefined);
 
-  const still = await db.selectFrom("project_hosts").select("id").where("id", "=", hostId).executeTakeFirst();
-  if (!still) {
-    // Deleted while certbot was working: nothing is left to use what it issued.
-    if (result.ok) await certbot(found, certbotDeleteArgs(row.hostname));
+  // Gone, or the panel's name turned off and another chosen, while certbot was working.
+  const still = await target.load();
+  if (!still || still.hostname !== row.hostname) {
+    // Nothing is left to use what it issued — unless the same name was given back meanwhile, which this checks.
+    if (result.ok) forgetCertificate(row.hostname);
     return;
   }
   if (!result.ok) {
     const why = certbotFailure(result.output);
-    await setHost(hostId, { status: "error", last_error: !routing || routing.reaches ? why : `${routing.detail} ${why}` });
+    await target.set({ status: "error", last_error: !routing || routing.reaches ? why : `${routing.detail} ${why}` });
     return;
   }
 
   // Now with the certificate: the same apply writes the HTTPS block and marks it active.
   const withTls = await applyProxy();
-  if (!withTls.ok) await setHost(hostId, { status: "error", last_error: withTls.message });
+  if (!withTls.ok) await target.set({ status: "error", last_error: withTls.message });
+}
+
+function startIssue(target: IssueTarget): void {
+  if (issuing.has(target.id)) return;
+  issuing.add(target.id);
+  void issue(target)
+    .catch(async (err) => {
+      await target.set({ status: "error", last_error: err instanceof Error ? err.message : String(err) }).catch(() => undefined);
+    })
+    .finally(() => issuing.delete(target.id));
 }
 
 /**
@@ -826,15 +1087,16 @@ async function issue(hostId: string): Promise<void> {
  * minute, so the route answers at once and the page follows `status`.
  */
 export function issueCertificate(hostId: string): void {
-  if (issuing.has(hostId)) return;
-  issuing.add(hostId);
-  void issue(hostId)
-    .catch(async (err) => {
-      await setHost(hostId, { status: "error", last_error: err instanceof Error ? err.message : String(err) }).catch(
-        () => undefined
-      );
+  startIssue(projectTarget(hostId));
+}
+
+/** The same for the panel's own name, whichever row it is now. */
+export function issuePanelCertificate(): void {
+  void loadPanelHost()
+    .then((row) => {
+      if (row) startIssue(panelTarget(row.id));
     })
-    .finally(() => issuing.delete(hostId));
+    .catch(() => undefined);
 }
 
 /**
@@ -846,7 +1108,9 @@ export async function issuePending(): Promise<number> {
   const db = await getDb();
   const rows = await db.selectFrom("project_hosts").select("id").where("status", "=", "pending").execute();
   issueWhenReady(rows.map((row) => row.id));
-  return rows.length;
+  const panel = await loadPanelHost();
+  if (panel?.status === "pending") issuePanelWhenReady();
+  return rows.length + (panel?.status === "pending" ? 1 : 0);
 }
 
 export interface CloudflareStatus {
@@ -887,18 +1151,42 @@ export async function syncCloudflare(fresh = false): Promise<CloudflareStatus> {
       .where("status", "in", ["pending", "error"])
       .execute();
     for (const host of waiting) issueCertificate(host.id);
+    // The panel's name too, when it sits on one of them.
+    const panel = await loadPanelHost();
+    const domain = panel && (panel.status === "pending" || panel.status === "error") ? await panelDomain(panel.hostname) : null;
+    if (domain && linked.includes(domain.id)) issuePanelCertificate();
   }
   return { connected: true, zones: outcome.zones, error: null };
 }
 
-/** After a name is deleted: its certificate is of no use to anything else. */
+/** Whether a name is still given to a project or to the panel. */
+async function hostnameInUse(hostname: string): Promise<boolean> {
+  const db = await getDb();
+  const [project, panel] = await Promise.all([
+    db.selectFrom("project_hosts").select("id").where("hostname", "=", hostname).executeTakeFirst(),
+    db.selectFrom("panel_hosts").select("id").where("hostname", "=", hostname).executeTakeFirst(),
+  ]);
+  return project !== undefined || panel !== undefined;
+}
+
+/**
+ * After a name is deleted: its certificate is of no use to anything else —
+ * unless the name was given back meanwhile (turned off and on again, or moved
+ * to another project), or its block is still the one nginx loads because the
+ * apply that should have removed it was refused. Deleting it then would leave
+ * nginx pointing at files that are gone, and the next restart of nginx would
+ * fail for every name on the server.
+ *
+ * In the apply chain, so neither can change while it looks.
+ */
 export function forgetCertificate(hostname: string): void {
-  void (async () => {
+  void serialised(async () => {
     const found = await proxyProbe();
-    if (found.state === "ready" && certificateOnDisk(hostname)) {
-      await certbot(found, certbotDeleteArgs(hostname));
-    }
-  })().catch(() => undefined);
+    if (found.state !== "ready" || !certificateOnDisk(hostname)) return;
+    if (await hostnameInUse(hostname)) return;
+    if (fs.existsSync(path.join(SITES_DIR, siteFileName(hostname)))) return;
+    await certbot(found, certbotDeleteArgs(hostname));
+  }).catch(() => undefined);
 }
 
 export interface SetupResult {
@@ -940,12 +1228,22 @@ async function renew(): Promise<void> {
   const found = await proxyProbe();
   if (found.state !== "ready") return;
   const db = await getDb();
-  const active = await db
-    .selectFrom("project_hosts")
-    .innerJoin("domains", "domains.id", "project_hosts.domain_id")
-    .select(["project_hosts.hostname", "domains.cloudflare"])
-    .where("project_hosts.status", "=", "active")
-    .execute();
+  const [projects, panel] = await Promise.all([
+    db
+      .selectFrom("project_hosts")
+      .innerJoin("domains", "domains.id", "project_hosts.domain_id")
+      .select(["project_hosts.hostname", "domains.cloudflare"])
+      .where("project_hosts.status", "=", "active")
+      .execute(),
+    loadPanelHost(),
+  ]);
+  // The panel's certificate is in the same directory, so the same `certbot
+  // renew` covers it; it only has to count here, or a panel whose name is the
+  // only one would never renew at all.
+  const active =
+    panel?.status === "active"
+      ? [...projects, { hostname: panel.hostname, cloudflare: (await panelDomain(panel.hostname))?.cloudflare ? 1 : 0 }]
+      : projects;
   if (active.length === 0) return;
 
   // The token only when a name on Cloudflare is among those renewed: one
@@ -991,11 +1289,9 @@ export function startProxyRenewal(): void {
  */
 export async function reconcileProxy(): Promise<void> {
   const db = await getDb();
-  await db
-    .updateTable("project_hosts")
-    .set({ status: "error", last_error: "Interrotto da un riavvio del pannello: riprova.", updated_at: nowIso() })
-    .where("status", "=", "issuing")
-    .execute();
+  const interrupted = { status: "error" as const, last_error: "Interrotto da un riavvio del pannello: riprova.", updated_at: nowIso() };
+  await db.updateTable("project_hosts").set(interrupted).where("status", "=", "issuing").execute();
+  await db.updateTable("panel_hosts").set(interrupted).where("status", "=", "issuing").execute();
 
   const found = await proxyProbe();
   if (!canApply(found)) return;

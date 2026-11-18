@@ -31,7 +31,7 @@ La preparazione aggiunge un solo file alla configurazione di nginx, `/etc/nginx/
 
 La strada systemd non è un giro inutile: la unit di RunPanel imposta `NoNewPrivileges=yes`, con cui sudo non può funzionare — ed è un'impostazione da tenere, perché impedisce anche a ogni progetto nativo sotto il pannello di usare sudo.
 
-Cancellare `/etc/nginx/conf.d/runpanel.conf` e ricaricare spegne in un colpo tutti i nomi gestiti.
+Cancellare `/etc/nginx/conf.d/runpanel.conf` e ricaricare spegne in un colpo tutti i nomi gestiti — anche il nome HTTPS del pannello, mentre il pannello resta sulla sua porta.
 
 ## Dare un indirizzo a un progetto
 
@@ -94,11 +94,44 @@ nginx inoltra alla porta su cui l'app ascolta davvero, in loopback, passando `Ho
 
 Gli indirizzi su cui risponde un progetto compaiono anche sotto il suo titolo, così si apre con un clic senza passare dalle Impostazioni; un lucchetto segna quelli protetti da password.
 
+## Il pannello stesso in HTTPS
+
+Il pannello può aprirsi da un tuo nome, con il lucchetto — `https://pannello.esempio.it` invece di `http://203.0.113.7:3000` — con gli stessi nginx e certbot. Solo il proprietario, da **Impostazioni › Pannello › Metti il pannello su HTTPS**:
+
+1. Con nginx e certbot pronti (la sezione mostra lo stesso passaggio di preparazione della pagina **Domini**), scegli un nome: una parola sotto uno dei domini del pannello, oppure un nome scritto per intero, per un dominio gestito altrove.
+2. Il record DNS da creare viene mostrato e verificato dal vivo, come per l'indirizzo di un progetto; il certificato si chiede appena il record porta qui.
+3. Con il certificato il nome viene provato due volte. Dal server: a nginx su questa macchina si chiede il nome in TLS, il certificato deve essere valido per quel nome, deve rispondere il blocco del pannello e dietro deve esserci il pannello. Dal tuo browser: deve raggiungere `https://<nome>` e trovarci il token di questo server — DNS, firewall sulla 443 e certificato, come li vede la tua rete.
+4. Solo allora il pannello propone di farne il suo **indirizzo pubblico** (**Impostazioni › Pannello › Indirizzo pubblico**): i webhook GitHub collegati da lì in poi, i link nelle notifiche, l'indirizzo dato a un server che entra nel cluster.
+
+**Non si toglie niente.** Il pannello continua ad ascoltare sulla sua porta e l'indirizzo che usi adesso continua a funzionare: il nome è un ingresso in più. I webhook già registrati su GitHub restano sul vecchio indirizzo finché non premi **Riallinea** nella sezione Webhook di ogni progetto. **Disattiva** toglie il blocco, poi il certificato, e — se il nome era l'indirizzo pubblico — rimette quello che l'impostazione conteneva prima. Se lo disattivi dal nome stesso, la pagina mostra dove il pannello resta raggiungibile: la sua porta, sugli indirizzi pubblici del server.
+
+**Cosa fa il blocco.** La porta 80 risponde a Let's Encrypt e alla verifica del percorso e, prima del certificato, a chiunque altro dice che sta arrivando: sul nome il pannello non è mai servito in HTTP in chiaro. La 443 inoltra alla porta del pannello in loopback con il buffering spento nei due sensi (gli eventi dal vivo della pagina del progetto, un upload che passa direttamente), un'ora tra una lettura e l'altra, i WebSocket e nessun limite di dimensione di nginx: ogni route del pannello ha già il suo. Risponde solo per il suo nome (`421` per qualsiasi altro), così se diventa il server di default di nginx non consegna il pannello a ogni nome che arriva alla macchina. Il pannello deve rispondere su `127.0.0.1:<porta>`, e non sulla 80 o sulla 443: altrimenti lo dice prima di scrivere qualsiasi cosa.
+
+**Header inoltrati.** nginx imposta `Host`, `X-Forwarded-Proto`, `X-Forwarded-Host` e `X-Forwarded-For` sostituendo quelli mandati dal visitatore — `X-Forwarded-For` è l'indirizzo di chi si collega, non aggiunto in coda — quindi passando dal nome nessuno può dare al pannello valori scelti da lui. Il pannello li usa come dietro qualsiasi proxy: `Origin` confrontato con `Host` o `X-Forwarded-Host` per il controllo dell'origine, `Origin` (o `X-Forwarded-Proto`) per il flag `Secure` del cookie di sessione, ed entrambi decidono solo della richiesta che li porta. `X-Forwarded-For`, l'indirizzo del visitatore per il limite di accessi per indirizzo, viene letto solo con `RUNPANEL_TRUSTED_PROXY_HOPS=1` (vedi [Configurazione](configuration.md#metterlo-su-internet)): lascialo a `0` finché la porta del pannello è raggiungibile da fuori, perché lì l'header lo scrive il client, e mettilo a `1` quando alla porta arriva solo nginx.
+
+**HSTS.** L'header del pannello (due anni, `includeSubDomains`) non viene passato: su un nome come `esempio.it` obbligherebbe all'HTTPS ogni progetto del dominio, compresi quelli che aspettano ancora il certificato. nginx manda il suo, senza `includeSubDomains`, e solo quando il nome è l'indirizzo pubblico: un giorno per la prima settimana, due anni dopo (il passaggio avviene pochi minuti dopo la fine della settimana). Provare il nome non manda niente, e un nome disattivato nella prima settimana i browser lo dimenticano entro un giorno. Finché vale, i browser che hanno aperto il nome usano solo HTTPS per quel nome, su qualsiasi porta: `http://pannello.esempio.it:3000` non si apre più da quei browser; l'IP del server sì. Se l'indirizzo pubblico viene cambiato a mano, nginx si adegua entro due minuti.
+
+**Lo stesso nome in http.** I browser tengono un solo gruppo di cookie per nome, qualunque sia la porta, e rifiutano un cookie in http che ne sostituirebbe uno sicuro. Dopo un accesso su `https://pannello.esempio.it`, quel browser non riesce ad accedere da `http://pannello.esempio.it:3000` finché non esce dall'indirizzo HTTPS o quella sessione scade (7 giorni). La sezione lo avvisa quando vede il pannello usato così; l'indirizzo IP non ne risente.
+
+**Più server.** Ogni server ha il suo nome, impostato dalle sue impostazioni (lo scegli con il selettore dei server). Gli altri server continuano a raggiungerlo all'indirizzo con cui è stato collegato: il nome non lo cambia. Se quell'indirizzo è proprio il nome — chi si collega dopo che il nome è diventato l'indirizzo pubblico riceve quello — disattivarlo taglia fuori gli altri finché l'indirizzo non viene cambiato, e **Disattiva** lo dice prima.
+
+## Un indirizzo di prova senza dominio
+
+Un progetto che non ha ancora indirizzi ne può avere uno subito, da **Impostazioni › Indirizzi › Non ho un dominio: indirizzo di prova**: `app.203-0-113-7.sslip.io`. [sslip.io](https://sslip.io) risponde a ogni nome di questo tipo con l'indirizzo scritto dentro, quindi non c'è nessun record DNS da creare.
+
+È servito **solo in HTTP**, e la finestra lo dice prima di crearlo:
+
+- sslip.io — e nip.io, gestito dalle stesse persone — non è nella Public Suffix List, quindi Let's Encrypt conta ogni certificato di ogni suo nome su un unico limite settimanale condiviso con chiunque lo usi. Il servizio se l'è fatto alzare a mano, fino a 250.000, e nel 2026 si è esaurito comunque pochi giorni dopo un aumento. Un certificato che può arrivare o no non è una promessa che il pannello fa: non ne chiede nessuno, per nessun nome sotto quei servizi.
+- Il nome mostra l'IP del server, alle ricerche DNS del nome rispondono i server di sslip.io, e tutto dipende da un servizio gratuito gestito da volontari: se sslip.io smette di rispondere, l'indirizzo smette di funzionare. Un certificato avrebbe anche pubblicato il nome nei registri pubblici di Certificate Transparency, dove gli scanner trovano i siti nuovi in pochi minuti.
+
+Per qualsiasi cosa vera, dai al progetto un dominio suo. Un indirizzo di prova si rimuove come gli altri; se l'IP del server cambia continua a puntare al vecchio, quindi rimuovilo e creane uno nuovo. Il dominio del server (`203-0-113-7.sslip.io`) compare nella pagina **Domini**, senza record da creare. Un nome sotto sslip.io che aveva già il suo certificato prima di questa versione lo tiene e continua a rinnovarlo — un rinnovo non conta su quel limite — ma non se ne chiedono di nuovi.
+
 ## Cosa viene rifiutato
 
 - Un nome già servito da un altro blocco di nginx: nginx ne terrebbe uno solo e vincerebbe quello gestito, quindi il pannello lo lascia fuori e lo scrive sotto l'indirizzo.
-- L'indirizzo del pannello stesso (**Impostazioni › Pannello › Indirizzo pubblico**), anche come gemello `www`.
-- Un indirizzo assegnato due volte, un progetto senza porta (si imposta nel campo **Porta** delle impostazioni del progetto), un dominio ancora in uso, un gemello `www` per un sottodominio diverso da `www`.
+- L'indirizzo del pannello stesso (**Impostazioni › Pannello › Indirizzo pubblico**) e il suo nome HTTPS, anche come gemello `www`.
+- Un indirizzo assegnato due volte, un progetto senza porta (si imposta nel campo **Porta** delle impostazioni del progetto), un dominio ancora in uso — da un progetto o dal nome del pannello — un gemello `www` per un sottodominio diverso da `www`.
+- Come nome del pannello: il nome di un progetto, un nome locale, un nome sotto sslip.io o nip.io.
 
 ## Limiti
 

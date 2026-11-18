@@ -6,7 +6,8 @@ import { getSetting } from "@/lib/settings";
 import { generateId } from "@/lib/utils";
 import { createDomainSchema } from "@/lib/validation";
 import { isVisible, visibleProjectIds } from "@/lib/principal";
-import { ACME_EMAIL_SETTING, hostView, proxyProbe, serverAddresses, syncCloudflare } from "@/services/proxy";
+import { ACME_EMAIL_SETTING, hostView, panelHostView, proxyProbe, serverAddresses, syncCloudflare } from "@/services/proxy";
+import { loadPanelHost } from "@/services/proxy/panel-store";
 
 /**
  * The Domains page: what this server's nginx can do, the domains it answers
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
   // First, because it may link or unlink a domain, and the list below should say so.
   const cloudflare = await syncCloudflare(fresh);
   const db = await getDb();
-  const [proxy, acmeEmail, domains, hosts, visible, server] = await Promise.all([
+  const [proxy, acmeEmail, domains, hosts, visible, server, panel] = await Promise.all([
     proxyProbe(fresh),
     getSetting(ACME_EMAIL_SETTING),
     db.selectFrom("domains").selectAll().orderBy("name", "asc").execute(),
@@ -37,7 +38,9 @@ export async function GET(request: NextRequest) {
       .execute(),
     visibleProjectIds(denied.principal),
     serverAddresses(fresh),
+    loadPanelHost(),
   ]);
+  const panelHost = panel ? panelHostView(panel) : null;
 
   return NextResponse.json({
     proxy,
@@ -60,6 +63,17 @@ export async function GET(request: NextRequest) {
       hostCount: hosts.filter((host) => host.domain_id === domain.id).length,
     })),
     hosts: hosts.filter((host) => isVisible(visible, host.project_id)).map(hostView),
+    // The panel's own name is managed here too, so it is listed — what it is
+    // and where its certificate stands, not its token: that one is the owner's.
+    panelHost: panelHost
+      ? {
+          hostname: panelHost.hostname,
+          status: panelHost.status,
+          certificate: panelHost.certificate,
+          certificateDaysLeft: panelHost.certificateDaysLeft,
+          applyError: panelHost.applyError,
+        }
+      : null,
   });
 }
 

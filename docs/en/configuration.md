@@ -43,7 +43,9 @@ Added under **Impostazioni › Pannello › Registry privati**. Credentials are 
 
 ## Putting it on the internet
 
-Terminate TLS in front of the panel and tell it how many proxies it sits behind:
+The simplest way is the panel's own: **Impostazioni › Pannello › Metti il pannello su HTTPS** puts it behind the nginx it already manages for the projects, with a Let's Encrypt certificate (see [Domains](domains.md#the-panel-itself-over-https)). Its port stays open, so there leave `RUNPANEL_TRUSTED_PROXY_HOPS` at `0` until only nginx can reach that port: otherwise whoever uses it directly would choose the address the panel sees.
+
+With a proxy of your own, terminate TLS in front of the panel and tell it how many proxies it sits behind:
 
 ```bash
 RUNPANEL_TRUSTED_PROXY_HOPS=1

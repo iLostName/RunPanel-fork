@@ -1248,6 +1248,27 @@ export const hostActionSchema = z.object({ action: z.literal("retry") });
 export const proxyActionSchema = z.object({ action: z.enum(["setup", "apply"]) });
 
 /**
+ * The panel's own HTTPS name: a domain of the panel and the label under it, or
+ * a name typed whole for a domain the panel does not manage. Both canonical
+ * on the way in, like a project's name.
+ */
+export const panelHostnameSchema = z
+  .object({
+    domainId: z.string().min(1).max(32).optional(),
+    subdomain: subdomainSchema.optional(),
+    hostname: domainNameSchema.optional(),
+  })
+  .strict()
+  .refine((body) => (body.hostname !== undefined) !== (body.domainId !== undefined && body.subdomain !== undefined), {
+    message: "Scegli un dominio e il nome sotto di esso, oppure scrivi l'indirizzo intero",
+  });
+
+/** The one word in front of an instant address: `app` in `app.203-0-113-7.sslip.io`. */
+export const instantHostSchema = z.object({
+  label: subdomainSchema.refine((label) => label !== "", { message: "Scegli un nome, per esempio app" }),
+});
+
+/**
  * A Cloudflare API token, as pasted. It only ever travels as a bearer header and
  * through the environment of certbot's hook — never a command line — but it is
  * kept to printable ASCII so a stray newline cannot split either.

@@ -172,6 +172,53 @@ export async function run({ base }) {
   res = await owner.call(`/api/projects/${otherId}/hosts`, json("POST", { domainId, subdomain: "panel" }));
   r.check("a project cannot take the panel's address", res.status === 409, show(res));
 
+  // --- the panel's own name over HTTPS ---------------------------------------------------------
+  // Like the rest, only the contract: a test instance never writes nginx.
+  res = await owner.call("/api/panel-https");
+  r.check("the panel starts with no HTTPS name", res.status === 200 && res.body.panelHost === null && res.body.adopted === false, show(res));
+  r.check("and says where it stays reachable", Array.isArray(res.body.direct) && typeof res.body.port === "number" && res.body.proxy?.state === "disabled", show(res));
+  r.check("its own domains are offered for the name", res.body.domains?.some((domain) => domain.id === domainId), show(res));
+  res = await owner.call("/api/panel-https", json("PUT", { domainId, subdomain: "pannello" }));
+  r.check("a name is refused while the proxy is disabled", res.status === 409 && typeof res.body.error === "string", show(res));
+  res = await owner.call("/api/panel-https", json("PUT", { hostname: "app.203-0-113-7.sslip.io" }));
+  r.check("a test address is never the panel's name", res.status === 409 && /sslip/.test(res.body.error ?? ""), show(res));
+  res = await owner.call("/api/panel-https", json("PUT", { hostname: "app.esempio.it" }));
+  r.check("nor a project's name", res.status === 409, show(res));
+  for (const [label, body] of [
+    ["no name at all", {}],
+    ["a name that is no domain", { hostname: "localhost" }],
+    ["both a domain and a whole name", { domainId, subdomain: "pannello", hostname: "pannello.esempio.it" }],
+    ["an unknown field", { hostname: "pannello.esempio.it", port: 80 }],
+  ]) {
+    res = await owner.call("/api/panel-https", json("PUT", body));
+    r.check(`${label} is a 400`, res.status === 400, show(res));
+  }
+  for (const [method, path] of [
+    ["GET", "/api/panel-https/dns"],
+    ["GET", "/api/panel-https/verify"],
+    ["POST", "/api/panel-https/certificate"],
+    ["POST", "/api/panel-https/public-url"],
+    ["DELETE", "/api/panel-https"],
+  ]) {
+    res = await owner.call(path, { method });
+    r.check(`${method} ${path} without a name is a 404`, res.status === 404, show(res));
+  }
+
+  // --- a test address without a domain ----------------------------------------------------------
+  res = await owner.call(`/api/projects/${otherId}/hosts/instant`);
+  r.check(
+    "a test address says why it is not offered while the proxy is disabled",
+    res.status === 200 && res.body.available === false && typeof res.body.reason === "string" && res.body.provider === "sslip.io",
+    show(res)
+  );
+  r.check("with a label to start from", typeof res.body.suggestedLabel === "string" && res.body.suggestedLabel.length > 0, show(res));
+  res = await owner.call(`/api/projects/${otherId}/hosts/instant`, json("POST", { label: "altro" }));
+  r.check("and is not created", res.status === 409, show(res));
+  for (const bad of ["", "a.b", "-x"]) {
+    res = await owner.call(`/api/projects/${otherId}/hosts/instant`, json("POST", { label: bad }));
+    r.check(`the test label ${JSON.stringify(bad)} is a 400`, res.status === 400, show(res));
+  }
+
   // --- the domain itself ---------------------------------------------------------------------
   res = await owner.call(`/api/projects/${otherId}/hosts`, json("POST", { domainId, subdomain: "" }));
   r.check("an empty subdomain assigns the domain itself", res.status === 201 && res.body.host?.hostname === "esempio.it", show(res));
@@ -275,6 +322,12 @@ export async function run({ base }) {
   r.check("not through a project it cannot see", res.status === 404, show(res));
   res = await dev.call(`/api/projects/${projectId}/hosts`, json("POST", { domainId, subdomain: "dev" }));
   r.check("read access cannot assign a name", res.status === 403, show(res));
+  res = await dev.call(`/api/projects/${projectId}/hosts/instant`, json("POST", { label: "dev" }));
+  r.check("nor a test address", res.status === 403, show(res));
+  res = await dev.call("/api/panel-https");
+  r.check("the panel's HTTPS name is the owner's alone", res.status === 403, show(res));
+  res = await dev.call("/api/panel-https", json("PUT", { hostname: "pannello.esempio.it" }));
+  r.check("and so is choosing it", res.status === 403, show(res));
   res = await dev.call(`/api/projects/${otherId}/hosts`);
   r.check("a project the account cannot see answers 404", res.status === 404, show(res));
 

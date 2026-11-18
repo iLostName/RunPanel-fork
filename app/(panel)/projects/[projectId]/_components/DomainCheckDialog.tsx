@@ -15,10 +15,11 @@ import { cn } from "@/lib/utils";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
+import { isInstantHostname } from "@/lib/proxy-names";
 import { AddressBadge, addressDetail } from "@/app/(panel)/domains/_components/AddressStatus";
 import { PROXY_SERVES, ProxySetup, type ProxyInfo } from "@/app/(panel)/domains/_components/ProxySetup";
 import type { HostView } from "@/services/proxy";
-import { DomainDnsRecords, type DnsName } from "./DomainDnsRecords";
+import { DnsVerdictBadge, DomainDnsRecords, type DnsName } from "./DomainDnsRecords";
 
 interface DnsData {
   proxy: { state: string; detail: string };
@@ -151,6 +152,8 @@ function CheckBody({
   const live =
     names.length > 0 ? names.map((name) => hosts.find((h) => h.id === name.hostId)).filter((h): h is HostView => !!h) : [host];
   const serves = PROXY_SERVES.has(proxy.state);
+  // An instant address has no record to create and no certificate to wait for.
+  const instant = isInstantHostname(host.hostname);
 
   const retry = useCallback(
     async (hostId: string, quiet = false) => {
@@ -176,14 +179,14 @@ function CheckBody({
   // Once per name and opening: a record that turned right asks for its certificate now.
   const asked = useRef(new Set<string>());
   useEffect(() => {
-    if (!canEdit || proxy.state !== "ready") return;
+    if (!canEdit || proxy.state !== "ready" || instant) return;
     for (const name of names) {
       const current = hosts.find((h) => h.id === name.hostId);
       if (!current || current.status !== "pending" || !name.check.ready || asked.current.has(name.hostId)) continue;
       asked.current.add(name.hostId);
       void retry(name.hostId, true);
     }
-  }, [names, hosts, canEdit, proxy.state, retry]);
+  }, [names, hosts, canEdit, proxy.state, retry, instant]);
 
   const dnsTone: StepTone = !data ? "waiting" : names.every(settled) ? "done" : names.some((n) => n.check.state === "elsewhere") ? "problem" : "waiting";
   const certificates = live.map((h) => h.certificate ?? (h.status === "active" ? "active" : "missing"));
@@ -218,6 +221,29 @@ function CheckBody({
             <LoadError what="il controllo del DNS" error={error} onRetry={() => void refresh()} />
           ) : !data ? (
             <SkeletonBlock className="h-40" />
+          ) : instant ? (
+            <div className="space-y-3">
+              <p className="text-muted text-sm">
+                Nessun record da creare: sslip.io risponde da solo, con l&apos;IP che c&apos;è nel nome.
+              </p>
+              {names.map((name) => (
+                <div key={name.hostId} className="space-y-1">
+                  <p className="flex flex-wrap items-center gap-2">
+                    <span className="text-foreground font-mono text-sm">{name.hostname}</span>
+                    <DnsVerdictBadge name={name} />
+                  </p>
+                  <p className="text-muted text-xs">
+                    {name.check.state === "elsewhere"
+                      ? "Porta a un altro IP: l'indirizzo del server è cambiato. Rimuovi questo indirizzo e creane uno nuovo."
+                      : name.check.summary}
+                  </p>
+                </div>
+              ))}
+              <Button size="sm" variant="secondary" onPress={() => void refresh()} isPending={refreshing}>
+                <Icon icon="solar:refresh-linear" width={16} aria-hidden />
+                Verifica ora
+              </Button>
+            </div>
           ) : (
             <>
               <p className="text-muted text-sm">
@@ -261,7 +287,13 @@ function CheckBody({
           )}
         </Step>
 
-        <Step title="Il certificato HTTPS" tone={certTone}>
+        <Step title="Il certificato HTTPS" tone={instant ? "waiting" : certTone}>
+          {instant && (
+            <Hint title="Gli indirizzi di prova restano in HTTP">
+              sslip.io è condiviso da tutti quelli che lo usano, e Let&apos;s Encrypt conta i loro certificati su un unico
+              limite: il lucchetto non sarebbe una promessa mantenibile. Per l&apos;HTTPS dai al progetto un tuo dominio.
+            </Hint>
+          )}
           <ul className="space-y-3">
             {live.map((current) => (
               <li key={current.id} className="space-y-1">
@@ -281,6 +313,7 @@ function CheckBody({
                   <p className="text-muted text-xs">Valido fino al {formatWhen(current.certExpiresAt)}.</p>
                 )}
                 {canEdit &&
+                  !instant &&
                   proxy.state === "ready" &&
                   (current.status === "error" || current.status === "pending" || current.certificate === "expiring" || current.certificate === "expired") && (
                     <Button size="sm" variant="ghost" onPress={() => void retry(current.id)}>

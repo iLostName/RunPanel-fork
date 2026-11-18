@@ -22,6 +22,7 @@ import {
   type PollInterval,
 } from "@/lib/polling";
 import { useNode, useNodeApi } from "@/lib/hooks/useNode";
+import { PanelHttpsSection } from "./_components/PanelHttps";
 
 /**
  * What the panel does for everyone, as opposed to Account, which is yours.
@@ -218,7 +219,8 @@ export default function PanelSettingsPage() {
               Da qui il pannello ricava l&apos;URL dei webhook GitHub. Lascialo vuoto per dedurlo
               dalla richiesta: va bene finché lo apri dallo stesso indirizzo da cui lo raggiunge
               GitHub. Se il pannello non è raggiungibile da internet, usa il controllo periodico
-              nelle impostazioni del progetto.
+              nelle impostazioni del progetto. Per un indirizzo con il lucchetto, vedi{" "}
+              <strong className="text-foreground">Metti il pannello su HTTPS</strong> qui sotto.
             </FieldHint>
           </div>
 
@@ -263,6 +265,13 @@ export default function PanelSettingsPage() {
             </div>
           </Panel>
         )}
+
+        {/*
+          The panel's own name over HTTPS. Below the preferences because it can
+          change the public address above: it reports back, so a later "Salva
+          preferenze" sends the new value instead of the one this page loaded.
+        */}
+        {me.isOwner && <PanelHttpsSection onPublicUrlChange={setPublicUrl} />}
 
         {me.isOwner && (
           <Section title="Colore d'accento" summary="Il colore delle azioni principali e della selezione">
