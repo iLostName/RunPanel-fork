@@ -57,6 +57,15 @@ export default async function PanelLayout({
     <PollingProvider>
     <PanelUpdateProvider>
     <div className="min-h-dvh">
+      {/* First in the tab order and invisible until focused: whoever navigates
+          by keyboard skips the sidebar instead of tabbing through it on every
+          page. */}
+      <a
+        href="#main"
+        className="bg-accent text-accent-foreground sr-only z-[60] rounded-[var(--radius)] px-3 py-2 text-sm font-medium focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
+      >
+        Vai al contenuto
+      </a>
       <AppSidebar version={(await panelRelease()).label} />
       <MobileNav />
       <div className="md:ml-64">
@@ -71,7 +80,7 @@ export default async function PanelLayout({
             The bottom padding below `md` clears the navigation bar: without it
             the last row of every list sits underneath it, and on a long page
             that is the row you scrolled down to reach. */}
-        <main className="mx-auto w-full max-w-[1400px] px-4 pt-6 pb-24 sm:px-6 md:pb-6 lg:px-8">
+        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1400px] px-4 pt-6 pb-24 outline-none sm:px-6 md:pb-6 lg:px-8">
           <PageAccess>{children}</PageAccess>
         </main>
       </div>

@@ -227,7 +227,7 @@ export default function LoginPage() {
                 <li key={p.url}>
                   <a
                     href={`${p.url}/login`}
-                    className="border-border bg-surface-2 hover:bg-surface-3 flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
+                    className="border-border bg-surface-secondary hover:bg-surface-hover flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
                   >
                     <span className="text-foreground font-medium">{p.name}</span>
                     <span className="text-muted font-mono text-xs">{p.url}</span>

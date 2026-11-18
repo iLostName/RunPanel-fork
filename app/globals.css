@@ -29,7 +29,7 @@
    * being a different number. Declaring it here gives the step a name and makes
    * it the only way to go smaller than `xs`.
    *
-   * Six steps, one job each, and no others: `text-xl` page title, `text-base`
+   * Six steps, one job each, and no others: `text-2xl` page title, `text-base`
    * dialog heading, `text-sm` body and controls, `text-xs` secondary
    * description, `text-meta` field hints and row metadata.
    *
@@ -439,5 +439,24 @@
    */
   .toggle-button[data-selected="true"]:not(:focus-visible):not([data-focus-visible="true"]) {
     box-shadow: var(--selected-ring);
+  }
+}
+
+/*
+ * Motion for whoever asked the system for less of it.
+ *
+ * The panel pulses status dots, slides drawers and fades toasts. None of that is
+ * information that exists only in the motion — every pulse sits next to a word —
+ * so all of it can stop. Durations go to almost nothing rather than to zero so
+ * the libraries that wait for `transitionend` still get one.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

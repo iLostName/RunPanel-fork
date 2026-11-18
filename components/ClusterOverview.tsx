@@ -109,7 +109,7 @@ export function ServerCardView({ server: s, active, onSelect }: { server: Server
       onClick={onSelect}
       aria-pressed={active}
       className={cn(
-        "border-border bg-surface hover:bg-surface-2 w-full rounded-xl border p-4 text-left transition-colors",
+        "border-border bg-surface hover:bg-surface-hover w-full rounded-xl border p-4 text-left transition-colors",
         active && "border-accent/60 bg-accent/5"
       )}
     >
