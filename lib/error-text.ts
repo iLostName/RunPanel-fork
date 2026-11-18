@@ -66,3 +66,18 @@ export function refusalNote(raw: string | null): string {
   const { text, forbidden } = readableError(raw);
   return forbidden ? "" : ` (${text})`;
 }
+
+/**
+ * Whether a failed load means the thing is gone, rather than that loading failed.
+ *
+ * The pages decided this three different ways (an exact `"HTTP 404"`, a
+ * substring, not at all), so a project deleted in another tab showed "riprova"
+ * on one page and "non esiste" on another. A 404 from `useResource`, a
+ * forwarded one from another server, or a route's own "non trovato" all count.
+ */
+export function isNotFound(raw: string | null | undefined): boolean {
+  if (!raw) return false;
+  const http = HTTP_STATUS.exec(raw);
+  if (http) return http[1] === "404";
+  return /\bnon trovat[oa]\b/i.test(raw);
+}

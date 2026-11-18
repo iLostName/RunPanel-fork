@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Popover } from "@heroui/react";
+import { Button, Popover, Tooltip } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
 
@@ -58,5 +58,52 @@ export function InfoTip({
         </Popover.Dialog>
       </Popover.Content>
     </Popover>
+  );
+}
+
+/**
+ * A hover/focus tooltip for a control that has no text of its own.
+ *
+ * Icon-only buttons carried an `aria-label` and nothing for the eye: whoever
+ * could not guess a glyph had to press it to find out. `children` must be a
+ * pressable element (a HeroUI `Button`), which is what lets the tooltip open on
+ * keyboard focus as well as on hover.
+ */
+export function Tip({
+  content,
+  children,
+  placement = "top",
+  delay = 350,
+}: {
+  content: React.ReactNode;
+  children: React.ReactElement;
+  placement?: "top" | "bottom" | "start" | "end";
+  delay?: number;
+}) {
+  return (
+    <Tooltip delay={delay} closeDelay={0}>
+      {children}
+      <Tooltip.Content placement={placement} className="max-w-xs text-xs">
+        {content}
+      </Tooltip.Content>
+    </Tooltip>
+  );
+}
+
+/** The same for text that explains itself on hover: a truncated value, an abbreviation. */
+export function TipText({
+  content,
+  children,
+  className,
+}: {
+  content: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <Tooltip delay={350} closeDelay={0}>
+      <Tooltip.Trigger className={cn("inline cursor-default", className)}>{children}</Tooltip.Trigger>
+      <Tooltip.Content className="max-w-xs text-xs">{content}</Tooltip.Content>
+    </Tooltip>
   );
 }

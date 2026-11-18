@@ -17,7 +17,7 @@ export const meta = { name: "error-text-unit", needsDocker: false, drivers: [], 
 export async function run({ repoRoot }) {
   const r = createReporter("error-text-unit");
   const load = (file) => import(pathToFileURL(join(repoRoot, "lib", file)).href);
-  const { readableError, refusalNote, FORBIDDEN_TEXT } = await load("error-text.ts");
+  const { readableError, refusalNote, FORBIDDEN_TEXT, isNotFound } = await load("error-text.ts");
   const { pageAt, passesNavPermission } = await load("nav.ts");
 
   // --- failures in words ------------------------------------------------------
@@ -69,6 +69,15 @@ export async function run({ repoRoot }) {
     r.check("Pannello opens with either permission", passesNavPermission(settings?.permission, (p) => p === "registries"));
     r.check("and stays shut with neither", !passesNavPermission(settings?.permission, () => false));
   }
+
+  // --- gone, rather than failed -------------------------------------------------
+  r.check("a 404 from the hook means gone", isNotFound("HTTP 404") === true);
+  r.check("a 404 forwarded from another server means gone", isNotFound("Il server ha risposto 404") === true);
+  r.check("a route's own sentence means gone", isNotFound("Progetto non trovato") === true && isNotFound("Pianificazione non trovata") === true);
+  r.check("a 500 is a failure, not gone", isNotFound("HTTP 500") === false);
+  r.check("a refusal is not gone", isNotFound("HTTP 403") === false);
+  r.check("nothing is not gone", isNotFound(null) === false && isNotFound("") === false);
+  r.check("a word that only contains it does not count", isNotFound("ritrovato") === false);
 
   return r.result();
 }
