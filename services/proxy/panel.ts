@@ -266,6 +266,10 @@ async function chooseProblem(hostname: string): Promise<{ status: number; error:
   const found = await proxyProbe(true);
   if (found.state !== "ready") return { status: 409, error: found.detail };
   const port = panelListenPort();
+  if (port === 80 || port === 443) {
+    // nginx needs both for every name, this one included: they cannot be the panel's too.
+    return { status: 409, error: `Il pannello ascolta sulla porta ${port}, che serve a nginx: avvialo su un'altra porta, per esempio 3000.` };
+  }
   if (!(await panelAnswersOnLoopback(port))) {
     return {
       status: 409,

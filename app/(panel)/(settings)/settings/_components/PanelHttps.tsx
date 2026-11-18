@@ -170,11 +170,17 @@ export function PanelHttpsSection({ onPublicUrlChange }: { onPublicUrlChange: (u
 
 /** nginx or certbot still missing: the one step to take, the same as on the Domains page. */
 function NotReady({ data, onChanged }: { data: Data; onChanged: () => Promise<void> }) {
+  // In a container, off Linux or on a test instance there is nothing to prepare: the hint below says why.
+  const impossible = data.proxy.state === "disabled" || data.proxy.state === "unsupported";
   return (
     <div className="space-y-3">
       <p className="text-muted text-sm">
-        Per il lucchetto il pannello usa nginx e certbot, gli stessi degli indirizzi dei progetti.{" "}
-        {PROXY_SERVES.has(data.proxy.state) ? "Manca ancora certbot, che chiede i certificati." : "Prima vanno preparati, una volta sola."}
+        Per il lucchetto il pannello usa nginx e certbot, gli stessi degli indirizzi dei progetti.
+        {impossible
+          ? ""
+          : PROXY_SERVES.has(data.proxy.state)
+            ? " Manca ancora certbot, che chiede i certificati."
+            : " Prima vanno preparati, una volta sola."}
       </p>
       <ProxySetup proxy={data.proxy} onChanged={onChanged} />
     </div>
@@ -323,6 +329,11 @@ function ChooseName({ data, onChanged }: { data: Data; onChanged: () => Promise<
           {serverError}
         </p>
       )}
+
+      <FieldHint>
+        Da lì il pannello si raggiunge da internet, protetto dall&apos;accesso come sulla sua porta: conviene attivare la
+        verifica in due passaggi, da Account.
+      </FieldHint>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button size="sm" onPress={submit} isPending={saving} isDisabled={!hostname}>
