@@ -27,6 +27,8 @@ interface Command {
   id: string;
   label: string;
   hint?: string;
+  /** The hint is a keyboard chord: left out on a phone, which has no keyboard to type it on. */
+  chord?: boolean;
   /** Matched by the search but not shown. */
   also?: string;
   icon: string;
@@ -162,6 +164,7 @@ export function CommandPalette() {
       id: `page:${page.href}`,
       label: page.label,
       hint: page.keys,
+      chord: true,
       icon: page.icon,
       run: () => router.push(href(page.href)),
     }));
@@ -366,7 +369,14 @@ export function CommandPalette() {
         {filtered.length === 0 && (
           <p className="text-muted px-3 py-6 text-center text-sm">Nessun risultato.</p>
         )}
-        <ul id="palette-list" role="listbox" aria-label="Risultati" className="max-h-80 overflow-y-auto p-1">
+        <ul
+          id="palette-list"
+          role="listbox"
+          aria-label="Risultati"
+          // On a phone: rows a thumb's height, and as much list as the
+          // keyboard leaves room for.
+          className="max-h-80 overflow-y-auto overscroll-contain p-1 max-md:max-h-[min(60dvh,28rem)]"
+        >
           {filtered.map((command, position) => (
             <li
               key={command.id}
@@ -378,7 +388,7 @@ export function CommandPalette() {
                 onClick={() => void choose(command)}
                 onMouseEnter={() => setActive(position)}
                 className={cn(
-                  "flex w-full cursor-pointer items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-left text-sm",
+                  "touch-chrome flex w-full cursor-pointer items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-left text-sm max-md:min-h-11",
                   // The palette lists the same destinations as the sidebar, from
                   // the same array, with the same icons — so the highlighted row
                   // should look like the sidebar's, not like a grey rectangle.
@@ -392,7 +402,9 @@ export function CommandPalette() {
                   className={cn(position === active && "text-accent")}
                 />
                 <span className="text-foreground flex-1 truncate">{command.label}</span>
-                {command.hint && <span className="text-muted text-xs">{command.hint}</span>}
+                {command.hint && (
+                  <span className={cn("text-muted text-xs", command.chord && "max-md:hidden")}>{command.hint}</span>
+                )}
               </div>
             </li>
           ))}
