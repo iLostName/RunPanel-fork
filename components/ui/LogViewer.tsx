@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState } from "react";
+import { highlightParts } from "@/lib/log-search";
 import { cn } from "@/lib/utils";
 
 export interface LogLine {
@@ -29,6 +30,7 @@ export const LogViewer = memo(function LogViewer({
   className,
   ariaLabel = "Log",
   inline = false,
+  highlight,
 }: {
   lines: LogLine[];
   emptyMessage?: string;
@@ -41,6 +43,8 @@ export const LogViewer = memo(function LogViewer({
    * text decide.
    */
   inline?: boolean;
+  /** Text to mark in every line, case-insensitively — what a search is looking for. */
+  highlight?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
@@ -74,13 +78,14 @@ export const LogViewer = memo(function LogViewer({
         ) : (
           lines.map((line) => {
             const tone = line.stream === "stderr" ? "text-danger" : "text-foreground/80";
+            const text = highlight ? <Marked text={line.text} query={highlight} /> : line.text;
             return inline ? (
               <span key={line.id} className={cn("break-all whitespace-pre-wrap", tone)}>
-                {line.text}
+                {text}
               </span>
             ) : (
               <div key={line.id} className={cn("break-words whitespace-pre-wrap", tone)}>
-                {line.text}
+                {text}
               </div>
             );
           })
@@ -103,3 +108,20 @@ export const LogViewer = memo(function LogViewer({
     </div>
   );
 });
+
+/** One line with the matches of a search marked, by the same rule the search uses. */
+function Marked({ text, query }: { text: string; query: string }) {
+  return (
+    <>
+      {highlightParts(text, query).map((part, i) =>
+        part.match ? (
+          <mark key={i} className="bg-warning/30 text-foreground rounded-sm">
+            {part.text}
+          </mark>
+        ) : (
+          part.text
+        )
+      )}
+    </>
+  );
+}

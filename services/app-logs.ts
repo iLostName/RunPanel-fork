@@ -424,6 +424,7 @@ interface CollectorState {
   running: Map<string, Promise<number>>;
   queued: Map<string, Promise<number>>;
   containers: { at: number; value: Map<string, AppContainer> | null } | null;
+  refreshing?: Promise<boolean> | null;
 }
 
 // On globalThis so dev-mode reloads do not start a second timer, as in `status-reconcile.ts`.
@@ -462,7 +463,7 @@ function collectProject(project: ProjectRow): Promise<number> {
   const running = state.running.get(project.id);
   const run = (): Promise<number> => {
     const known = state.known.get(project.id);
-    const job = collectOnce(known ?? project)
+    const job = collectOnce(project)
       .then((count) => {
         if (known) {
           known.collectedAt = Date.now();
@@ -509,7 +510,15 @@ function onProjectEvent(projectId: string, type: string): void {
   }
 }
 
-async function refreshKnown(): Promise<boolean> {
+/** One listing at a time: two at once would each subscribe the same new project. */
+function refreshKnown(): Promise<boolean> {
+  state.refreshing ??= listProjects().finally(() => {
+    state.refreshing = null;
+  });
+  return state.refreshing;
+}
+
+async function listProjects(): Promise<boolean> {
   let rows: ProjectRow[];
   try {
     const db = await getDb();
@@ -603,6 +612,10 @@ async function tick(): Promise<void> {
 
 export function startAppLogCollector(): void {
   if (state.timer) return;
+  // Listening from the start, reading only later: a run replaced before the
+  // first tick — the autostart pass after a reboot — still has its old lines
+  // read before the driver empties them.
+  void refreshKnown();
   state.timer = setInterval(() => void tick(), TICK_MS);
   state.timer.unref?.();
   state.firstTick = setTimeout(() => void tick(), FIRST_TICK_MS);
