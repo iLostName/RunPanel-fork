@@ -4,8 +4,11 @@ import { getDb, nowIso } from "@/lib/db";
 import type { BackupDestinationsTable } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
 import type { DestinationFacts } from "@/lib/backup-copies";
-import { isRemoteType, remoteTarget } from "./kinds";
+import { signedFetch } from "@/services/cluster/client";
+import { clusterState, getMember } from "@/services/cluster/state";
+import { isRemoteType, remoteTarget, type KnownMembers } from "./kinds";
 import { localDestination, localDirectory } from "./local";
+import { peerDestination, type PeerTransport } from "./peer";
 import { rcloneDestination } from "./rclone";
 import { s3Destination } from "./s3";
 import { sftpDestination } from "./sftp";
@@ -18,7 +21,8 @@ import type { Destination } from "../types";
  *
  * `local`, any S3-compatible object store — S3 itself, R2, B2, MinIO —
  * Telegram through the user's own account, and the remote types: an SFTP
- * server or NAS, a WebDAV folder, and every service rclone speaks. The row's
+ * server or NAS, a WebDAV folder, every service rclone speaks, and another
+ * RunPanel server of the same cluster. The row's
  * `config` has been encrypted since the very first migration, which is why
  * adding a transport that needs a secret key, or a whole account session,
  * changed nothing about storage: a column that is sometimes ciphertext and
@@ -42,6 +46,33 @@ const FACTORIES: Record<string, Factory> = {
     }),
   webdav: (row, config) => webdavDestination(row, config),
   rclone: (row, config) => rcloneDestination(row, config, { tmpDir: panelConfig.tmpDir }),
+  peer: (row, config) => peerDestination(row, config, peerTransport),
+};
+
+/**
+ * How a linked-server destination reaches its member: the cluster as this
+ * server knows it at the moment of the call, and the cluster's own signed
+ * requests, for no user. Looked up every time, so a member revoked or moved
+ * to another address is noticed by the next backup, not by a restart.
+ */
+const peerTransport: PeerTransport = {
+  async resolve(memberId) {
+    const state = await clusterState();
+    if (!state) return { problem: "solo" };
+    if (memberId === state.selfId) return { problem: "self" };
+    const member = await getMember(memberId);
+    return member ? { member: { id: member.id, name: member.name, url: member.url } } : { problem: "gone" };
+  },
+  send(member, path, init) {
+    return signedFetch(member, path, {
+      method: init.method,
+      body: init.body ?? null,
+      contentType: init.contentType ?? null,
+      headers: init.headers,
+      headersTimeoutMs: init.timeoutMs,
+      signal: init.signal,
+    });
+  },
 };
 
 /**
@@ -96,8 +127,12 @@ export interface S3Target {
 
 export type DestinationTarget = S3Target | Record<string, unknown>;
 
-export function destinationTarget(row: BackupDestinationsTable): DestinationTarget | null {
-  if (isRemoteType(row.type)) return remoteTarget(row.type, destinationConfig(row));
+/**
+ * `members`, when the caller has them, names a linked server as it is called
+ * today and says whether it is still linked.
+ */
+export function destinationTarget(row: BackupDestinationsTable, members?: KnownMembers): DestinationTarget | null {
+  if (isRemoteType(row.type)) return remoteTarget(row.type, destinationConfig(row), members);
   if (row.type !== "s3") return null;
   const config = destinationConfig(row);
   const text = (key: string) => (typeof config[key] === "string" ? (config[key] as string) : "");

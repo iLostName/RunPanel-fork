@@ -36,6 +36,7 @@ import {
   sshHostProblem,
   sshUserProblem,
 } from "./backup-remote";
+import { PEER_MAX_QUOTA_BYTES, isPeerMemberId } from "./backup-peer";
 import { RCLONE_PROVIDERS, parseRcloneSections, parseRcloneToken } from "./rclone-config";
 import {
   MAX_PAGE_PROJECTS,
@@ -1118,7 +1119,7 @@ export const taskSchema = z.object({
 export const taskUpdateSchema = taskSchema.partial();
 
 /** Every transport; adding one means adding it here too, and its schemas below. */
-export const destinationTypes = ["local", "s3", "telegram", "sftp", "webdav", "rclone"] as const;
+export const destinationTypes = ["local", "s3", "telegram", "sftp", "webdav", "rclone", "peer"] as const;
 
 /**
  * An S3-compatible destination's configuration.
@@ -1316,6 +1317,42 @@ export const rcloneConfigInput = z
   })
   .strict();
 
+/**
+ * A linked RunPanel server of the cluster as a destination: which one. Its
+ * name is kept beside the id — what the messages call it once it is no
+ * longer linked — and filled in on the server, never taken from the form.
+ * Whether the id is a member, and not this server, is checked there too
+ * (kinds.ts): it takes the store.
+ */
+const peerMemberId = z.string().trim().refine(isPeerMemberId, "Scegli uno dei server collegati");
+
+export const peerConfigSchema = z.object({
+  memberId: peerMemberId,
+  memberName: z.string().max(120).optional(),
+});
+
+export const peerConfigInput = z
+  .object({
+    memberId: z.string().max(64).optional(),
+  })
+  .strict();
+
+/**
+ * How much room this server gives another one's copies: bytes, null for no
+ * limit of its own (the disk keeps its reserve all the same), 0 to refuse
+ * new ones. Copies already kept stay, over the limit or not.
+ */
+export const peerQuotaSchema = z
+  .object({
+    quotaBytes: z
+      .number("Il limite è un numero di byte")
+      .int("Il limite è un numero intero di byte")
+      .min(0, "Il limite non può essere negativo")
+      .max(PEER_MAX_QUOTA_BYTES, "Il limite è troppo grande")
+      .nullable(),
+  })
+  .strict();
+
 /** What the form may send for an S3 destination; merged over the stored config on an edit. */
 export const s3ConfigInput = z
   .object({
@@ -1336,6 +1373,7 @@ export const destinationConfigInputs = {
   sftp: sftpConfigInput,
   webdav: webdavConfigInput,
   rclone: rcloneConfigInput,
+  peer: peerConfigInput,
 } as const;
 
 
@@ -1479,6 +1517,7 @@ export const destinationUpdateSchema = z
         ...rcloneConfigInput.shape,
         // After SFTP's: a WebDAV user name may be longer.
         ...webdavConfigInput.shape,
+        ...peerConfigInput.shape,
         /** Telegram: a finished login whose account replaces the linked one. */
         loginId: z.string().min(16).max(64).optional(),
         /** Telegram, only to try a destination before creating it: where it would save. */

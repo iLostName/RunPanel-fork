@@ -125,7 +125,8 @@ export interface Destination {
    * the runner removes it once they have all finished.
    *
    * `options.signal` stops an upload in flight, and the same option on `open`
-   * a download: the remote drivers (SFTP, WebDAV, rclone) honour it.
+   * a download: the remote drivers (SFTP, WebDAV, rclone, a linked server)
+   * honour it.
    */
   put(localPath: string, fileName: string, options?: PutOptions): Promise<{ ref: string; bytes: number }>;
   remove(ref: string): Promise<void>;
@@ -157,6 +158,13 @@ export interface PutOptions {
   /** A line in the run's log: progress, a wait the service asked for. */
   log?: (line: string) => void;
   signal?: AbortSignal;
+  /**
+   * The archive's sha256, when the caller already knows it. A destination
+   * that declares it before sending — a linked RunPanel server, which checks
+   * what arrived against it — is spared reading the whole file once more.
+   * Absent, such a destination computes it itself.
+   */
+  sha256?: string;
 }
 
 export interface DestinationStat {

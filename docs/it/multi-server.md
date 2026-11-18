@@ -51,6 +51,10 @@ Si condivide anche il token GitHub: ogni server clona con le stesse credenziali,
 
 Restano di ogni server: le sessioni (si entra su ogni pannello separatamente), i link di invito (si aprono sul pannello che li ha generati), il registro attività, backup e destinazioni, registry, indirizzo pubblico, intervallo del controllo periodico, impostazioni di aggiornamento, i canali di notifica e le notifiche della campanella, la [pagina di stato pubblica](operations.md#pagina-di-stato-pubblica), che però può mostrare progetti di tutti i server.
 
+## Backup da un server all'altro
+
+Un server collegato può tenere la copia fuori sede dei backup di un altro: sul server da proteggere aggiungi la destinazione **Server RunPanel collegato** e scegli l'altro. È fatta per due server che si fanno da copia a vicenda, senza un account esterno. Le copie viaggiano con le stesse richieste firmate del resto del cluster, in pezzi firmati da 8 MB, e il server che le riceve le tiene in `data/peer-backups`, una cartella per ogni server che le manda, separata dai suoi backup. Su ogni server, **Backup › Copie per altri server** mostra cosa tiene per gli altri e quanto spazio occupa; lì il proprietario dà un limite a ogni server, o ne rifiuta le copie, e da lì scarica un archivio per ricostruire un server perso. Un server spento o con una versione vecchia fa fallire solo la sua copia, dicendo perché. Vedi [Un altro server RunPanel](backups.md#un-altro-server-runpanel).
+
 ## Diagnostica
 
 **Diagnostica**, accanto a ogni server in **Impostazioni › Server collegati**, lo interroga e confronta: raggiungibile, stesso segreto (la firma viene accettata), stesso cluster, versione, orologio e account allineati. Una versione diversa è evidenziata anche nell'elenco. L'orologio diventa rosso oltre i due minuti e mezzo di differenza; oltre i cinque le richieste vengono rifiutate, perché la firma scade.

@@ -24,6 +24,8 @@ export interface KindFieldsProps {
   isOwner: boolean;
   /** Archives already stored here, when editing: changing where it writes would leave them behind. */
   archives: number;
+  /** The server the destination lives on, when the page knows it: a linked server cannot be its own copy. */
+  memberId?: string | null;
   onChange: (state: KindState) => void;
 }
 

@@ -47,7 +47,7 @@ import type { AccessMode } from "../access-columns";
 import type { TaskRunStatus, TaskRunsIn, TaskTrigger } from "../tasks-rules";
 import type { ColumnType } from "kysely";
 
-export type BackupDestinationType = "local" | "telegram" | "s3" | "webdav" | "sftp" | "rclone";
+export type BackupDestinationType = "local" | "telegram" | "s3" | "webdav" | "sftp" | "rclone" | "peer";
 export type BackupTrigger = "schedule" | "manual" | "pre-restore";
 export type BackupRunStatus = "running" | "success" | "partial" | "failed";
 export type BackupArtifactKind =

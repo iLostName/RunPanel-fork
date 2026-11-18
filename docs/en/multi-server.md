@@ -51,6 +51,10 @@ The GitHub token is shared too: every server clones with the same credentials, a
 
 Each server keeps its own: sessions (you sign in on each panel separately), invitation links (they open on the panel that issued them), the activity log, backups and destinations, registries, public address, polling interval, update settings, its notification channels and the bell's notifications, and the [public status page](operations.md#public-status-page), which can still show projects of every server.
 
+## Backups from one server to another
+
+A linked server can keep the off-site copy of another one's backups: on the server to protect, add the **Server RunPanel collegato** destination (linked RunPanel server) and pick the other one. Two servers keeping each other's copies is what it is made for, with no third-party account. The copies travel with the same signed requests as the rest of the cluster, in signed pieces of 8 MB, and the receiving server keeps them in `data/peer-backups`, one folder per source server, apart from its own backups. On every server, **Backup › Copie per altri server** (copies for other servers) shows what it keeps for the others and how much space it takes; there the owner sets a limit for each server, or refuses its copies, and from there downloads an archive to rebuild a server that was lost. A server that is off or on an older version only fails its own copy, with the reason. See [Another RunPanel server](backups.md#another-runpanel-server).
+
 ## Diagnosis
 
 **Diagnostica**, next to each server in **Impostazioni › Server collegati**, asks it who it is and compares: reachable, same secret (the signature is accepted), same cluster, version, clock and accounts in step. A different version is also highlighted in the list. The clock turns red past two and a half minutes of difference; past five, requests are refused because signatures expire.

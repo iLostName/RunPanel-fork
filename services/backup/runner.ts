@@ -369,6 +369,7 @@ async function execute({ runId, request, startedAt, emit, log, missing }: Execut
       file: archive.absolutePath,
       fileName,
       bytes: archive.bytes,
+      sha256: archive.sha256,
       emit,
       signal: request.signal,
     });

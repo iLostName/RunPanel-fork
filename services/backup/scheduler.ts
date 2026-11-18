@@ -4,6 +4,7 @@ import type { BackupPoliciesTable } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { removePartialArchives } from "./paths";
 import { pruneUploads } from "./uploads";
+import { sweepPeerUploads } from "./peer-hosting";
 import { policyDestinationIds } from "./policy-destinations";
 import { BackupBusyError, runBackup } from "./runner";
 import type { BackupTarget } from "./types";
@@ -96,9 +97,11 @@ export async function tick(now = new Date()): Promise<TickResult> {
     await setSetting(TICK_SETTING, now.toISOString());
 
     // Hourly is enough for a one-day lifetime, and costs one directory read.
+    // The same hour sweeps the uploads another server started here and left.
     if (now.getTime() - (globalRef.__runpanelUploadPrune ?? 0) > 3_600_000) {
       globalRef.__runpanelUploadPrune = now.getTime();
       pruneUploads(now.getTime());
+      sweepPeerUploads();
     }
   } catch (err) {
     // A tick that throws must not kill the interval, or the panel silently

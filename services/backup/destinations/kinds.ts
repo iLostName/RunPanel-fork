@@ -3,6 +3,8 @@ import { decrypt, encrypt } from "@/lib/crypto";
 import { DEFAULT_REMOTE_FOLDER } from "@/lib/backup-remote";
 import { parseRcloneSections, parseRcloneToken } from "@/lib/rclone-config";
 import {
+  peerConfigInput,
+  peerConfigSchema,
   rcloneConfigInput,
   rcloneConfigSchema,
   sftpConfigInput,
@@ -10,6 +12,7 @@ import {
   webdavConfigInput,
   webdavConfigSchema,
 } from "@/lib/validation";
+import { clusterState, getMember } from "@/services/cluster/state";
 import { lookupOneDrive, rcloneServiceLabel } from "./rclone";
 import { fingerprintOf, generateSshKeyPair, keyComment, type SshKeyPair } from "./ssh-keys";
 
@@ -30,7 +33,7 @@ import { fingerprintOf, generateSshKeyPair, keyComment, type SshKeyPair } from "
  *  - the list shows where a destination writes, never with which credentials.
  */
 
-export type RemoteType = "sftp" | "webdav" | "rclone";
+export type RemoteType = "sftp" | "webdav" | "rclone" | "peer";
 
 export type Prepared = { ok: true; config: Record<string, unknown> } | { ok: false; error: string; status: number };
 
@@ -40,7 +43,7 @@ export interface PrepareOptions {
 }
 
 export function isRemoteType(type: string): type is RemoteType {
-  return type === "sftp" || type === "webdav" || type === "rclone";
+  return type === "sftp" || type === "webdav" || type === "rclone" || type === "peer";
 }
 
 // --- SFTP key pairs, sealed for the round trip through the browser ----------------
@@ -97,7 +100,34 @@ export async function prepareRemoteConfig(
       return prepareWebdav(input, stored);
     case "rclone":
       return prepareRclone(input, stored, opts);
+    case "peer":
+      return preparePeer(input, stored);
   }
+}
+
+/**
+ * A linked server: one of this cluster's members and not this server, with
+ * its name as it is now — what the messages will call it should it ever be
+ * revoked. Nothing secret is stored: the calls are signed with the cluster's
+ * own secret, which is not the destination's to keep.
+ */
+async function preparePeer(input: Record<string, unknown>, stored: Record<string, unknown> | null): Promise<Prepared> {
+  const parsed = peerConfigInput.safeParse(input);
+  if (!parsed.success) return fail(firstIssue(parsed.error, "Configurazione non valida"));
+  const merged: Record<string, unknown> = { ...(stored ?? {}) };
+  if (parsed.data.memberId !== undefined) merged.memberId = parsed.data.memberId.trim();
+  if (!merged.memberId) return fail("Scegli il server che terrà le copie");
+
+  const state = await clusterState();
+  if (!state) return fail("Questo server non è collegato ad altri RunPanel: collegane uno da Impostazioni › Server collegati, poi torna qui.");
+  if (merged.memberId === state.selfId) return fail("Scegli un altro server: una copia su questo stesso server non è fuori sede.");
+  const member = typeof merged.memberId === "string" ? await getMember(merged.memberId) : null;
+  if (!member) return fail("Il server scelto non è tra quelli collegati: aggiorna la pagina e scegline uno dalla lista.");
+  merged.memberName = member.name;
+
+  const valid = peerConfigSchema.safeParse(merged);
+  if (!valid.success) return fail(firstIssue(valid.error, "Configurazione non valida"));
+  return { ok: true, config: valid.data };
 }
 
 function prepareSftp(input: Record<string, unknown>, stored: Record<string, unknown> | null): Prepared {
@@ -229,11 +259,16 @@ export function remoteEditView(type: RemoteType, config: Record<string, unknown>
         hasSections: text(config, "sections") !== "",
       };
     }
+    case "peer":
+      return { memberId: text(config, "memberId"), memberName: text(config, "memberName") || null };
   }
 }
 
+/** The members this server knows now, so a list names a linked server as it is called today. */
+export type KnownMembers = ReadonlyMap<string, { name: string }>;
+
 /** Where a destination writes, for the list anyone holding `backup` reads: never credentials, never a user name. */
-export function remoteTarget(type: RemoteType, config: Record<string, unknown>): Record<string, unknown> {
+export function remoteTarget(type: RemoteType, config: Record<string, unknown>, members?: KnownMembers): Record<string, unknown> {
   switch (type) {
     case "sftp": {
       const hostKey = text(config, "hostKey");
@@ -259,5 +294,15 @@ export function remoteTarget(type: RemoteType, config: Record<string, unknown>):
         service: rcloneServiceLabel(config),
         folder: typeof config.folder === "string" ? config.folder : DEFAULT_REMOTE_FOLDER,
       };
+    case "peer": {
+      // Its name today when it is still linked, the one it had otherwise.
+      const memberId = text(config, "memberId");
+      const member = members?.get(memberId);
+      return {
+        memberId,
+        memberName: member?.name ?? (text(config, "memberName") || null),
+        linked: members ? Boolean(member) : null,
+      };
+    }
   }
 }

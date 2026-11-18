@@ -1,4 +1,5 @@
-import type { RcloneTargetView, SftpTargetView, WebdavTargetView } from "@/components/backups/types";
+import { PEER_FOLDER } from "@/lib/backup-peer";
+import type { PeerTargetView, RcloneTargetView, SftpTargetView, WebdavTargetView } from "@/components/backups/types";
 
 /**
  * How a stored remote destination reads in a list: where it writes, the
@@ -49,6 +50,16 @@ const REMOTE_TEXT: Record<string, RemoteText> = {
     },
     technical: (target) => ` · rclone ${(target as RcloneTargetView).provider}`,
     place: (target) => `su ${(target as RcloneTargetView).service}`,
+  },
+  peer: {
+    icon: "solar:server-path-linear",
+    where: (target) => {
+      const t = target as PeerTargetView;
+      const name = t.memberName ?? "senza nome";
+      return t.linked === false ? `Server RunPanel «${name}», non più collegato` : `Server RunPanel «${name}»`;
+    },
+    technical: (target) => ` · ${PEER_FOLDER}/<id di questo server> · membro ${(target as PeerTargetView).memberId}`,
+    place: (target) => `sul server «${(target as PeerTargetView).memberName ?? "collegato"}»`,
   },
 };
 

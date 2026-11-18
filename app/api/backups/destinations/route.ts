@@ -17,6 +17,7 @@ import {
 import { isRemoteType, prepareRemoteConfig } from "@/services/backup/destinations/kinds";
 import { localPathProblem } from "@/services/backup/destinations/local";
 import { TelegramFailure, type TelegramConfig } from "@/services/backup/destinations/telegram";
+import { clusterState, listMembers } from "@/services/cluster/state";
 import { linkedTelegramLogin, releaseTelegramLogin, suggestedChannelTitle } from "@/services/backup/telegram-login";
 import { telegramConfigFromLogin } from "@/services/backup/telegram-setup";
 import type { DestinationCheck } from "@/services/backup/types";
@@ -26,10 +27,12 @@ export async function GET() {
   if (isDenied(denied)) return denied;
 
   const db = await getDb();
-  const [rows, usage, visible] = await Promise.all([
+  const [rows, usage, visible, members] = await Promise.all([
     db.selectFrom("backup_destinations").selectAll().orderBy("created_at", "asc").execute(),
     destinationUsage(),
     visiblePolicyIds(denied.principal),
+    // A linked server is named as it is called today, and said when it is not linked any more.
+    clusterState().then(async (state) => (state ? new Map((await listMembers()).map((m) => [m.id, { name: m.name }])) : new Map<string, { name: string }>())),
   ]);
 
   // The config is never returned whole: it is ciphertext, and for anything
@@ -46,7 +49,7 @@ export async function GET() {
         type: row.type,
         isDefault: row.is_default === 1,
         createdAt: row.created_at,
-        target: destinationTarget(row),
+        target: destinationTarget(row, members),
         telegram: telegramTarget(row),
         // A local destination's folder of its own; null for the panel's own
         // archive folder, and for every other type.

@@ -56,7 +56,7 @@ PostgreSQL, MySQL, Redis e MongoDB creati come container etichettati con i propr
 <td valign="top">
 
 ### 💾 Backup che si ripristinano
-Dump programmati dei database, dello store del pannello, della configurazione e dei volumi dei progetti, in un unico zip verificabile, copiato in tutte le destinazioni che scegli — dischi locali, bucket S3-compatibili, server SFTP e NAS, cartelle WebDAV (Nextcloud e simili), Telegram con il tuo account (diviso in parti se serve) e, con rclone, Google Drive, OneDrive o Dropbox — ognuna con la sua conservazione, e se vuoi cifrato con una password tua.
+Dump programmati dei database, dello store del pannello, della configurazione e dei volumi dei progetti, in un unico zip verificabile, copiato in tutte le destinazioni che scegli — dischi locali, bucket S3-compatibili, server SFTP e NAS, cartelle WebDAV (Nextcloud e simili), Telegram con il tuo account (diviso in parti se serve), con rclone Google Drive, OneDrive o Dropbox, e un altro server RunPanel del tuo cluster — ognuna con la sua conservazione, e se vuoi cifrato con una password tua.
 
 </td>
 <td valign="top">

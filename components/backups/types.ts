@@ -142,6 +142,49 @@ export interface RcloneTargetView {
   folder: string;
 }
 
+/** A linked RunPanel server of the cluster: its member id and its name today, or the one it had. */
+export interface PeerTargetView {
+  memberId: string;
+  memberName: string | null;
+  /** False once it is no longer a member; null from a server that could not tell. */
+  linked: boolean | null;
+}
+
+/** One server whose copies this server keeps (`GET /api/backups/hosted`). */
+export interface HostedSourceView {
+  sourceId: string;
+  name: string;
+  url: string | null;
+  linked: boolean;
+  archives: number;
+  bytes: number;
+  lastReceivedAt: string | null;
+  incoming: { count: number; bytes: number };
+  /** Null: no limit of its own. 0: new copies refused. */
+  quotaBytes: number | null;
+}
+
+export interface HostedDiskView {
+  freeBytes: number;
+  totalBytes: number;
+  /** What the disk always keeps free for this server's own work. */
+  reserveBytes: number;
+}
+
+export interface HostedOverviewView {
+  sources: HostedSourceView[];
+  disk: HostedDiskView | null;
+  folder: string;
+}
+
+/** One archive kept for another server (`GET /api/backups/hosted/:memberId/archives`). */
+export interface HostedArchiveView {
+  ref: string;
+  name: string;
+  bytes: number;
+  createdAt: string;
+}
+
 export interface DestinationView {
   id: string;
   name: string;
@@ -152,7 +195,7 @@ export interface DestinationView {
    * Where a destination writes, by type; null for the local disk and Telegram.
    * Never the keys, never a user name.
    */
-  target?: S3TargetView | SftpTargetView | WebdavTargetView | RcloneTargetView | null;
+  target?: S3TargetView | SftpTargetView | WebdavTargetView | RcloneTargetView | PeerTargetView | null;
   /** Where a Telegram destination writes: the chat, never the session or the account. */
   telegram?: { chat: "channel" | "saved"; title: string | null; linked: boolean } | null;
   /** A local destination's folder of its own; null for the panel's archive folder. */
