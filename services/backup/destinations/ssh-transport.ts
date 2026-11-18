@@ -160,7 +160,9 @@ export function sshArguments(
     ...option("ClearAllForwardings=yes"),
     ...option("PermitLocalCommand=no"),
     ...option("RequestTTY=no"),
-    ...option("LogLevel=ERROR"),
+    // INFO, ssh's own default: below it, "Connection closed by …" — how a
+    // server that is not SSH, or that drops strangers, shows up — goes unsaid.
+    ...option("LogLevel=INFO"),
     "-i",
     files.identity.replace(/%/g, "%%"),
     "-p",

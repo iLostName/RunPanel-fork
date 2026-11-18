@@ -37,12 +37,16 @@ export interface SshExit {
   connected: boolean;
 }
 
-/** The lines that say something, without OpenSSH's banner of `@` signs. */
+/**
+ * The lines that say something: without OpenSSH's banner of `@` signs, and
+ * without the note it prints when it accepts a host key on first contact —
+ * the panel says that itself, with the fingerprint.
+ */
 function meaningful(stderr: string): string[] {
   return stderr
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line && !/^@+$/.test(line) && !/^@\s/.test(line));
+    .filter((line) => line && !/^@+$/.test(line) && !/^@\s/.test(line) && !/^Warning: Permanently added/i.test(line));
 }
 
 /** What `ssh` (or the absence of it) said, as a problem. */

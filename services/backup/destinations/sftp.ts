@@ -51,6 +51,8 @@ export interface SftpDeps {
   pinHostKey?: (key: string) => Promise<void>;
   command?: SshCommand;
   stallMs?: number;
+  /** Seconds for the connection and the handshake; 20 unless a test is in a hurry. */
+  connectTimeoutSec?: number;
 }
 
 /** Enough to connect, write, read back and delete a few bytes. */
@@ -93,6 +95,7 @@ export function sftpDestination(
         step,
         command: deps.command,
         stallMs: deps.stallMs,
+        connectTimeoutSec: deps.connectTimeoutSec,
         signal,
       }
     );
