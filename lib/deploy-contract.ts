@@ -135,10 +135,13 @@ export const deployContractSchema = z.object({
    * When a new version never passes the health check, put the last one that
    * did back online. On by default.
    *
-   * Docker only for now (see the rollback in services/deploy-pipeline.ts):
-   * every deploy is its own image there, and the previous one is still on
-   * disk. Native runtimes build in place, so by the time the check fails the
-   * previous version's files are already gone.
+   * Docker: every deploy is its own image, and the previous one is still on
+   * disk. Native runtimes on Linux, from git: every deploy builds in a folder
+   * of its own and the previous one is kept (lib/releases.ts) — which is why,
+   * for them, this also decides where the build happens: off, they build in
+   * the project folder as they always did, and there is nothing to go back
+   * to. Compose rebuilds the stack from the checkout and has no way back yet.
+   * The cases are `rollbackPlan`'s.
    */
   rollback: z
     .object({ enabled: z.boolean().default(true) })

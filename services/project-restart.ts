@@ -1,9 +1,12 @@
 import fs from "fs";
 import { getDb, nowIso } from "@/lib/db";
 import { config } from "@/lib/config";
-import { relocatedArtifactDir, relocatedStartCmd } from "@/lib/artifact-dir";
+import { relocatedArtifactDir, relocatedReleaseDir, relocatedStartCmd } from "@/lib/artifact-dir";
 import { decrypt } from "@/lib/crypto";
 import { parseContractJson } from "@/lib/deploy-contract";
+import { envFileEntry } from "@/lib/releases";
+import { activateRelease, clearCurrentRelease, releaseOfArtifact } from "./project-releases";
+import { repairLinks } from "./releases-fs";
 import { listenPort, readAccess } from "@/lib/access-columns";
 import { processManager } from "./process-manager";
 import { buildStartOpts } from "./start-opts";
@@ -99,7 +102,9 @@ async function restart(projectId: string): Promise<{ success: true } | { error: 
   // hand PM2 a cwd it will fail on without a word. A docker project only
   // needs its image, so a missing directory is not a reason to refuse it.
   if (!fs.existsSync(lastDeploy.artifact_dir)) {
-    const moved = relocatedArtifactDir(lastDeploy.artifact_dir, project.slug, config.reposDir);
+    const moved =
+      relocatedArtifactDir(lastDeploy.artifact_dir, project.slug, config.reposDir) ??
+      relocatedReleaseDir(lastDeploy.artifact_dir, project.slug, config.releasesDir);
     if (moved && fs.existsSync(moved)) {
       const startCmd = relocatedStartCmd(lastDeploy.start_cmd, lastDeploy.artifact_dir, moved);
       await db
@@ -180,11 +185,49 @@ async function restart(projectId: string): Promise<{ success: true } | { error: 
     loopbackPort: access.mode === "restricted" ? listenPort(project, port) : undefined,
   });
 
+  /*
+    A deploy that built into a version folder of its own is started there
+    again — that folder is what `artifact_dir` names — and becomes the current
+    one, which is how a rollback puts the previous version back: the folder
+    the file manager and the scheduled tasks follow moves with it.
+
+    Its links into the project folder are checked first. That finishes a hand-
+    over a panel restart cut short, and gives the version anything the project
+    folder gained since it was made. Best effort: a version that ran yesterday
+    can run today without it.
+  */
+  const release = project.runtime_type === "docker" ? null : releaseOfArtifact(project.slug, lastDeploy.artifact_dir);
+  if (release) {
+    try {
+      await repairLinks({ dir: release.dir, checkout: getRepoPath(project.slug), envFile: envFileEntry(contract.envFile) });
+    } catch (err) {
+      console.warn(`[restart] ${project.slug}: links of release ${release.id} not checked:`, err instanceof Error ? err.message : err);
+    }
+  }
+
   // Rewritten on every start, as the container side already is: left to the
   // deploy alone, the file keeps a variable the operator has since deleted, and
-  // a dotenv loader in the app brings it back. Same content a deploy writes.
+  // a dotenv loader in the app brings it back. Same content a deploy writes,
+  // into the folder the app runs from.
   if (contract.envFile.enabled && project.runtime_type !== "docker") {
-    writeEnvFileInto(getRepoPath(project.slug), contract.envFile.path, startOpts.env ?? {});
+    writeEnvFileInto(release?.dir ?? getRepoPath(project.slug), contract.envFile.path, startOpts.env ?? {});
+  }
+
+  if (release) {
+    try {
+      activateRelease(project.slug, release.id);
+    } catch (err) {
+      console.warn(`[restart] ${project.slug}: release ${release.id} not marked as current:`, err instanceof Error ? err.message : err);
+    }
+  } else if (project.runtime_type !== "docker" && project.runtime_type !== "compose") {
+    // A deploy that built in place starts from the project folder — after the
+    // first deploy into a version folder failed, say — so no version folder is
+    // the current one any more, whatever was left pointing at one.
+    try {
+      clearCurrentRelease(project.slug);
+    } catch {
+      /* nothing was current */
+    }
   }
 
   // The driver empties the process output before launching, so tell any open

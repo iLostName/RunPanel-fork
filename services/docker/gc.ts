@@ -316,7 +316,11 @@ const ONE_TIME_RETENTION_DAYS = 90;
  * address, so every distinct one left something behind.
  *
  * The newest deployment of each project is always kept, however old. A project
- * that last shipped a year ago should still be able to say when.
+ * that last shipped a year ago should still be able to say when. So are the two
+ * newest that worked: Restart starts the app from the last one, and a failed
+ * deploy goes back to it — a row swept because a failed deploy came after it
+ * would leave a project that runs fine with nothing to restart from, and a
+ * native project's version folder with no row to find it by.
  */
 async function pruneStore(): Promise<void> {
   const db = await getDb();
@@ -339,6 +343,16 @@ async function pruneStore(): Promise<void> {
       .limit(1)
       .executeTakeFirst();
     if (newest) keep.push(newest.id);
+    const good = await db
+      .selectFrom("deployments")
+      .select("id")
+      .where("project_id", "=", project_id)
+      .where("status", "in", ["running", "superseded"])
+      .where("start_cmd", "is not", null)
+      .orderBy("started_at", "desc")
+      .limit(2)
+      .execute();
+    for (const row of good) if (!keep.includes(row.id)) keep.push(row.id);
   }
 
   let deployments = db
