@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { PeerFields } from "./PeerFields";
 import { RcloneFields } from "./RcloneFields";
 import { SftpFields } from "./SftpFields";
 import { WebdavFields } from "./WebdavFields";
@@ -45,6 +46,13 @@ export const REMOTE_KINDS: RemoteKind[] = [
     description: "Con rclone, se è installato su questo server.",
     icon: remoteIcon("rclone") ?? "solar:cloud-upload-linear",
     Fields: RcloneFields,
+  },
+  {
+    type: "peer",
+    label: "Server RunPanel collegato",
+    description: "Un altro server del cluster: la copia fuori sede, senza account esterni.",
+    icon: remoteIcon("peer") ?? "solar:server-path-linear",
+    Fields: PeerFields,
   },
 ];
 

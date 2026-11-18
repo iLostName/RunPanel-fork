@@ -453,6 +453,7 @@ export function DestinationForm({
           api={api}
           isOwner={isOwner}
           archives={archives}
+          memberId={memberId ?? selected}
           onChange={report}
         />
       ) : (

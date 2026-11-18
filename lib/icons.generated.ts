@@ -2,7 +2,7 @@
 // Regenerate with: npm run icons
 import type { IconifyJSON } from "@iconify/types";
 
-/** 175 icons, extracted from @iconify-json/solar. */
+/** 176 icons, extracted from @iconify-json/solar. */
 export const solarSubset = {
   "prefix": "solar",
   "width": 24,
@@ -416,6 +416,9 @@ export const solarSubset = {
     },
     "server-linear": {
       "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><path d=\"M2 17C2 15.1144 2 14.1716 2.58579 13.5858C3.17157 13 4.11438 13 6 13H18C19.8856 13 20.8284 13 21.4142 13.5858C22 14.1716 22 15.1144 22 17C22 18.8856 22 19.8284 21.4142 20.4142C20.8284 21 19.8856 21 18 21H6C4.11438 21 3.17157 21 2.58579 20.4142C2 19.8284 2 18.8856 2 17Z\"/><path d=\"M2 6C2 4.11438 2 3.17157 2.58579 2.58579C3.17157 2 4.11438 2 6 2H18C19.8856 2 20.8284 2 21.4142 2.58579C22 3.17157 22 4.11438 22 6C22 7.88562 22 8.82843 21.4142 9.41421C20.8284 10 19.8856 10 18 10H6C4.11438 10 3.17157 10 2.58579 9.41421C2 8.82843 2 7.88562 2 6Z\"/><path stroke-linecap=\"round\" d=\"M11 6H18\"/><path stroke-linecap=\"round\" d=\"M6 6H8\"/><path stroke-linecap=\"round\" d=\"M11 17H18\"/><path stroke-linecap=\"round\" d=\"M6 17H8\"/></g>"
+    },
+    "server-path-linear": {
+      "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><path stroke-linecap=\"round\" d=\"M22 19H14M2 19H10\"/><path stroke-linecap=\"round\" d=\"M12 17V14\"/><circle cx=\"12\" cy=\"19\" r=\"2\"/><path d=\"M2 11C2 9.34315 3.34315 8 5 8H19C20.6569 8 22 9.34315 22 11C22 12.6569 20.6569 14 19 14H5C3.34315 14 2 12.6569 2 11Z\"/><path d=\"M2 5C2 3.34315 3.34315 2 5 2H19C20.6569 2 22 3.34315 22 5C22 6.65685 20.6569 8 19 8H5C3.34315 8 2 6.65685 2 5Z\"/><path stroke-linecap=\"round\" d=\"M13 5L19 5\"/><path stroke-linecap=\"round\" d=\"M13 11L19 11\"/><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M6 5H6.0001\"/><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M6 11H6.0001\"/></g>"
     },
     "server-square-linear": {
       "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><path d=\"M2 11C2 7.22876 2 5.34315 3.17157 4.17157C4.34315 3 6.22876 3 10 3H14C17.7712 3 19.6569 3 20.8284 4.17157C22 5.34315 22 7.22876 22 11V13C22 16.7712 22 18.6569 20.8284 19.8284C19.6569 21 17.7712 21 14 21H10C6.22876 21 4.34315 21 3.17157 19.8284C2 18.6569 2 16.7712 2 13V11Z\"/><path d=\"M2 12H22\"/><path stroke-linecap=\"round\" d=\"M13.5 16.5H18\"/><path stroke-linecap=\"round\" d=\"M13.5 7.5L18 7.5\"/><path stroke-linecap=\"round\" d=\"M6 17.5L6 15.5\"/><path stroke-linecap=\"round\" d=\"M6 8.5L6 6.5\"/><path stroke-linecap=\"round\" d=\"M9 17.5L9 15.5\"/><path stroke-linecap=\"round\" d=\"M9 8.5L9 6.5\"/></g>"

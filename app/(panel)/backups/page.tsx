@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { DeleteButton } from "@/components/ui/DangerAction";
 import { DestinationsPanel } from "./_components/DestinationsPanel";
 import { EncryptionPanel } from "./_components/EncryptionPanel";
+import { HostedCopiesPanel } from "./_components/HostedCopiesPanel";
 import { Hint } from "@/components/ui/Hint";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatTile } from "@/components/ui/StatTile";
@@ -33,6 +34,9 @@ import {
   destinationsPhrase,
   policyDestinations,
   type DestinationView,
+  type HostedDiskView,
+  type HostedOverviewView,
+  type HostedSourceView,
   type PolicyView,
   type RunView,
   type RunsResponse,
@@ -66,7 +70,15 @@ interface ClusterBackups {
   policies: Located<PolicyView>[];
   runs: Located<RunView>[];
   destinations: Located<DestinationView>[];
-  perServer: { memberId: string; activeRunId: string | null; overview: Overview | null; catalog: TargetCatalog | null }[];
+  /** What each server keeps for the others. Absent from a panel on an older version. */
+  hosted?: Located<HostedSourceView>[];
+  perServer: {
+    memberId: string;
+    activeRunId: string | null;
+    overview: Overview | null;
+    catalog: TargetCatalog | null;
+    hostedDisk?: HostedDiskView | null;
+  }[];
   members: MemberStatus[];
 }
 
@@ -103,6 +115,8 @@ export default function BackupsPage() {
   });
   const destinations = useResource<{ destinations: DestinationView[] }>(isSolo ? "/api/backups/destinations" : null);
   const catalog = useResource<TargetCatalog>(isSolo ? "/api/backups/targets" : null);
+  // Alone, a server only keeps copies of servers it was once linked to.
+  const hosted = useResource<HostedOverviewView>(isSolo ? "/api/backups/hosted" : null, { intervalMs: poll20000 });
   const cluster = useResource<ClusterBackups>(isSolo ? null : "/api/cluster/backups", { intervalMs: poll5000 });
 
   const [busy, setBusy] = useState<string | null>(null);
@@ -127,6 +141,7 @@ export default function BackupsPage() {
       void runs.refresh();
       void policies.refresh();
       void destinations.refresh();
+      void hosted.refresh();
     } else void cluster.refresh();
   };
   // Where something new goes: the server named in the URL, else this one.
@@ -251,6 +266,10 @@ export default function BackupsPage() {
   const runsError = isSolo ? runs.error : cluster.error;
   const destinationsError = isSolo ? destinations.error : cluster.error;
   const destinationsLoaded = isSolo ? Boolean(destinations.data) : Boolean(cluster.data);
+  const hostedList: Located<HostedSourceView>[] = isSolo ? tag(hosted.data?.sources) : onlyMember(cluster.data?.hosted ?? [], serverParam);
+  const hostedDisks: Record<string, HostedDiskView | null | undefined> = isSolo
+    ? { [self]: hosted.data?.disk }
+    : Object.fromEntries((cluster.data?.perServer ?? []).map((p) => [p.memberId, p.hostedDisk]));
 
   return (
     <>
@@ -536,6 +555,16 @@ export default function BackupsPage() {
             </ul>
           )}
         </Panel>
+
+        {/* Someone else's archives, kept here: after this server's own. */}
+        <HostedCopiesPanel
+          sources={hostedList}
+          disks={hostedDisks}
+          loaded={isSolo ? Boolean(hosted.data) : Boolean(cluster.data)}
+          error={isSolo ? hosted.error : cluster.error}
+          isSolo={isSolo}
+          onChanged={refreshAll}
+        />
 
         <Hint tone="warn" title="Gli archivi contengono segreti">
           Le variabili e le credenziali dei database vengono salvate cifrate con la chiave di questo
