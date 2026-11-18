@@ -441,7 +441,9 @@ async function resolveArchive(
     throw new Error(
       destination.type === "local"
         ? "L'archivio non è più sul disco di questo server: è stato spostato o eliminato fuori dal pannello."
-        : `L'archivio non c'è più in «${destination.name}»: è stato eliminato fuori dal pannello, o da una regola di scadenza del bucket.`
+        : stat.detail
+          ? `L'archivio non è più intero in «${destination.name}». ${stat.detail}`
+          : `L'archivio non c'è più in «${destination.name}»: è stato eliminato fuori dal pannello, o da una regola di scadenza del bucket.`
     );
   }
 

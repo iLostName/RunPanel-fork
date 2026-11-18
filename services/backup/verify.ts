@@ -160,7 +160,7 @@ export async function startRunVerification(runId: string): Promise<VerificationV
         report = await verifyArchiveFile(file, { expectedSha256: expected, onProgress, open: panelArchiveOpener() });
       } else {
         const stat = await destination.stat(archivePath);
-        if (!stat.exists) throw new Error(`L'archivio non c'è più in «${destination.name}».`);
+        if (!stat.exists) throw new Error(stat.detail ?? `L'archivio non c'è più in «${destination.name}».`);
         report = await verifyArchiveStream(await destination.open(archivePath), expected, {
           total: stat.bytes,
           onProgress,

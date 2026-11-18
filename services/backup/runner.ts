@@ -313,7 +313,7 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
     if (destination.type !== "local") emit(`Carico l'archivio su «${destination.name}» (${formatBytes(archive.bytes)})…`);
     let stored: { ref: string; bytes: number };
     try {
-      stored = await destination.put(archive.absolutePath, fileName);
+      stored = await destination.put(archive.absolutePath, fileName, { log: emit, signal: request.signal });
     } catch (err) {
       // The sentence a person acts on goes into the run; the provider's own
       // code and words, for whoever reads the log, go there.
