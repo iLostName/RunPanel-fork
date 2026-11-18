@@ -55,6 +55,20 @@ import {
 import { sweep } from "./docker/gc";
 import { restartFromLastDeployment } from "./project-restart";
 import { ROLLBACK_NOTE } from "@/lib/deploy-explain";
+import { envFileEntry, releaseMode, rollbackPlan } from "@/lib/releases";
+import { createRelease, freeCheckoutBuildDirs } from "./releases-fs";
+import {
+  activateRelease,
+  currentRelease,
+  handOver,
+  leaveReleases,
+  manifestOf,
+  previousGoodRelease,
+  projectWorkDir,
+  pruneReleases,
+  releasesRoot,
+  type ReleaseRef,
+} from "./project-releases";
 import { BuildLogFile } from "./build-logs";
 import { projectEvents } from "./events";
 import path from "path";
@@ -90,7 +104,9 @@ const REBUILD_CLEAN_DIRS: Record<string, string[]> = {
 };
 
 /**
- * Runtimes whose build writes into the same directory the app runs from.
+ * Runtimes whose build writes into the same directory the app runs from —
+ * unless it gets a release folder of its own (lib/releases.ts), which is never
+ * the case on Windows.
  *
  * Docker and Compose build an image instead, so a running container holds
  * nothing on the host and the old instance can stay up through the build.
@@ -217,6 +233,18 @@ async function runDeploy(
   // failure the previous version can stand in for (the rollback below).
   let healthFailed = false;
 
+  /*
+    Where the version being deployed lives. Until the source is resolved, the
+    version that runs now: its release folder, or the project folder. From
+    then on, the folder this deploy builds in — its own release folder when
+    the project has one (lib/releases.ts), the project folder otherwise.
+  */
+  let deployDir = projectWorkDir(project.slug);
+  let release: ReleaseRef | null = null;
+  // A project going back to building in place hands its last version's data
+  // to the project folder; its version folders are removed once that worked.
+  let leftReleases = false;
+
   async function updateDeployment(fields: Partial<DeploymentsTable>) {
     await db.updateTable("deployments").set(fields).where("id", "=", deploymentId).execute();
     if (fields.status) {
@@ -307,15 +335,16 @@ async function runDeploy(
       captured: the contract is still being resolved when the first phase
       runs, and the commit is not known until the source has been fetched.
 
-      `projectDir` is the repository in every phase — deliberately not the
-      artifact directory the release command gets. For a static project the
-      two differ, and a one-time chore belongs to the project rather than to
-      the folder that ends up being served.
+      `projectDir` is the folder of the version being deployed in every phase
+      (`deployDir`: its release folder when it has one) — deliberately not the
+      artifact directory. For a static project the two differ, and a one-time
+      chore belongs to the project rather than to the folder that ends up
+      being served.
     */
     const phaseCtx = (image: string | null): PhaseContext => ({
       runtimeType: project.runtime_type,
       slug: project.slug,
-      projectDir: getRepoPath(project.slug),
+      projectDir: deployDir,
       image,
       env: envVars,
       hostEnv: commandEnv ?? undefined,
@@ -328,8 +357,13 @@ async function runDeploy(
     await runPhase("pre-deploy", oneTime, phaseCtx(null));
     checkpoint();
 
-    // REBUILD only: stop + clean first
-    if (mode === "rebuild") {
+    /*
+      REBUILD in place only: stop + clean first. Run once the contract says
+      whether this deploy builds in place: a version folder starts empty, so
+      there is nothing to clean, and the running app can stay up until the
+      switch.
+    */
+    const cleanForRebuild = async () => {
       if (wasRunning) {
         appendLog("--- Stopping process for clean rebuild ---");
         try {
@@ -377,7 +411,7 @@ async function runDeploy(
           appendLog(`Removed ${dir}/`);
         }
       }
-    }
+    };
 
     // Source acquisition — deploy pulls from git, rebuild keeps local files
     const projectDir = getRepoPath(project.slug);
@@ -435,6 +469,15 @@ async function runDeploy(
       );
     }
 
+    /*
+      What this deploy builds from. A deploy builds what it just fetched into
+      the project folder. A rebuild fetches nothing and rebuilds the version
+      that runs now: with version folders that is the current one, which also
+      holds any edit made from the file manager, and which may be on an older
+      commit than the project folder after a deploy that failed and went back.
+    */
+    const sourceDir = mode === "rebuild" ? projectWorkDir(project.slug) : projectDir;
+
     // Now that the source is on disk, work out the rest of the contract.
     //
     // Precedence, lowest first: a preset detected from the repository's shape,
@@ -444,10 +487,10 @@ async function runDeploy(
     // The repository's contract is untrusted input: it arrives with whatever
     // was pushed. Strip the fields that would let it reach outside its own
     // container before it takes part in the merge at all.
-    const rawRepoContract = readRepoContract(projectDir);
+    const rawRepoContract = readRepoContract(sourceDir);
     const stripped = rawRepoContract === null ? null : stripPanelOnlyFields(rawRepoContract);
     const repoContract = stripped?.contract ?? null;
-    const preset = detectPreset(projectDir, project.runtime_type);
+    const preset = detectPreset(sourceDir, project.runtime_type);
 
     if (preset) {
       appendLog(`Detected project shape: ${preset.label}`);
@@ -483,6 +526,50 @@ async function runDeploy(
         );
       }
     }
+
+    /*
+      A folder of its own for this version, or the project folder as before.
+
+      Decided here, on the resolved contract, because the automatic return is
+      what switches it — together with the native opt-in, off unless the
+      operator turned it on, and which a repository cannot set for itself
+      (`PANEL_ONLY_FIELDS`). Off, a native project builds in place exactly as
+      it always did. Made before the env file, the post-source commands and
+      the build, which all run in it. Nothing has been stopped yet, so a
+      version folder that cannot be made fails a deploy that cost nothing.
+    */
+    const releases = releaseMode({
+      runtimeType: project.runtime_type,
+      platform: process.platform,
+      sourceType: project.source_type,
+      gitCheckout: repoExists(project.slug),
+      rollbackEnabled: contract.rollback.enabled,
+      nativeEnabled: contract.rollback.native,
+    });
+
+    if (releases.on) {
+      appendLog("\n--- Release folder ---");
+      const previous = currentRelease(project.slug);
+      const created = await createRelease({
+        id: deploymentId,
+        root: releasesRoot(project.slug),
+        checkout: projectDir,
+        source: sourceDir,
+        previous: previous ? { ...previous, manifest: manifestOf(project.slug, previous.id) } : null,
+        // A rebuild is a clean one: nothing reused from the version before.
+        seed: mode === "deploy",
+        envFile: envFileEntry(contract.envFile),
+        log: appendLog,
+        signal,
+      });
+      release = { id: created.id, dir: created.dir };
+      deployDir = created.dir;
+      appendLog(`Building in ${created.dir}`);
+    } else {
+      deployDir = projectDir;
+      if (mode === "rebuild") await cleanForRebuild();
+    }
+    checkpoint();
 
     // Auto-inject service connection URLs (DB, Redis, etc.).
     //
@@ -608,9 +695,11 @@ async function runDeploy(
     // together — appending it to the contract here left it out of every restart,
     // because a restart re-reads the contract from the row and this never wrote
     // it back.
+    // Into the version's own folder: a release gets its own file rather than a
+    // link to one, see `envFileEntry`.
     if (contract.envFile.enabled && !isDockerApp) {
-      const written = writeEnvFileInto(projectDir, contract.envFile.path, envVars);
-      appendLog(`Wrote env file to ${path.relative(projectDir, written)}`);
+      const written = writeEnvFileInto(deployDir, contract.envFile.path, envVars);
+      appendLog(`Wrote env file to ${path.relative(deployDir, written)}`);
     }
 
     /*
@@ -637,13 +726,15 @@ async function runDeploy(
     //
     // and every subsequent deploy of a Prisma project fails the same way, for
     // as long as the app is up. Real zero-downtime here needs a separate build
-    // directory, not a later stop. Placed after preflight so a deploy that was
-    // never going to run does not take the app down on its way out.
+    // directory, not a later stop — which is what a release folder is, and why
+    // Windows, where there are none, still stops. Placed after preflight so a
+    // deploy that was never going to run does not take the app down on its way out.
     let stoppedForBuild = false;
     if (
       isWindows &&
       wasRunning &&
       mode === "deploy" &&
+      !release &&
       IN_PLACE_BUILD_RUNTIMES.has(project.runtime_type)
     ) {
       appendLog("\n--- Stopping previous instance ---");
@@ -661,7 +752,7 @@ async function runDeploy(
     // this phase; see above for why Windows cannot.
     appendLog("\n--- Building ---");
 
-    const buildResult = await buildProject(projectDir, project.runtime_type, {
+    const buildResult = await buildProject(deployDir, project.runtime_type, {
       slug: project.slug,
       deploymentId,
       buildCmd: contract.commands.build,
@@ -718,10 +809,11 @@ async function runDeploy(
       await runReleaseCommand(contract.commands.release, {
         runtimeType: project.runtime_type,
         slug: project.slug,
-        // The repository, as the settings promise and the one-time phases use:
-        // a static build's artifactDir is dist/, where repo-relative paths and
-        // the written .env are not.
-        projectDir: getRepoPath(project.slug),
+        // The version's folder, as the settings promise and the one-time phases
+        // use: a static build's artifactDir is dist/, where repo-relative paths
+        // and the written .env are not. In a release folder the data the app
+        // keeps is linked in, so a migration reaches the live database.
+        projectDir: deployDir,
         image: buildResult.startCmd.replace(/^docker:/, ""),
         // In the image for docker, on the project network: the names resolve there.
         env: composeCtx ? (commandEnv ?? envVars) : envVars,
@@ -750,8 +842,11 @@ async function runDeploy(
     });
 
     // Stop the old process only after the build succeeded — unless the build
-    // itself already required it down.
-    if (wasRunning && mode === "deploy" && !stoppedForBuild) {
+    // itself already required it down. Whatever the row says when a release
+    // folder is involved, coming or going: the hand-over below moves files out
+    // of the version that ran, and that version has to be stopped for it.
+    const leaving = !release && IN_PLACE_BUILD_RUNTIMES.has(project.runtime_type) && currentRelease(project.slug) !== null;
+    if ((release || leaving || (wasRunning && mode === "deploy")) && !stoppedForBuild) {
       appendLog("\n--- Stopping previous instance ---");
       try {
         await processManager.stop(project.slug, project.runtime_type);
@@ -761,11 +856,46 @@ async function runDeploy(
       }
     }
 
+    /*
+      The data the outgoing version wrote where the project folder had nothing
+      yet goes to the project folder now that it has stopped (planPromotion in
+      lib/releases.ts). Going back to building in place does the same, so the
+      app finds it in the folder it is about to start from.
+
+      A failure here is said and stepped over: until the hand-over the new
+      version reaches those files through links into the old one, and the old
+      one is kept on disk for as long as it holds them, so continuing loses
+      nothing — while stopping would leave the app down.
+    */
+    try {
+      if (release) {
+        appendLog("\n--- Switching release ---");
+        await handOver(project.slug, release, contract, appendLog);
+      } else if (leaving) {
+        leftReleases = await leaveReleases(project.slug, contract, appendLog);
+      }
+    } catch (err) {
+      appendLog(`ATTENZIONE: passaggio dei dati alla cartella del progetto non riuscito: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // After the stop and before the start, which is what the name has to
     // mean: in this instant nothing is serving, and that is the window a
     // chore like swapping a database file needs.
     await runPhase("pre-start", oneTime, phaseCtx(builtImage));
     checkpoint();
+
+    // The new version becomes `current` right before it starts, so whatever
+    // follows the project's files — the file manager, a scheduled task — finds
+    // the version that is running. Not fatal: the process is started from the
+    // artifact directory whatever the pointer says.
+    if (release) {
+      try {
+        activateRelease(project.slug, release.id);
+        appendLog(`Current release: ${release.id}`);
+      } catch (err) {
+        appendLog(`ATTENZIONE: il puntatore alla versione corrente non è stato aggiornato: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
 
     // Start new process
     appendLog("\n--- Starting application ---");
@@ -860,6 +990,23 @@ async function runDeploy(
     */
     await runPhase("post-deploy", oneTime, phaseCtx(builtImage));
     checkpoint();
+
+    /*
+      Now that this version has proved good, the ones no longer needed go: all
+      but it and the one before, which is what the next failed deploy goes
+      back to — or all of them, for a project back to building in place. The
+      project folder's own node_modules and build output go too, unused since
+      the app runs from a version folder. Before the final line, so the log
+      says what was removed; never a reason to fail a deploy that worked.
+    */
+    if (release || leftReleases) {
+      try {
+        await pruneReleases(project, contract, appendLog, { keepNone: !release });
+        if (release) await freeCheckoutBuildDirs(projectDir, appendLog);
+      } catch (err) {
+        appendLog(`Old release folders not cleaned up: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
 
     // Finalize
     appendLog(`\n=== ${label} successful ===`);
@@ -976,18 +1123,42 @@ async function runDeploy(
       Automatic rollback: a version that never answered is replaced by the last
       one that did, instead of leaving the app down or half up.
 
-      Docker only. Each deploy is its own image, and the previous one is still
-      on disk: the sweep that retires old images runs after a success, never
-      after a failure. Native runtimes build in the same folder, so by now the
-      previous version's files are gone and "restart the last good deploy"
+      Docker: each deploy is its own image, and the previous one is still on
+      disk — the sweep that retires old images runs after a success, never
+      after a failure. Native: each deploy is its own release folder, and the
+      previous one is kept for exactly this (`pruneReleases`); the restart
+      points `current` back at it and starts it as it was, data links and all.
+      A native deploy that built in place has nothing to go back to: by now
+      the previous version's files are gone and "restart the last good deploy"
       would run the new code. Compose rebuilds the stack from the checkout,
-      with the same problem.
+      with the same problem. `rollbackPlan` has the cases.
 
       After the status update above, because the restart refuses a project
       that still reads "deploying"; under the deploy's lock, which it already
       holds. The deployment stays failed, with a note saying what came back.
     */
-    if (healthFailed && !cancelled && project.runtime_type === "docker" && contract.rollback.enabled) {
+    const previousRelease = release ? await previousGoodRelease(project.id, project.slug).catch(() => null) : null;
+    const rollback = rollbackPlan({
+      healthFailed,
+      cancelled,
+      rollbackEnabled: contract.rollback.enabled,
+      runtimeType: project.runtime_type,
+      usedRelease: release !== null,
+      previous: previousRelease,
+    });
+
+    if (!rollback.attempt && (rollback.reason === "first" || rollback.reason === "missing")) {
+      appendLog("\n--- Rollback ---");
+      appendLog(
+        rollback.reason === "first"
+          ? "Nessuna versione precedente da rimettere online: è il primo deploy con le cartelle per versione, " +
+              "e quella di prima girava nella cartella del progetto, che il deploy ha già portato al nuovo commit."
+          : "Nessuna versione precedente da rimettere online: la sua cartella non c'è più."
+      );
+      logFile.flush();
+    }
+
+    if (rollback.attempt) {
       appendLog("\n--- Rollback ---");
       try {
         const result = await restartFromLastDeployment(project.id, { underLock: true });
@@ -1005,6 +1176,19 @@ async function runDeploy(
         appendLog(
           `Ritorno alla versione precedente non riuscito: ${redactGitSecrets(rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr))}`
         );
+      }
+      logFile.flush();
+    }
+
+    // A version folder that never ran goes now, and one the rollback left
+    // behind with it — unless it holds something the app wrote. The current
+    // one stays, whatever it is: after a failed deploy with no way back, that
+    // is the version still up.
+    if (release) {
+      try {
+        await pruneReleases(project, contract, appendLog);
+      } catch (pruneErr) {
+        appendLog(`Old release folders not cleaned up: ${pruneErr instanceof Error ? pruneErr.message : String(pruneErr)}`);
       }
       logFile.flush();
     }

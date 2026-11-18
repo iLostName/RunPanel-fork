@@ -22,18 +22,42 @@ import { useMemberApi, useServerHref } from "@/lib/hooks/useNode";
 import { formatBytes } from "@/lib/format";
 import type { Located } from "@/lib/cluster-merge";
 import { DestinationForm, type DestinationDetail } from "./DestinationForm";
-import { destinationIcon, technicalLine, whereItWrites, wherePlace } from "./destinations/kinds";
-import type { DestinationView } from "@/components/backups/types";
+import { describeDestination } from "./providers";
+import { remoteIcon, remotePlace, remoteTechnical } from "./destinations/where";
+import type { DestinationView, S3TargetView } from "@/components/backups/types";
 
 type Row = Located<DestinationView>;
+
+/** Where a deleted destination's archives stay, for the sentence that says so. */
+function whereArchivesStay(destination: DestinationView): string {
+  if (destination.type === "local") return destination.directory ? `in ${destination.directory}` : "sul disco di questo server";
+  if (destination.type === "s3") return `nel bucket «${(destination.target as S3TargetView | null | undefined)?.bucket ?? ""}»`;
+  if (destination.type === "telegram") {
+    return destination.telegram?.chat === "channel"
+      ? `su Telegram, nel canale «${destination.telegram.title ?? ""}»`
+      : "su Telegram, nei Messaggi salvati";
+  }
+  return remotePlace(destination) ?? `in «${destination.name}»`;
+}
+
+/** Region, endpoint and prefix: the line expert mode adds under an S3 destination. */
+function s3Technical(target: S3TargetView): string {
+  return ` · ${target.region} · ${target.endpoint}${target.prefix ? ` · /${target.prefix}` : ""}`;
+}
+
+const ICONS: Record<string, string> = {
+  local: "solar:server-linear",
+  telegram: "solar:plain-linear",
+};
 
 function usageLine(destination: DestinationView): string {
   const used = destination.usedBy ?? [];
   const count = destination.usedByCount ?? used.length;
+  // A policy that keeps a copy here, rather than writing here first, says so.
   const policies =
     count === 0
       ? "Nessuna pianificazione la usa"
-      : `La usa${count === 1 ? "" : "no"} ${used.map((p) => `«${p.name}»`).join(", ")}${count > used.length ? `${used.length ? " e " : ""}${count - used.length} di altri account` : ""}`;
+      : `La usa${count === 1 ? "" : "no"} ${used.map((p) => `«${p.name}»${p.primary === false ? " (copia)" : ""}`).join(", ")}${count > used.length ? `${used.length ? " e " : ""}${count - used.length} di altri account` : ""}`;
   const archives = destination.archives ?? 0;
   return archives > 0
     ? `${policies} · ${archives} archivi${destination.archiveBytes ? ` (${formatBytes(destination.archiveBytes)})` : ""}`
@@ -150,11 +174,23 @@ export function DestinationsPanel({
     onChanged();
   }
 
-  /** Policies of the same server that write somewhere else: what "sposta" would move. */
-  const elsewhere = (row: Row) =>
-    destinations
-      .filter((d) => d.memberId === row.memberId && d.id !== row.id)
-      .reduce((n, d) => n + (d.usedByCount ?? 0), 0);
+  /**
+   * Policies of the same server whose primary is somewhere else: what "sposta"
+   * would move. A policy keeping a copy here counts — it would make this its
+   * primary. Without `primary` (an older server) every listed policy is one
+   * that writes here first.
+   */
+  const elsewhere = (row: Row) => {
+    const all = new Set<string>();
+    const here = new Set<string>();
+    for (const destination of destinations.filter((d) => d.memberId === row.memberId)) {
+      for (const policy of destination.usedBy ?? []) {
+        all.add(policy.id);
+        if (destination.id === row.id && policy.primary !== false) here.add(policy.id);
+      }
+    }
+    return [...all].filter((id) => !here.has(id)).length;
+  };
 
   const deleteDialog = (() => {
     if (!deleting) return null;
@@ -173,8 +209,8 @@ export function DestinationsPanel({
             <>
               <p>{usageLine(deleting)}.</p>
               <p className="mt-2">
-                Eliminandola sparirebbero anche quelle pianificazioni. Apri ognuna e scegli un&apos;altra destinazione,
-                oppure rendi predefinita un&apos;altra destinazione spostandoci le pianificazioni; poi riprova.
+                Eliminandola sparirebbero anche quelle pianificazioni, o una loro copia. Apri ognuna e togli questa
+                destinazione dalla lista, o sostituiscila con un&apos;altra; poi riprova.
               </p>
             </>
           }
@@ -200,11 +236,19 @@ export function DestinationsPanel({
             <>
               <p>
                 Qui ci sono {archives} archivi{deleting.archiveBytes ? ` (${formatBytes(deleting.archiveBytes)})` : ""}.
-                Restano dove sono — {wherePlace(deleting)} —
-                ma il pannello non li vedrà più: niente ripristino, download o pulizia automatica.
+                Restano dove sono — {whereArchivesStay(deleting)} —
+                ma il pannello non li vedrà più: niente ripristino, download o pulizia automatica da qui.
               </p>
-              <p className="mt-2">Se ti servono, scaricali prima dalla Cronologia.</p>
+              <p className="mt-2">
+                I backup che hanno una copia anche in un&apos;altra destinazione restano ripristinabili da quella. Se ti
+                servono gli altri, scaricali prima dalla Cronologia.
+              </p>
+              {deleting.type === "telegram" && (
+                <p className="mt-2">La sessione del pannello su Telegram viene chiusa: sparisce dai dispositivi dell&apos;account.</p>
+              )}
             </>
+          ) : deleting.type === "telegram" ? (
+            "Nessuna pianificazione la usa e non contiene archivi. La sessione del pannello su Telegram viene chiusa."
           ) : (
             "Nessuna pianificazione la usa e non contiene archivi."
           )
@@ -239,7 +283,7 @@ export function DestinationsPanel({
         <EmptyState
           icon="solar:folder-linear"
           title="Nessuna destinazione"
-          description="Una destinazione è dove finiscono gli archivi: il disco di questo server, o fuori da qui — un archivio S3, un NAS, Google Drive."
+          description="Una destinazione è dove finiscono gli archivi: il disco di questo server, oppure fuori da qui — un archivio S3, Telegram, un NAS, Google Drive."
           className="py-8"
         />
       ) : (
@@ -247,7 +291,7 @@ export function DestinationsPanel({
           {destinations.map((row) => (
             <li key={`${row.memberId}:${row.id}`}>
               <ListRow
-                icon={destinationIcon(row.type)}
+                icon={ICONS[row.type] ?? remoteIcon(row.type) ?? "solar:cloud-storage-linear"}
                 title={row.name}
                 badges={
                   <>
@@ -261,8 +305,16 @@ export function DestinationsPanel({
                 }
                 description={
                   <>
-                    {whereItWrites(row)}
-                    <Technical>{technicalLine(row)}</Technical>
+                    {describeDestination(row)}
+                    <Technical>
+                      {row.type === "local"
+                        ? row.directory
+                          ? ""
+                          : " · data/backups/archives"
+                        : row.type === "s3" && row.target
+                          ? s3Technical(row.target as S3TargetView)
+                          : (remoteTechnical(row) ?? "")}
+                    </Technical>
                   </>
                 }
                 meta={usageLine(row)}
@@ -319,7 +371,14 @@ export function DestinationsPanel({
 
       {/* Mounted only while open, so a cancelled form starts empty next time. */}
       {adding && (
-        <DestinationForm isOpen onOpenChange={setAdding} onSaved={onChanged} canSetDefault={me.isOwner} isOwner={me.isOwner} />
+        <DestinationForm
+          isOpen
+          onOpenChange={setAdding}
+          onSaved={onChanged}
+          canSetDefault={me.isOwner}
+          canChooseFolder={me.isOwner}
+          isOwner={me.isOwner}
+        />
       )}
       {editing && (
         <DestinationForm
@@ -330,6 +389,7 @@ export function DestinationsPanel({
           editing={editing.detail}
           archives={editing.row.archives ?? 0}
           apiFor={(path) => memberApi(editing.row.memberId, path)}
+          memberId={editing.row.memberId}
         />
       )}
 
@@ -352,7 +412,7 @@ export function DestinationsPanel({
                   className="mt-3"
                   isSelected={defaulting.move}
                   onChange={(move) => setDefaulting({ ...defaulting, move })}
-                  label={`Sposta qui anche ${elsewhere(defaulting.row) === 1 ? "la pianificazione che oggi salva" : `le ${elsewhere(defaulting.row)} pianificazioni che oggi salvano`} altrove`}
+                  label={`Sposta qui anche ${elsewhere(defaulting.row) === 1 ? "la pianificazione che oggi salva" : `le ${elsewhere(defaulting.row)} pianificazioni che oggi salvano`} prima altrove (le loro altre copie restano)`}
                 />
               )}
             </>

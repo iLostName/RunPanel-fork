@@ -13,21 +13,32 @@ import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { Technical } from "@/components/ui/Technical";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Badge } from "@/components/ui/Badge";
 import { useEventStream } from "@/lib/hooks/useEventStream";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
-import { formatBytes, formatDuration, formatWhen } from "@/lib/format";
+import { formatBytes, formatDuration, formatRelative, formatWhen } from "@/lib/format";
+import { copiesLabel, countCopies, readOrder } from "@/lib/backup-copies";
+import { MSG } from "@/lib/copy";
+import { toast } from "@/lib/toast";
 import { KIND_LABELS, RestoreDialog } from "@/components/backups/RestoreDialog";
 import { IntegrityCheck } from "../../_components/IntegrityCheck";
 import { triggerLabel } from "../../_components/format";
-import { destinationPhrase, type ArtifactView, type RunDetail } from "@/components/backups/types";
+import {
+  COPY_STATUS,
+  destinationPhrase,
+  type ArtifactView,
+  type CopyView,
+  type RunDetail,
+} from "@/components/backups/types";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 type OpsEvent =
   | { type: "ready"; runId: string; status: string }
   | { type: "backup:log"; line: string }
   | { type: "backup:status"; status: string; message?: string }
-  | { type: "backup:artifact"; label: string; status: string; bytes?: number; error?: string };
+  | { type: "backup:artifact"; label: string; status: string; bytes?: number; error?: string }
+  | { type: "backup:copy"; copyId: string; destination: string; status: string };
 
 export default function BackupRunPage({ params }: { params: Promise<{ runId: string }> }) {
   const poll4000 = usePollInterval(4000);
@@ -41,6 +52,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
   );
 
   const [restoreOpen, setRestoreOpen] = useState(false);
+  const [retrying, setRetrying] = useState<string | null>(null);
   const running = data?.status === "running";
   const [streamed, setStreamed] = useState<LogLine[]>([]);
   // Touched only from the event handler, never during render: the id has to be
@@ -54,9 +66,10 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
         const line = { id: nextId.current++, text: event.line };
         setStreamed((current) => [...current.slice(-2000), line]);
       }
-      if (event.type === "backup:status" && event.status !== "running") {
+      if ((event.type === "backup:status" && event.status !== "running") || event.type === "backup:copy") {
         // The poll would notice within a few seconds anyway; asking now means
-        // the page stops saying "in corso" the moment it stops being true.
+        // the page stops saying "in corso" the moment it stops being true, and
+        // each copy turns green as it lands.
         refresh();
       }
     },
@@ -123,6 +136,29 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
   const ok = data.artifacts.filter((artifact) => artifact.status === "ok");
   const failed = data.artifacts.filter((artifact) => artifact.status === "failed");
   const skipped = data.artifacts.filter((artifact) => artifact.status === "skipped");
+  const copies = data.copies ?? [];
+  const copyCount = countCopies(copies);
+  const lostCopies = data.status === "running" || data.status === "failed" ? [] : copies.filter((copy) => copy.status === "failed");
+  // Which copy a restore or a download would read now: the same order the server follows.
+  const readsFirst = readOrder(copies.map((copy) => ({ ...copy, configured: copy.destinationId !== null })))[0]?.id ?? null;
+
+  async function retryCopy(copy: CopyView) {
+    setRetrying(copy.id);
+    try {
+      const res = await fetch(api(`/api/backups/runs/${runId}/copies/${copy.id}/retry`), { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(body.error ?? "Copia non avviata");
+        return;
+      }
+      toast.success(`Copia su «${copy.destinationName}» avviata: la pagina si aggiorna quando arriva.`);
+      await refresh();
+    } catch {
+      toast.error(MSG.unreachable);
+    } finally {
+      setRetrying(null);
+    }
+  }
 
   return (
     <>
@@ -173,9 +209,11 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
               <Field
                 label="Salvato"
                 value={
-                  data.destinationType
-                    ? destinationPhrase(data.destinationType, data.destinationName)
-                    : "destinazione non più configurata"
+                  copies.length > 1
+                    ? copiesLabel(copyCount)
+                    : data.destinationType
+                      ? destinationPhrase(data.destinationType, data.destinationName)
+                      : "destinazione non più configurata"
                 }
               />
             )}
@@ -212,7 +250,12 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
           )}
 
           {data.hasArchive && data.status !== "running" && (
-            <IntegrityCheck runId={data.id} checksum={data.checksum} className="border-separator mt-4 border-t pt-4" />
+            <IntegrityCheck
+              runId={data.id}
+              checksum={data.checksum}
+              showSource={copies.length > 1}
+              className="border-separator mt-4 border-t pt-4"
+            />
           )}
 
           {data.status === "partial" && (
@@ -223,12 +266,54 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
             </Hint>
           )}
 
+          {lostCopies.length > 0 && (
+            <Hint
+              tone="warn"
+              className="mt-4"
+              title={lostCopies.length === 1 ? "Una copia non è stata salvata" : `${lostCopies.length} copie non sono state salvate`}
+            >
+              L&apos;archivio è al sicuro in{" "}
+              {copies
+                .filter((copy) => copy.status === "done")
+                .map((copy) => `«${copy.destinationName}»`)
+                .join(", ")}
+              , ma non in {lostCopies.map((copy) => `«${copy.destinationName}»`).join(", ")}. Quando la destinazione torna
+              raggiungibile, premi «Riprova la copia» qui sotto: parte dalla copia che c&apos;è, dopo averla confrontata
+              con l&apos;archivio creato.
+            </Hint>
+          )}
+
           {data.status === "failed" && data.errorMessage && (
             <Hint tone="warn" className="mt-4" title="Il backup è fallito">
               {data.errorMessage}
             </Hint>
           )}
         </Panel>
+
+        {/* One destination is what a backup always was, and the summary says
+            where; the list is for the policies that keep several copies. */}
+        {copies.length > 1 && (
+          <Panel padding="flush">
+            <div className="p-4 sm:p-5">
+              <PanelHeader
+                title="Copie"
+                description="Lo stesso archivio in ogni destinazione della pianificazione. Ripristino, download e verifica usano la prima disponibile, partendo da quelle su questo server."
+              />
+            </div>
+            <ul className="divide-border divide-y">
+              {copies.map((copy) => (
+                <CopyRow
+                  key={copy.id}
+                  copy={copy}
+                  readFirst={copy.id === readsFirst}
+                  canRetry={copy.status === "failed" && !running && copy.destinationId !== null && copyCount.done > 0}
+                  retrying={retrying === copy.id}
+                  onRetry={() => void retryCopy(copy)}
+                />
+              ))}
+            </ul>
+          </Panel>
+        )}
 
         <Panel padding="flush">
           <div className="p-4 sm:p-5">
@@ -292,6 +377,69 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
       <p className="text-muted text-xs">{label}</p>
       <p className="text-foreground mt-0.5 text-sm">{value}</p>
     </div>
+  );
+}
+
+/** When a copy got where it is, or how it is doing, in words. */
+function copyLine(copy: CopyView): string {
+  const where = copy.destinationId === null ? "destinazione eliminata" : copy.local ? "su questo server" : "fuori da questo server";
+  switch (copy.status) {
+    case "done":
+      return `${where} · ${formatBytes(copy.bytes)} · salvata ${formatRelative(copy.finishedAt)}`;
+    case "failed":
+      return `${where} · non riuscita ${formatRelative(copy.finishedAt)}`;
+    case "uploading":
+      return `${where} · in corso da ${formatRelative(copy.startedAt)}`;
+    default:
+      return `${where} · aspetta il suo turno`;
+  }
+}
+
+function CopyRow({
+  copy,
+  readFirst,
+  canRetry,
+  retrying,
+  onRetry,
+}: {
+  copy: CopyView;
+  /** The copy a restore or a download would read now. */
+  readFirst: boolean;
+  canRetry: boolean;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <li className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+      <span className="bg-surface-secondary text-muted grid size-8 shrink-0 place-items-center rounded-lg">
+        <Icon icon={copy.local ? "solar:server-linear" : "solar:cloud-storage-linear"} width={17} aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-foreground min-w-0 truncate text-sm font-medium">{copy.destinationName}</span>
+          <StatusBadge status={COPY_STATUS[copy.status]} />
+          {copy.position === 0 && <Badge tone="accent">Principale</Badge>}
+          {readFirst && (
+            <span title="Ripristino e download leggono questa copia per prima" className="inline-flex">
+              <Badge icon="solar:download-minimalistic-linear">Letta per prima</Badge>
+            </span>
+          )}
+        </div>
+        <p className="text-muted mt-0.5 text-xs">{copyLine(copy)}</p>
+        {copy.errorMessage && copy.status === "failed" && <p className="text-danger mt-0.5 text-xs">{copy.errorMessage}</p>}
+        {copy.ref && (
+          <Technical>
+            <p className="text-muted mt-0.5 truncate font-mono text-meta">{copy.ref}</p>
+          </Technical>
+        )}
+      </div>
+      {canRetry && (
+        <Button size="sm" variant="secondary" onPress={onRetry} isPending={retrying}>
+          <Icon icon="solar:refresh-linear" width={15} aria-hidden />
+          Riprova la copia
+        </Button>
+      )}
+    </li>
   );
 }
 

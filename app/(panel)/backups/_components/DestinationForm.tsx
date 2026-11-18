@@ -12,12 +12,14 @@ import { Field } from "@/components/ui/Field";
 import { Advanced, Technical } from "@/components/ui/Technical";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { MSG } from "@/lib/copy";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { LOCAL_PATH_RULE } from "@/lib/validation";
+import { useNode, useNodeApi } from "@/lib/hooks/useNode";
 import { PROVIDERS, PROVIDER_IDS, detectProvider, type ProviderId } from "./providers";
+import { TelegramFields, type TelegramChoice, type TelegramDetail } from "./TelegramFields";
 import { REMOTE_KINDS, remoteKind } from "./destinations/kinds";
 import type { KindState } from "./destinations/types";
 
-/** `local`, `s3`, or one of the remote kinds in destinations/kinds.ts. */
+/** `local`, `s3`, `telegram`, or one of the remote kinds in destinations/kinds.ts. */
 type Kind = string;
 
 /** An S3 destination as the edit form gets it: everything but the secret. */
@@ -37,8 +39,12 @@ export interface DestinationDetail {
   name: string;
   type: string;
   isDefault: boolean;
-  /** S3's fields for S3, the remote kind's own view (kinds.ts on the server) for the others, null for the local disk. */
+  /** A local destination's folder of its own; null or absent for the panel's archive folder. */
+  directory?: string | null;
+  /** S3's fields for S3, the remote kind's own view (kinds.ts on the server) for SFTP, WebDAV and rclone, otherwise null. */
   config: S3Detail | Record<string, unknown> | null;
+  /** Absent from a server on an older version. */
+  telegram?: TelegramDetail | null;
 }
 
 interface CheckResult {
@@ -73,14 +79,18 @@ function announceCheck(name: string, verdict: CheckResult, done: string) {
  * nothing and says why; "Salva comunque" is there for a bucket that is
  * deliberately unreachable from here today.
  *
+ * Telegram is checked the other way round: the login already proved the
+ * account works, and its channel does not exist until the destination is
+ * saved, so the server creates it, checks it and answers with the verdict.
+ *
  * Editing never shows the stored secret: the field stays empty, and empty
  * means "keep the one you have". The type cannot change, because an archive's
  * path means one thing on a disk and another in a bucket.
  *
- * The local disk and S3 are laid out here; every other type brings its own
- * fields (destinations/kinds.ts) and reports its config and whether it is
- * complete, and goes through the same check and save as S3. What a check
- * learns — an SFTP server's host key on first contact — is saved with it.
+ * SFTP, WebDAV and rclone bring their own fields (destinations/kinds.ts):
+ * each reports its config and whether it is complete, and goes through the
+ * same check and save as S3. What a check learns — an SFTP server's host key
+ * on first contact — is saved with it.
  */
 export function DestinationForm({
   isOpen,
@@ -89,8 +99,10 @@ export function DestinationForm({
   editing,
   archives = 0,
   canSetDefault = true,
+  canChooseFolder = false,
   isOwner = canSetDefault,
   apiFor,
+  memberId,
 }: {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -101,18 +113,26 @@ export function DestinationForm({
   archives?: number;
   /** Only the owner chooses where the safety copies go. */
   canSetDefault?: boolean;
+  /** Only the owner points a local destination at a folder of the server. */
+  canChooseFolder?: boolean;
   /** Only the owner pastes an rclone configuration. */
   isOwner?: boolean;
   /** The server the destination lives on, when it is not the one the page is about. */
   apiFor?: (path: string) => string;
+  /** That server's id, for the backup password a Telegram destination suggests setting. */
+  memberId?: string | null;
 }) {
   const nodeApi = useNodeApi();
+  const { selected } = useNode();
   const api = apiFor ?? nodeApi;
   const stored = editing?.type === "s3" ? ((editing.config as S3Detail | null) ?? null) : null;
   const initialProvider: ProviderId = stored ? detectProvider(stored.endpoint) : "aws";
 
   const [kind, setKind] = useState<Kind>(editing ? editing.type : "s3");
   const [name, setName] = useState(editing?.name ?? "");
+  const [telegram, setTelegram] = useState<TelegramChoice>({ linked: null, chat: "channel", channelTitle: "" });
+  /** A local destination's folder of its own; empty is the panel's archive folder. */
+  const [folder, setFolder] = useState("");
   /** What a remote kind's fields last reported, tagged with the kind, so a switch never reuses another's. */
   const [remote, setRemote] = useState<{ kind: Kind; state: KindState } | null>(null);
   const remoteEntry = remoteKind(kind);
@@ -166,6 +186,10 @@ export function DestinationForm({
     !name.trim() ||
     (kind === "s3" &&
       (!trimmedEndpoint || !region.trim() || !bucket.trim() || !accessKeyId.trim() || (needsSecret && !secretAccessKey))) ||
+    // A new Telegram destination needs a linked account and, for a channel, its name.
+    (kind === "telegram" &&
+      !editing &&
+      (!telegram.linked || (telegram.chat === "channel" && !telegram.channelTitle.trim()))) ||
     (remoteEntry !== null && !remoteState?.complete);
 
   // Where the archives already stored here would be looked for after the edit.
@@ -187,12 +211,12 @@ export function DestinationForm({
     forcePathStyle: pathStyle === "path",
   });
 
-  /** The config of whichever type is chosen, as the API takes it. */
-  const kindConfig = (): Record<string, unknown> =>
-    kind === "s3" ? s3Config() : remoteEntry ? (remoteState?.config ?? {}) : {};
+  const localConfig = () => (folder.trim() ? { path: folder.trim() } : {});
+  const folderError =
+    kind === "local" && folder.trim() && !/^(\/|[A-Za-z]:[\\/]|\\\\)/.test(folder.trim()) ? LOCAL_PATH_RULE : undefined;
 
   /** What was checked, so a failure stops counting as soon as a field changes. */
-  const signature = JSON.stringify([kind, kind === "local" ? null : kindConfig()]);
+  const signature = JSON.stringify([kind, kind === "s3" ? s3Config() : remoteEntry ? (remoteState?.config ?? {}) : localConfig()]);
 
   /** Tried with exactly what the form holds, before anything is stored. */
   async function precheck(): Promise<CheckResult> {
@@ -202,7 +226,7 @@ export function DestinationForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: kind,
-          config: kindConfig(),
+          config: kind === "s3" ? s3Config() : remoteEntry ? (remoteState?.config ?? {}) : editing ? {} : localConfig(),
           ...(editing ? { destinationId: editing.id } : {}),
         }),
       });
@@ -213,7 +237,48 @@ export function DestinationForm({
     }
   }
 
+  /**
+   * Telegram: the session is on the server, named by the login id. Creating
+   * makes the channel and answers with the check run on it; editing renames,
+   * and with a new login re-links the account, then checks.
+   */
+  async function submitTelegram() {
+    const res = editing
+      ? await fetch(api(`/api/backups/destinations/${editing.id}`), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name.trim(),
+            ...(telegram.linked ? { config: { loginId: telegram.linked.loginId } } : {}),
+          }),
+        })
+      : await fetch(api("/api/backups/destinations"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name.trim(),
+            type: "telegram",
+            isDefault: canSetDefault && makeDefault,
+            config: {
+              loginId: telegram.linked?.loginId,
+              chat: telegram.chat,
+              ...(telegram.chat === "channel" ? { channelTitle: telegram.channelTitle.trim() } : {}),
+            },
+          }),
+        });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(body.error ?? (editing ? MSG.saveFailed : MSG.createFailed));
+      throw new Error(body.error ?? "destination failed");
+    }
+    if (body.check) announceCheck(name.trim(), body.check as CheckResult, editing ? "ricollegata" : "aggiunta");
+    else toast.success(`«${name.trim()}» salvata.`);
+    onSaved();
+  }
+
   async function submit() {
+    if (kind === "telegram") return submitTelegram();
+
     // A wrong key or bucket is found now, by whoever just typed it, rather
     // than by the first scheduled night — and before it is saved, so a typo
     // never becomes a destination the nightly can pick.
@@ -246,7 +311,7 @@ export function DestinationForm({
             name: name.trim(),
             type: kind,
             isDefault: canSetDefault && makeDefault,
-            config: kind === "s3" ? { ...s3Config(), prefix: prefix.trim() || undefined } : (remoteConfig ?? {}),
+            config: kind === "s3" ? { ...s3Config(), prefix: prefix.trim() || undefined } : (remoteConfig ?? localConfig()),
           }),
         });
 
@@ -268,10 +333,23 @@ export function DestinationForm({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       title={editing ? `Modifica «${editing.name}»` : "Nuova destinazione"}
-      submitLabel={showFailure ? "Salva comunque" : editing ? "Verifica e salva" : "Verifica e aggiungi"}
-      isSubmitDisabled={incomplete || Boolean(kind === "s3" && endpointError)}
-      // The type cards side by side, and the longer forms of the remote types.
-      wide={!editing || Boolean(remoteEntry)}
+      submitLabel={
+        kind === "telegram"
+          ? editing
+            ? telegram.linked
+              ? "Salva e verifica"
+              : "Salva"
+            : "Aggiungi e verifica"
+          : showFailure
+            ? "Salva comunque"
+            : editing
+              ? "Verifica e salva"
+              : "Verifica e aggiungi"
+      }
+      isSubmitDisabled={incomplete || Boolean(kind === "s3" && endpointError) || Boolean(folderError)}
+      // Room for the type cards side by side, the QR code beside its
+      // instructions, and the longer forms of the remote types.
+      wide={!editing || kind === "telegram" || Boolean(remoteEntry)}
       onSubmit={submit}
     >
       {showFailure && (
@@ -299,6 +377,13 @@ export function DestinationForm({
               title="Archivio S3 (consigliato)"
               description="Amazon S3, Cloudflare R2, Backblaze B2, MinIO."
             />
+            <ChoiceCard
+              selected={kind === "telegram"}
+              onSelect={() => setKind("telegram")}
+              icon="solar:plain-linear"
+              title="Telegram"
+              description="Il tuo account, in un canale privato o nei Messaggi salvati."
+            />
             {REMOTE_KINDS.map((entry) => (
               <ChoiceCard
                 key={entry.type}
@@ -322,14 +407,44 @@ export function DestinationForm({
 
       <TextField value={name} onChange={setName}>
         <Label>Nome</Label>
-        <Input placeholder={kind === "s3" ? provider.label : remoteEntry ? remoteEntry.label : "Copia locale"} />
+        <Input
+          placeholder={kind === "s3" ? provider.label : kind === "telegram" ? "Telegram" : remoteEntry ? remoteEntry.label : "Copia locale"}
+        />
       </TextField>
 
       {kind === "local" ? (
-        <FieldHint>
-          Gli archivi restano su questo server, in <Code>data/backups</Code>. Utile come copia rapida, ma un
-          backup che si perde insieme al server che protegge non è un vero backup.
-        </FieldHint>
+        <>
+          <FieldHint>
+            Gli archivi restano su questo server, in{" "}
+            <Code>{editing?.directory ?? (folder.trim() || "data/backups")}</Code>. Utile come copia rapida, ma un backup
+            che si perde insieme al server che protegge non è un vero backup: affiancagli una copia fuori da qui.
+          </FieldHint>
+          {editing?.directory && (
+            <FieldHint>La cartella non si cambia: per scrivere altrove aggiungi una nuova destinazione.</FieldHint>
+          )}
+          {/* A folder of the server is the owner's to choose, like the host itself. */}
+          {!editing && canChooseFolder && (
+            <Advanced summary="un'altra cartella, per una seconda copia" defaultExpanded={folder !== "" || undefined}>
+              <Field
+                label="Cartella"
+                error={folderError}
+                hint="Vuota: la cartella del pannello. Per una seconda copia scegline una su un altro disco o su un NAS montato: deve esistere, fuori dai dati del pannello, e l'utente del pannello deve poterci scrivere."
+              >
+                <TextField value={folder} onChange={setFolder} aria-label="Cartella">
+                  <Input placeholder="/mnt/backup/runpanel" className="font-mono text-sm" />
+                </TextField>
+              </Field>
+            </Advanced>
+          )}
+        </>
+      ) : kind === "telegram" ? (
+        <TelegramFields
+          api={api}
+          memberId={memberId ?? selected}
+          editing={editing ? { destinationId: editing.id, detail: editing.telegram ?? null } : undefined}
+          value={telegram}
+          onChange={setTelegram}
+        />
       ) : remoteEntry ? (
         // Keyed by type: switching starts the next type's fields from scratch.
         <remoteEntry.Fields

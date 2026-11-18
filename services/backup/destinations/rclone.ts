@@ -24,7 +24,8 @@ import {
   type RcloneStep,
 } from "./rclone-errors";
 import { DestinationFailure, failedCheck, problem } from "./problem";
-import type { Destination, DestinationCheck } from "../types";
+import { progressLog } from "./progress";
+import type { Destination, DestinationCheck, PutOptions } from "../types";
 
 /**
  * Backups through rclone: Google Drive, OneDrive, Dropbox, Mega, Box, pCloud
@@ -135,7 +136,12 @@ interface RunResult {
   timedOut: boolean;
 }
 
-function run(command: RcloneCommand, args: string[], env: NodeJS.ProcessEnv, opts: { timeoutMs: number | null; signal?: AbortSignal; stdoutLimit?: number }): Promise<RunResult> {
+function run(
+  command: RcloneCommand,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  opts: { timeoutMs: number | null; signal?: AbortSignal; stdoutLimit?: number; onLine?: (line: string) => void }
+): Promise<RunResult> {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -145,8 +151,15 @@ function run(command: RcloneCommand, args: string[], env: NodeJS.ProcessEnv, opt
     child.stdout.on("data", (chunk: Buffer) => {
       if (stdout.length < (opts.stdoutLimit ?? STAT_LIMIT)) stdout += chunk.toString("utf8");
     });
+    let pending = "";
     child.stderr.on("data", (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString("utf8")).slice(-STDERR_LIMIT);
+      const text = chunk.toString("utf8");
+      stderr = (stderr + text).slice(-STDERR_LIMIT);
+      if (!opts.onLine) return;
+      pending += text;
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? "";
+      for (const line of lines) opts.onLine(line);
     });
     const kill = () => {
       if (child.exitCode === null && child.signalCode === null) child.kill();
@@ -237,6 +250,30 @@ export async function lookupOneDrive(token: string, fetchImpl: typeof fetch = fe
   return { driveId, driveType };
 }
 
+/** The refresh token inside a stored token: what stays the same for one authorization. */
+function refreshTokenOf(token: string | undefined): string {
+  try {
+    const parsed = JSON.parse(token ?? "") as { refresh_token?: unknown };
+    return typeof parsed.refresh_token === "string" ? parsed.refresh_token : (token ?? "");
+  } catch {
+    return token ?? "";
+  }
+}
+
+/**
+ * A stats line of rclone's JSON log (`--use-json-log` with `--stats`) turned
+ * into bytes sent; anything else is not progress and is left alone.
+ */
+export function statsProgress(line: string, progress: (done: number) => void): void {
+  if (!line.startsWith("{")) return;
+  try {
+    const entry = JSON.parse(line) as { stats?: { bytes?: unknown } };
+    if (typeof entry.stats?.bytes === "number") progress(entry.stats.bytes);
+  } catch {
+    /* not JSON after all */
+  }
+}
+
 /** "Google Drive", or "rclone («nas», sftp)" for a pasted remote. */
 export function rcloneServiceLabel(config: Partial<RcloneConfig>): string {
   if (config.provider && config.provider !== "expert") return RCLONE_PROVIDER_LABEL[config.provider];
@@ -281,7 +318,10 @@ export function rcloneDestination(row: { id: string; name: string; type: string 
     return { command, env: rcloneEnvironment(remote.env), remote: remote.remote, version: tool.version };
   }
 
-  async function exec(build: (remote: string) => string[], opts: { timeoutMs: number | null; signal?: AbortSignal }): Promise<RunResult> {
+  async function exec(
+    build: (remote: string) => string[],
+    opts: { timeoutMs: number | null; signal?: AbortSignal; onLine?: (line: string) => void }
+  ): Promise<RunResult> {
     const prepared = await prepare();
     return run(prepared.command, build(prepared.remote), prepared.env, opts);
   }
@@ -367,10 +407,18 @@ export function rcloneDestination(row: { id: string; name: string; type: string 
     type: row.type,
     name: row.name,
 
-    async put(localPath: string, fileName: string, opts: { signal?: AbortSignal } = {}) {
+    async put(localPath: string, fileName: string, opts: PutOptions = {}) {
       const { size } = await fs.promises.stat(localPath);
       const ref = joinRemote(folder, fileName);
-      const result = await exec((remote) => rcloneArgs("copyto", [localPath, rclonePath(remote, ref)]), { timeoutMs: null, signal: opts.signal });
+      // `copyto` copies: the staged archive stays for the policy's other
+      // destinations. rclone's own transfer stats, every half minute, become
+      // the run log's progress lines.
+      const progress = opts.log ? progressLog(opts.log, size) : undefined;
+      const result = await exec(
+        (remote) =>
+          rcloneArgs("copyto", [localPath, rclonePath(remote, ref)], progress ? ["--stats", "30s", "--stats-log-level", "NOTICE"] : []),
+        { timeoutMs: null, signal: opts.signal, onLine: progress ? (line) => statsProgress(line, progress) : undefined }
+      );
       if (result.exitCode !== 0) throw failure("upload", result, opts.signal);
       // What the service kept, asked back: a mismatch is an archive nobody can restore.
       const kept = await statRef(ref).catch(() => null);
@@ -399,6 +447,23 @@ export function rcloneDestination(row: { id: string; name: string; type: string 
     },
 
     stat: statRef,
+
+    /**
+     * The same account and folder is the same place: a policy refuses two
+     * copies there. An account is told by what identifies it without saying
+     * it — the OneDrive drive, a digest of the token or of the pasted remote.
+     */
+    location() {
+      const digest = (value: string) => crypto.createHash("sha256").update(value).digest("hex").slice(0, 16);
+      const provider = String(config.provider ?? "");
+      const account =
+        provider === "onedrive" && config.driveId
+          ? `drive-${config.driveId}`
+          : provider === "expert"
+            ? digest(`${config.remote ?? ""}\n${config.sections ?? ""}`)
+            : digest(refreshTokenOf(config.token));
+      return `rclone:${provider}:${account}:${folder}`;
+    },
 
     /**
      * The folder listed, then a probe written with `copyto`, read back with

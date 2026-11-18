@@ -11,7 +11,7 @@ import { LoadError } from "@/components/ui/LoadError";
 import { readableError } from "@/lib/error-text";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SelectField } from "@/components/ui/SelectField";
-import UpdatesLoading from "../loading";
+import { UpdatesSkeleton } from "./UpdatesSkeleton";
 import { ServerFilter } from "@/components/cluster/ServerBits";
 import { useResource } from "@/lib/hooks/useResource";
 import { useMe } from "@/lib/hooks/useMe";
@@ -173,7 +173,7 @@ export function UpdatesOverview() {
     />
   );
 
-  if (loading && !data) return <UpdatesLoading />;
+  if (loading && !data) return <UpdatesSkeleton />;
   if (!data && error) {
     return (
       <>

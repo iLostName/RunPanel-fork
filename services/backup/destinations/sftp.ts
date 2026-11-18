@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import type { Readable } from "node:stream";
 import { DEFAULT_REMOTE_FOLDER, joinRemote, partialName } from "@/lib/backup-remote";
 import { formatBytes } from "@/lib/format";
@@ -6,7 +7,8 @@ import { FX, OPEN_FLAGS, isStatus } from "./sftp-client";
 import { fingerprintOf } from "./ssh-keys";
 import { openSftpSession, type SessionOptions, type SftpSession, type SshCommand } from "./ssh-transport";
 import { DestinationFailure, failedCheck } from "./problem";
-import type { Destination, DestinationCheck } from "../types";
+import { progressLog } from "./progress";
+import type { Destination, DestinationCheck, PutOptions } from "../types";
 
 /**
  * Backups to a server over SFTP: a NAS (Synology, QNAP), a Hetzner Storage
@@ -127,8 +129,12 @@ export function sftpDestination(
     type: row.type,
     name: row.name,
 
-    async put(localPath: string, fileName: string, opts: { signal?: AbortSignal } = {}) {
+    async put(localPath: string, fileName: string, opts: PutOptions = {}) {
       const cfg = requireConfig();
+      // The staged archive is read, never moved: the runner hands the same file
+      // to every destination of the policy and removes it at the end.
+      const { size } = await fs.promises.stat(localPath);
+      const progress = opts.log ? progressLog(opts.log, size) : undefined;
       const folder = sftpFolder(cfg);
       const ref = joinRemote(folder, fileName);
       const provisional = partialName(ref, crypto.randomBytes(4).toString("hex"));
@@ -140,7 +146,7 @@ export function sftpDestination(
           await session.client.ensureDir(folder);
           let bytes: number;
           try {
-            bytes = await session.client.upload(localPath, provisional, { signal: opts.signal });
+            bytes = await session.client.upload(localPath, provisional, { signal: opts.signal, onProgress: progress });
             const kept = await session.client.stat(provisional);
             if (kept.size !== null && kept.size !== bytes) {
               throw new DestinationFailure({
@@ -205,6 +211,15 @@ export function sftpDestination(
      * The rename is in there because an upload depends on it, and it is
      * exactly the permission a carefully restricted account sometimes lacks.
      */
+    /**
+     * The same server, account and folder is the same place: a policy refuses
+     * two copies there. The user is part of it, because a relative folder is
+     * relative to that user's home, and a chrooted account sees its own root.
+     */
+    location() {
+      return `sftp:${String(config.username ?? "")}@${String(config.host ?? "").toLowerCase()}:${config.port ?? 22}:${sftpFolder(config)}`;
+    },
+
     async test(): Promise<DestinationCheck> {
       let cfg: SftpConfig;
       try {

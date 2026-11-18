@@ -99,7 +99,7 @@ export const NOTIFY_GROUPS: NotifyEventGroup[] = [
         key: "backup.finished",
         label: "Backup concluso",
         description:
-          "Riuscito, parziale o fallito, con quanti artefatti e quanto pesano. Un backup notturno che fallisce in silenzio te ne accorgi il giorno che ti serve.",
+          "Riuscito, parziale o fallito, con quanti artefatti e quanto pesano, e un avviso quando una copia non arriva in una delle destinazioni. Un backup notturno che fallisce in silenzio te ne accorgi il giorno che ti serve.",
       },
     ],
   },

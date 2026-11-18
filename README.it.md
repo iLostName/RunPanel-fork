@@ -56,7 +56,7 @@ PostgreSQL, MySQL, Redis e MongoDB creati come container etichettati con i propr
 <td valign="top">
 
 ### 💾 Backup che si ripristinano
-Dump programmati dei database, dello store del pannello, della configurazione e dei volumi dei progetti, in un unico zip verificabile, su disco locale, su un bucket S3-compatibile, su un server SFTP o un NAS, in una cartella WebDAV (Nextcloud e simili) o, con rclone, su Google Drive, OneDrive e Dropbox, e se vuoi cifrato con una password tua.
+Dump programmati dei database, dello store del pannello, della configurazione e dei volumi dei progetti, in un unico zip verificabile, copiato in tutte le destinazioni che scegli — dischi locali, bucket S3-compatibili, server SFTP e NAS, cartelle WebDAV (Nextcloud e simili), Telegram con il tuo account (diviso in parti se serve) e, con rclone, Google Drive, OneDrive o Dropbox — ognuna con la sua conservazione, e se vuoi cifrato con una password tua.
 
 </td>
 <td valign="top">
@@ -366,7 +366,7 @@ Tutto sta in `.env` (vedi `.env.example` per la versione commentata) ed è contr
 - Più account con permessi per progetto, servizio, cartella e risorsa, controllati dal server su ogni route e su ogni stream; un test fallisce se una route nuova non dichiara cosa protegge ([Utenti e permessi](docs/it/users.md))
 - `proxy.ts` rifiuta le richieste `/api` senza sessione prima che arrivino a un handler, in aggiunta al controllo di ciascun handler; le eccezioni sono elencate in [Architettura](docs/it/architecture.md)
 - Le chiamate tra server collegati portano un HMAC-SHA256 su metodo, percorso, corpo, utente e orario, con un segreto di cluster cifrato a riposo; ogni firma vale una volta sola, entro cinque minuti ([Più server](docs/it/multi-server.md))
-- Variabili dei progetti, credenziali dei servizi, dei registry e dei backup, token GitHub, segreti dei canali di notifica e password SMTP cifrati a riposo (AES-256-GCM)
+- Variabili dei progetti, credenziali dei servizi, dei registry e dei backup (sessioni Telegram comprese, che non arrivano mai al browser), token GitHub, segreti dei canali di notifica e password SMTP cifrati a riposo (AES-256-GCM)
 - Gli archivi di backup si possono cifrare per intero con una password dei backup (scrypt e AES-256-GCM a blocchi, che si accorge di un file troncato, riordinato o modificato), così una copia in un bucket o su un disco perso non espone niente; uno script senza dipendenze li decifra anche senza il pannello ([Backup](docs/it/backups.md#cifratura-con-una-password))
 - Nessuna variabile `RUNPANEL_*` raggiunge i progetti distribuiti: chiave di cifratura, credenziali dello store e token di setup restano del pannello
 - Firme dei webhook verificate con HMAC-SHA256 e confronto a tempo costante
@@ -387,7 +387,7 @@ Per il TLS e i reverse proxy davanti al pannello, vedi [Metterlo su internet](do
 <br>
 
 - I comandi una tantum girano **almeno una volta**, non esattamente una volta: un riavvio del pannello a metà esecuzione rimette il comando in coda.
-- Un health check fallito **torna da solo alla versione precedente solo per i progetti Docker**: l'immagine di prima viene rimessa online. I progetti nativi e Compose compilano nella stessa cartella e restano in errore fino al deploy successivo.
+- Un health check fallito **torna da solo alla versione precedente per i progetti Docker** (acceso di serie): viene rimessa online l'immagine di prima. **I progetti nativi collegati a GitHub, su Linux, possono accendere** le cartelle per versione (spente di serie, segnate come novità nelle impostazioni), e allora torna online la cartella della versione di prima, dal secondo deploy dopo averle accese. I progetti Compose, quelli nativi che non le hanno accese, e quelli nativi su Windows o caricati da ZIP compilano nella stessa cartella e restano in errore fino al deploy successivo. Con le cartelle per versione, i file di build fuori dalle cartelle note che un deploy sul posto ha lasciato nella cartella del progetto restano in comune tra le versioni, quindi il ritorno indietro non li rimette com'erano. Vedi [Tornare alla versione precedente](docs/it/deploy.md#tornare-alla-versione-precedente).
 - Le restrizioni sulle porte le applica il processo del pannello: a pannello fermo la porta semplicemente si chiude. Una regola che deve valere anche a pannello spento richiede in più un firewall sull'host.
 - Il **ripristino** non confronta le versioni dei motori, e rifiuta lo store Postgres di RunPanel (il comando `pg_restore` è nel manifest dell'archivio). Vedi [Backup](docs/it/backups.md#ripristino).
 - L'installazione automatica all'avvio è **solo per Linux**; altrove il pannello mostra cosa fare a mano.

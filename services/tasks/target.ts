@@ -7,6 +7,7 @@ import { SKIP_REASONS, type SkipCode } from "@/lib/tasks-rules";
 import { composeContext, composePs } from "../docker/compose";
 import { appContainerName } from "../docker/labels";
 import { getRepoPath } from "../git-manager";
+import { projectWorkDir } from "../project-releases";
 import { assertOwnAppContainer, ForeignContainerError } from "../process-drivers/docker-driver";
 import { processManager } from "../process-manager";
 import { injectLinkedServiceEnv } from "../service-injection";
@@ -17,9 +18,9 @@ import { injectLinkedServiceEnv } from "../service-injection";
  *  - **Docker**: in the app's own container, with `docker exec` — the same
  *    environment, files and network the app has, because they are the app's.
  *  - **Compose**: in the container of the service the task names.
- *  - **Native** (node, static, custom): on the host, in the project's
- *    directory, with the variables a restart gives the app — the project's
- *    own and the connection strings of its linked services.
+ *  - **Native** (node, static, custom): on the host, in the folder of the
+ *    version that runs, with the variables a restart gives the app — the
+ *    project's own and the connection strings of its linked services.
  *
  * A container that is not running is a skip, not a failure: the command did
  * not get to run, and an app stopped on purpose is not the task's fault.
@@ -78,7 +79,10 @@ async function composeTarget(project: ProjectsTable, service: string | null): Pr
 }
 
 async function hostTarget(project: ProjectsTable): Promise<TargetResult> {
-  const cwd = getRepoPath(project.slug);
+  // The version the app runs from — its release folder when it has one, where
+  // its node_modules are and its data is linked in — not the project folder,
+  // which a deploy that failed may already have moved to another commit.
+  const cwd = projectWorkDir(project.slug);
   if (!fs.existsSync(cwd)) return skip("no-directory");
   return { ok: true, target: { kind: "host", cwd, env: await taskEnv(project), where: `sull'host, in ${cwd}` } };
 }

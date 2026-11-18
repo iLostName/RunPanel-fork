@@ -3,10 +3,13 @@ import { describeCron } from "@/lib/cron";
 import { cronSentence } from "@/lib/schedule";
 import { getDb } from "@/lib/db";
 import { staleWhileRevalidate } from "@/lib/stale-cache";
-import type { BackupRunStatus, ProjectsTable } from "@/lib/db/schema";
+import type { BackupCopyStatus, BackupRunStatus, ProjectsTable } from "@/lib/db/schema";
+import { readOrder } from "@/lib/backup-copies";
 import { readLogFile } from "../log-file";
+import { loadCopies, type CopyRecord } from "./copies";
 import { listDumpableDatabases } from "./dumpers";
 import { keyAvailability } from "./keyring";
+import { loadPolicyDestinations } from "./policy-destinations";
 import { backupLogPath } from "./paths";
 import { backupDocker, listProjectVolumes, projectOwner, projectVolumes } from "./project-export";
 import { parseTargets } from "./scheduler";
@@ -42,6 +45,19 @@ export interface PolicyView {
   lastRunAt: string | null;
   nextRunAt: string | null;
   lastStatus: BackupRunStatus | null;
+  /**
+   * Every destination, in order: the first is the primary, the one
+   * `destinationId` names; each other one receives a copy of the same archive.
+   */
+  destinations: PolicyDestinationView[];
+}
+
+export interface PolicyDestinationView {
+  destinationId: string;
+  destinationName: string | null;
+  destinationType: string | null;
+  /** Null: the policy's own rule. Every field null: keep every copy. */
+  retention: { count: number | null; days: number | null; bytes: number | null } | null;
 }
 
 export async function listPolicies(): Promise<PolicyView[]> {
@@ -53,6 +69,7 @@ export async function listPolicies(): Promise<PolicyView[]> {
   ]);
 
   const byId = new Map(destinations.map((d) => [d.id, d]));
+  const lists = await loadPolicyDestinations(policies);
 
   // One query for every policy's latest run rather than one per policy: the
   // list is rendered on every poll of the backups page.
@@ -96,6 +113,12 @@ export async function listPolicies(): Promise<PolicyView[]> {
     lastRunAt: policy.last_run_at,
     nextRunAt: policy.next_run_at,
     lastStatus: latest.get(policy.id) ?? null,
+    destinations: (lists.get(policy.id) ?? []).map((entry) => ({
+      destinationId: entry.destinationId,
+      destinationName: byId.get(entry.destinationId)?.name ?? null,
+      destinationType: byId.get(entry.destinationId)?.type ?? null,
+      retention: entry.retention,
+    })),
   }));
 }
 
@@ -114,12 +137,54 @@ export interface RunView {
   durationMs: number | null;
   hasArchive: boolean;
   errorMessage: string | null;
-  /** Where the archive went: "sul disco di questo server" and "su <bucket>" are different promises. */
+  /**
+   * Where the archive went: "sul disco di questo server" and "su <bucket>" are
+   * different promises. The primary copy — the first, in the policy's order,
+   * that holds the archive; `copies` has every one.
+   */
   destinationName: string | null;
   destinationType: string | null;
   /** The last "Verifica integrità", if one was ever run. */
   verification: { status: "ok" | "failed"; checkedAt: string } | null;
   encryption: RunEncryption | null;
+  /** Every copy of the archive, in the policy's order. */
+  copies: CopyView[];
+}
+
+export interface CopyView {
+  id: string;
+  /** Null once the destination is deleted: the copy may still be there, out of the panel's reach. */
+  destinationId: string | null;
+  /** Its name now, or the one it had when it was deleted. */
+  destinationName: string;
+  destinationType: string;
+  /** On this server's disk: read first, nothing to download. */
+  local: boolean;
+  position: number;
+  status: BackupCopyStatus;
+  /** The destination's handle for the file. */
+  ref: string | null;
+  bytes: number | null;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+function toCopyView(copy: CopyRecord): CopyView {
+  return {
+    id: copy.id,
+    destinationId: copy.destination_id,
+    destinationName: copy.name,
+    destinationType: copy.type,
+    local: copy.local,
+    position: copy.position,
+    status: copy.status,
+    ref: copy.ref,
+    bytes: copy.bytes,
+    errorMessage: copy.error_message,
+    startedAt: copy.started_at,
+    finishedAt: copy.finished_at,
+  };
 }
 
 /**
@@ -161,23 +226,26 @@ interface RunContextMaps {
   destinations: Map<string, { name: string; type: string }>;
   verifications: Map<string, { status: string; checked_at: string }>;
   keys: KeyMap;
+  copies: Map<string, CopyRecord[]>;
 }
 
-/** The destinations, checks and keys a page of runs refers to: three queries, whatever the page size. */
+/** The destinations, checks, keys and copies a page of runs refers to: a few queries, whatever the page size. */
 async function runContext(runs: RunRow[]): Promise<RunContextMaps> {
   const db = await getDb();
   const ids = runs.map((run) => run.id);
-  const [destinations, verifications, keys] = await Promise.all([
+  const [destinations, verifications, keys, copies] = await Promise.all([
     db.selectFrom("backup_destinations").select(["id", "name", "type"]).execute(),
     ids.length > 0
       ? db.selectFrom("backup_verifications").select(["run_id", "status", "checked_at"]).where("run_id", "in", ids).execute()
       : Promise.resolve([]),
     runs.some((run) => run.encryption_key_id) ? keyAvailability() : Promise.resolve<KeyMap>(new Map()),
+    loadCopies(ids),
   ]);
   return {
     destinations: new Map(destinations.map((d) => [d.id, { name: d.name, type: d.type }])),
     verifications: new Map(verifications.map((v) => [v.run_id, v])),
     keys,
+    copies,
   };
 }
 
@@ -195,6 +263,7 @@ export async function listRuns(limit = 50, policyId?: string): Promise<RunView[]
 function toRunView(run: RunRow, context?: RunContextMaps): RunView {
   const destination = run.destination_id ? context?.destinations.get(run.destination_id) : undefined;
   const verification = context?.verifications.get(run.id);
+  const copies = context?.copies.get(run.id) ?? [];
   return {
     id: run.id,
     policyId: run.policy_id,
@@ -207,7 +276,9 @@ function toRunView(run: RunRow, context?: RunContextMaps): RunView {
     startedAt: run.started_at,
     finishedAt: run.finished_at,
     durationMs: run.finished_at ? Date.parse(run.finished_at) - Date.parse(run.started_at) : null,
-    hasArchive: Boolean(run.archive_path),
+    // Something to download or restore from: a copy holding the archive on a
+    // destination the panel can still reach.
+    hasArchive: copies.length > 0 ? readOrder(copies).length > 0 : Boolean(run.archive_path),
     errorMessage: run.error_message,
     destinationName: destination?.name ?? null,
     destinationType: destination?.type ?? null,
@@ -215,6 +286,7 @@ function toRunView(run: RunRow, context?: RunContextMaps): RunView {
       ? { status: verification.status === "ok" ? "ok" : "failed", checkedAt: verification.checked_at }
       : null,
     encryption: runEncryption(run.encryption_key_id, context?.keys ?? new Map()),
+    copies: copies.map(toCopyView),
   };
 }
 

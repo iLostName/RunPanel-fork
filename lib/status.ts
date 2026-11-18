@@ -23,6 +23,7 @@ export type KnownStatus =
   | "partial"
   | "canceled"
   | "skipped"
+  | "uploading"
   | "unreachable";
 
 interface StatusMeta {
@@ -52,6 +53,8 @@ const STATUS_META: Record<KnownStatus, StatusMeta> = {
   partial: { tone: "warning", label: "Parziale" },
   canceled: { tone: "neutral", label: "Annullato" },
   skipped: { tone: "neutral", label: "Saltato" },
+  // A copy of a backup on its way to one of the destinations.
+  uploading: { tone: "warning", label: "Copia in corso", active: true },
   // Not a state of the project: the server holding it did not answer, so this
   // is the last thing known about it.
   unreachable: { tone: "danger", label: "Non raggiungibile" },

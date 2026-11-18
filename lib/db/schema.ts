@@ -57,6 +57,8 @@ export type BackupArtifactKind =
   | "project-volume"
   | "project-repo";
 export type BackupArtifactStatus = "ok" | "skipped" | "failed";
+/** One copy of a run's archive on one destination — see migration 045. */
+export type BackupCopyStatus = "pending" | "uploading" | "done" | "failed";
 export type RestoreSource = "catalog" | "upload";
 export type RestoreStatus = "running" | "success" | "failed";
 
@@ -427,6 +429,48 @@ export interface BackupRunsTable {
   heartbeat_at: string;
   /** The `backup_keys` row that encrypted the archive; null for one in clear (migration 044). */
   encryption_key_id: string | null;
+}
+
+/**
+ * Where a policy writes, in order: position 0 is the primary, which
+ * `backup_policies.destination_id` mirrors (migration 045).
+ */
+export interface BackupPolicyDestinationsTable {
+  id: string;
+  policy_id: string;
+  destination_id: string;
+  position: number;
+  /** 0 | 1 — 0 follows the policy's rule; 1 the three columns, all null keeping every copy. */
+  own_retention: number;
+  retention_count: number | null;
+  retention_days: number | null;
+  retention_bytes: number | null;
+  created_at: string;
+}
+
+/**
+ * One copy of a run's archive on one destination (migration 045). The run's
+ * `destination_id`, `archive_path` and `archive_bytes` mirror the first copy,
+ * in order, that holds the archive.
+ */
+export interface BackupRunCopiesTable {
+  id: string;
+  run_id: string;
+  /** `set null`: a deleted destination leaves the record of where the copy was. */
+  destination_id: string | null;
+  /** Snapshots, for when the destination is gone. */
+  destination_name: string;
+  destination_type: string;
+  /** The policy's order when the run started; 0 is the primary. */
+  position: number;
+  status: BackupCopyStatus;
+  /** The destination's handle for the file, once it is there. */
+  ref: string | null;
+  bytes: number | null;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
 }
 
 /** Every password archives have been encrypted with — see migration 044. */
@@ -996,6 +1040,8 @@ export interface Database {
   restore_runs: RestoreRunsTable;
   backup_verifications: BackupVerificationsTable;
   backup_keys: BackupKeysTable;
+  backup_policy_destinations: BackupPolicyDestinationsTable;
+  backup_run_copies: BackupRunCopiesTable;
   domains: DomainsTable;
   project_hosts: ProjectHostsTable;
   panel_hosts: PanelHostsTable;

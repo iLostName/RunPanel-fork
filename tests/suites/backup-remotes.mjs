@@ -193,6 +193,32 @@ export async function run({ base, dataDir }) {
       r.check("deleting the run", removed.status === 200, JSON.stringify(removed.body));
       r.check("deletes the archive on the server", fs.readdirSync(folder).length === 0, fs.readdirSync(folder).join(","));
       await api.call(`/api/backups/policies/${policy.body?.id}`, { method: "DELETE" });
+
+      // Several copies: the same WebDAV folder twice is one place, refused;
+      // the local disk plus WebDAV is two, and both get the archive.
+      const twin = await api.call("/api/backups/destinations", json("POST", { name: "Nextcloud doppione", type: "webdav", config: { ...davConfig, url: dav.url.replace(/\/$/, "") } }));
+      const local = (await api.call("/api/backups/destinations")).body?.destinations?.find((entry) => entry.type === "local");
+      const samePlace = await api.call(
+        "/api/backups/policies",
+        json("POST", { name: "Due volte lì", cron: "", destinations: [{ destinationId: davId }, { destinationId: twin.body?.id }], targets: [{ kind: "panel" }] })
+      );
+      r.check("two copies in the same WebDAV folder are refused", samePlace.status === 400 && /stesso posto/.test(samePlace.body?.error ?? ""), JSON.stringify(samePlace.body));
+      const both = await api.call(
+        "/api/backups/policies",
+        json("POST", { name: "Disco e WebDAV", cron: "", destinations: [{ destinationId: local?.id }, { destinationId: davId }], targets: [{ kind: "panel" }] })
+      );
+      r.check("the local disk and WebDAV are two places", both.status === 201, JSON.stringify(both.body));
+      const twoCopies = await waitForRun(api, (await api.call(`/api/backups/policies/${both.body?.id}/run`, { method: "POST" })).body?.runId);
+      r.check(
+        "a run writes a copy on each",
+        twoCopies.status === "success" && twoCopies.copies?.length === 2 && twoCopies.copies.every((copy) => copy.status === "done"),
+        JSON.stringify(twoCopies.copies ?? twoCopies.errorMessage)
+      );
+      r.check("and the WebDAV one is there under its final name", fs.readdirSync(folder).filter((name) => !name.endsWith(".partial")).length === 1, fs.readdirSync(folder).join(","));
+      await api.call(`/api/backups/runs/${twoCopies.id}`, { method: "DELETE" });
+      r.check("deleting that run deletes both copies", fs.readdirSync(folder).length === 0, fs.readdirSync(folder).join(","));
+      await api.call(`/api/backups/policies/${both.body?.id}`, { method: "DELETE" });
+      await api.call(`/api/backups/destinations/${twin.body?.id}`, { method: "DELETE" });
     } else {
       r.note("store Postgres: il backup di prova su WebDAV gira solo con SQLite");
     }

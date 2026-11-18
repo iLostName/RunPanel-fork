@@ -11,7 +11,7 @@ import { Section } from "@/components/ui/Section";
 import { Hint, FieldHint } from "@/components/ui/Hint";
 import { Segmented } from "@/components/ui/Segmented";
 import { CommandBlock } from "@/components/ui/CommandBlock";
-import UpdatesLoading from "./loading";
+import { UpdatesSkeleton } from "./_components/UpdatesSkeleton";
 import { useResource } from "@/lib/hooks/useResource";
 import { formatRelative, formatWhen } from "@/lib/format";
 import { MSG } from "@/lib/copy";
@@ -178,7 +178,7 @@ function ServerUpdatesPage() {
       </>
     );
   }
-  if (!data) return <UpdatesLoading />;
+  if (!data) return <UpdatesSkeleton />;
 
   const { check, checkout, run, canUpdate, blocker } = data;
   const available = hasUpdate(data);

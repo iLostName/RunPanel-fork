@@ -1,9 +1,8 @@
-import fs from "fs";
 import { getDb, nowIso } from "@/lib/db";
-import { buildDestination } from "./destinations";
+import { readOrder } from "@/lib/backup-copies";
+import { readFirstCopy, runCopies } from "./copies";
 import { verifyArchiveFile, verifyArchiveStream, type IntegrityReport, type MemberFailure } from "./integrity";
 import { panelArchiveOpener } from "./keyring";
-import { resolveArchivePath } from "./paths";
 
 /**
  * "Verifica integrità" on a backup run: reading its archive back, now, and
@@ -29,6 +28,8 @@ export interface VerificationView {
   checkedAt: string | null;
   /** `full`: archive and every member. `archive`: the archive's sha256 only (not on this disk). */
   depth: "full" | "archive" | null;
+  /** The copy that was read: the first that answered. Null for a check from before copies. */
+  source: { destinationName: string; destinationType: string } | null;
   progress: { done: number; total: number | null } | null;
   failures: MemberFailure[];
 }
@@ -61,7 +62,11 @@ export async function storedVerification(runId: string): Promise<VerificationVie
   const db = await getDb();
   const row = await db.selectFrom("backup_verifications").selectAll().where("run_id", "=", runId).executeTakeFirst();
   if (!row) return null;
-  let detail: { depth?: "full" | "archive"; failures?: MemberFailure[] } = {};
+  let detail: {
+    depth?: "full" | "archive";
+    failures?: MemberFailure[];
+    source?: VerificationView["source"];
+  } = {};
   try {
     detail = row.detail ? JSON.parse(row.detail) : {};
   } catch {
@@ -73,6 +78,7 @@ export async function storedVerification(runId: string): Promise<VerificationVie
     startedAt: null,
     checkedAt: row.checked_at,
     depth: detail.depth ?? null,
+    source: detail.source ?? null,
     progress: null,
     failures: detail.failures ?? [],
   };
@@ -90,7 +96,7 @@ async function store(runId: string, view: VerificationView): Promise<void> {
   const values = {
     status: view.status === "ok" ? "ok" : "failed",
     message: view.message,
-    detail: JSON.stringify({ depth: view.depth, failures: view.failures.slice(0, 20) }),
+    detail: JSON.stringify({ depth: view.depth, failures: view.failures.slice(0, 20), source: view.source }),
     checked_at: view.checkedAt ?? nowIso(),
   };
   await db
@@ -105,11 +111,15 @@ async function loadRun(runId: string) {
   const run = await db.selectFrom("backup_runs").selectAll().where("id", "=", runId).executeTakeFirst();
   if (!run) throw new Error("Backup non trovato");
   if (run.status === "running") throw new VerifyBusyError("Il backup è ancora in corso: lo si verifica quando ha finito");
-  if (!run.archive_path || !run.destination_id) throw new Error("Questo backup non ha un archivio da verificare");
-
-  const row = await db.selectFrom("backup_destinations").selectAll().where("id", "=", run.destination_id).executeTakeFirst();
-  if (!row) throw new Error("La destinazione di questo backup non è più configurata");
-  return { row, archivePath: run.archive_path, expected: run.checksum, bytes: run.archive_bytes ?? null };
+  const order = readOrder(await runCopies(runId));
+  if (!run.archive_path || order.length === 0) {
+    throw new Error(
+      run.archive_path
+        ? "La destinazione di questo backup non è più configurata"
+        : "Questo backup non ha un archivio da verificare"
+    );
+  }
+  return { expected: run.checksum, bytes: run.archive_bytes ?? null, firstIsLocal: order[0].local };
 }
 
 /**
@@ -128,6 +138,7 @@ export async function startRunVerification(runId: string): Promise<VerificationV
     startedAt: nowIso(),
     checkedAt: null,
     depth: null,
+    source: null,
     progress: null,
     failures: [],
   };
@@ -140,32 +151,37 @@ export async function startRunVerification(runId: string): Promise<VerificationV
     live.delete(runId);
     throw err;
   }
-  const { row, archivePath, expected } = run;
-  job.depth = row.type === "local" ? "full" : "archive";
+  const { expected } = run;
+  job.depth = run.firstIsLocal ? "full" : "archive";
   job.progress = { done: 0, total: run.bytes };
 
   void (async () => {
     let report: IntegrityReport;
     try {
-      const destination = buildDestination(row);
       const onProgress = (done: number, total: number | null) => {
         job.progress = { done, total: total ?? job.progress?.total ?? null };
       };
 
-      if (destination.type === "local") {
-        const file = resolveArchivePath(archivePath);
-        if (!fs.existsSync(file)) throw new Error("L'archivio non è più sul disco di questo server.");
-        // An encrypted archive is opened with the password it was sealed with,
-        // which this panel keeps; one it no longer has is reported, not failed.
-        report = await verifyArchiveFile(file, { expectedSha256: expected, onProgress, open: panelArchiveOpener() });
-      } else {
-        const stat = await destination.stat(archivePath);
-        if (!stat.exists) throw new Error(`L'archivio non c'è più in «${destination.name}».`);
-        report = await verifyArchiveStream(await destination.open(archivePath), expected, {
-          total: stat.bytes,
-          onProgress,
-        });
-      }
+      // The first copy that answers, the ones on this disk first: a copy that
+      // is gone or unreachable gives way to the next. One that answers is the
+      // one checked — a damaged copy is reported, never passed over.
+      report = await readFirstCopy(runId, async ({ copy, destination, bytes }) => {
+        job.source = { destinationName: destination.name, destinationType: destination.type };
+        if (destination.localPath) {
+          job.depth = "full";
+          // An encrypted archive is opened with the password it was sealed
+          // with, which this panel keeps; one it no longer has is reported,
+          // not failed.
+          return verifyArchiveFile(destination.localPath(copy.ref as string), {
+            expectedSha256: expected,
+            onProgress,
+            open: panelArchiveOpener(),
+          });
+        }
+        job.depth = "archive";
+        job.progress = { done: 0, total: bytes };
+        return verifyArchiveStream(await destination.open(copy.ref as string), expected, { total: bytes, onProgress });
+      });
     } catch (err) {
       report = {
         ok: false,

@@ -325,6 +325,19 @@ export function s3Destination(
 
     stat,
 
+    // Two destinations on the same bucket and prefix would put the same key
+    // twice: one object, and deleting either copy would delete both.
+    location() {
+      let host = String(config.endpoint ?? "");
+      try {
+        host = new URL(host).host;
+      } catch {
+        /* an endpoint that is not a URL is compared as typed */
+      }
+      const prefix = String(config.prefix ?? "").replace(/^\/+|\/+$/g, "");
+      return `s3:${host.toLowerCase()}/${config.bucket ?? ""}/${prefix}`;
+    },
+
     /**
      * Writes, reads back and deletes a marker rather than only listing.
      *

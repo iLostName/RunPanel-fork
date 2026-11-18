@@ -92,6 +92,12 @@ export async function run({ repoRoot }) {
     const destination = (overrides = {}) => webdav.webdavDestination({ id: "w1", name: "Nextcloud", type: "webdav" }, { ...config, ...overrides });
     const onDisk = (...parts) => join(scratch, "dav", "Backup", "run panel", "«archivi»", ...parts);
 
+    r.check(
+      "the same address and folder is the same place, whatever the spelling",
+      destination().location() === destination({ url: server.url.replace(/\/$/, "").replace("127.0.0.1", "127.0.0.1") }).location()
+    );
+    r.check("another folder is another place", destination().location() !== destination({ folder: "Altrove" }).location());
+
     const check = await destination().test();
     r.check("Verifica creates the folders and passes", check.ok === true && fs.statSync(onDisk()).isDirectory(), JSON.stringify(check));
     r.check("it says how much space is left", /Spazio libero/.test(check.message), check.message);
@@ -136,7 +142,14 @@ export async function run({ repoRoot }) {
 
     server.knobs.maxBody = 1024 * 1024;
     const tooLarge = await rejects(destination().put(archive, "big.zip"));
-    r.check("a 413 from the proxy is explained, with the size", tooLarge?.problem?.code === "TOO_LARGE" && tooLarge.message.includes("(2.0 MB)") && /troppo grande/.test(tooLarge.message), tooLarge?.message);
+    // Like nginx, the fake answers 413 and hangs up while the body is still
+    // arriving: whether the client reads the answer first or sees the hang-up
+    // first is a race, and either way the sentence has to name the limit.
+    r.check(
+      "a 413 from the proxy is explained, with the size and the setting",
+      ["TOO_LARGE", "BODY_LIMIT"].includes(tooLarge?.problem?.code) && tooLarge.message.includes("2.0 MB") && /client_max_body_size/.test(tooLarge.message),
+      tooLarge?.message
+    );
     r.check("and leaves nothing", fs.readdirSync(onDisk()).length === 0);
     delete server.knobs.maxBody;
 

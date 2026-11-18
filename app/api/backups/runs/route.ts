@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireOwner, requirePermission } from "@/lib/auth-guard";
 import { visiblePolicyIds } from "@/lib/backup-access";
 import { withAudit } from "@/lib/audit";
-import { getDb } from "@/lib/db";
 import { manualBackupSchema } from "@/lib/validation";
 import { backupOverview, listRuns } from "@/services/backup/catalog";
 import { defaultDestinationId } from "@/services/backup/destinations";
+import { destinationListError } from "@/services/backup/policy-destinations";
 import { BackupBusyError, activeBackupRunId, startBackup } from "@/services/backup/runner";
 
 export async function GET(request: NextRequest) {
@@ -58,17 +58,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Dati non validi", details: parsed.error.issues }, { status: 400 });
     }
 
-    const destinationId = parsed.data.destinationId ?? (await defaultDestinationId());
-    if (!destinationId) return NextResponse.json({ error: "Nessuna destinazione configurata" }, { status: 400 });
-    const db = await getDb();
-    const destination = await db.selectFrom("backup_destinations").select("id").where("id", "=", destinationId).executeTakeFirst();
-    if (!destination) return NextResponse.json({ error: "Destinazione non trovata" }, { status: 404 });
+    // The default destination alone, unless asked otherwise. A run with no
+    // policy has no retention and stays until someone deletes it, so a copy on
+    // every destination by default would fill each of them — the paid ones
+    // too — with archives nobody comes back to; and this is usually the quick
+    // copy taken before a risky change, where the minutes count.
+    const fallback = parsed.data.destinationIds || parsed.data.destinationId ? null : await defaultDestinationId();
+    const destinationIds =
+      parsed.data.destinationIds ?? (parsed.data.destinationId ? [parsed.data.destinationId] : fallback ? [fallback] : []);
+    if (destinationIds.length === 0) return NextResponse.json({ error: "Nessuna destinazione configurata" }, { status: 400 });
+    const listProblem = await destinationListError(destinationIds);
+    if (listProblem) return NextResponse.json({ error: listProblem.error }, { status: listProblem.notFound ? 404 : 400 });
 
     try {
       const { runId, done } = await startBackup({
         trigger: "manual",
         targets: parsed.data.targets,
-        destinationId,
+        destinationIds,
         policyName: parsed.data.name ?? null,
       });
       // Recorded on the run row by the runner; this only stops Node treating

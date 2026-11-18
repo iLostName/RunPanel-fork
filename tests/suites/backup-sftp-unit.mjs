@@ -378,6 +378,13 @@ export async function run({ repoRoot }) {
         });
       const tag = (text) => `${pass.label}: ${text}`;
 
+      r.check(
+        tag("the same server, user and folder is the same place"),
+        destination().location() === destination({ host: "NAS.lan" }).location()
+      );
+      r.check(tag("another user is another place"), destination().location() !== destination({ username: "altro" }).location());
+      r.check(tag("another folder too"), destination().location() !== destination({ folder: "Altro" }).location());
+
       setEnv();
       const first = await destination().test();
       r.check(tag("Verifica works on first contact"), first.ok === true, JSON.stringify(first));
@@ -463,8 +470,17 @@ export async function run({ repoRoot }) {
         const incomplete = await sftpDestination({ id: "d3", name: "NAS", type: "sftp" }, { host: "nas.lan" }, { tmpDir }).test();
         r.check(tag("an incomplete configuration says what is missing"), incomplete.ok === false && /incompleta/.test(incomplete.message));
 
-        const controller = new AbortController();
         setEnv();
+        const large = join(scratch, "large.zip");
+        fs.writeFileSync(large, crypto.randomBytes(40 * 1024 * 1024));
+        const lines = [];
+        const sent = await pinnedDestination.put(large, "large.zip", { log: (line) => lines.push(line) });
+        r.check(tag("a large upload reports its progress in the run log"), lines.some((line) => /caricati .* di 40 MB \(\d+%\)/.test(line)), lines.join(" | "));
+        r.check(tag("and leaves the staged file where it was, for the next copy"), fs.existsSync(large) && sent.bytes === 40 * 1024 * 1024);
+        await pinnedDestination.remove(sent.ref);
+        fs.rmSync(large);
+
+        const controller = new AbortController();
         const big = join(scratch, "big.zip");
         fs.writeFileSync(big, crypto.randomBytes(8 * 1024 * 1024));
         const pending = pinnedDestination.put(big, "aborted.zip", { signal: controller.signal });

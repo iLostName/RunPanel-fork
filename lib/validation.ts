@@ -24,6 +24,7 @@ import {
 } from "./tasks-rules";
 import { hasRunnableLine } from "./tasks-shell";
 import { MAX_BACKUP_PASSWORD, backupPasswordProblem } from "./backup-password";
+import { MAX_COPIES } from "./backup-copies";
 import {
   DEFAULT_REMOTE_FOLDER,
   MAX_REMOTE_FOLDER,
@@ -1016,13 +1017,41 @@ export const timeZoneSchema = z
   .max(64)
   .refine(isValidTimeZone, "Fuso orario sconosciuto");
 
+/**
+ * How many archives one destination of a policy keeps, in place of the
+ * policy's rule. Every field null or absent: all of them. The bounds are the
+ * policy's own.
+ */
+export const copyRetentionSchema = z
+  .object({
+    count: z.number().int().min(1).max(1000).nullable().optional(),
+    days: z.number().int().min(1).max(3650).nullable().optional(),
+    bytes: z.number().int().min(1024 * 1024).nullable().optional(),
+  })
+  .strict();
+
+/** One destination of a policy, in order: the first is the primary. */
+export const policyDestinationSchema = z
+  .object({
+    destinationId: z.string().min(1).max(32),
+    /** Null or absent: the policy's own rule. */
+    retention: copyRetentionSchema.nullable().optional(),
+  })
+  .strict();
+
 export const backupPolicySchema = z.object({
   name: z.string().min(1).max(80),
   enabled: z.boolean().optional(),
   /** Empty means the policy exists but only ever runs when someone asks. */
   cron: z.union([z.literal(""), cronExpressionSchema]),
   timezone: timeZoneSchema.nullable().optional(),
-  destinationId: z.string().min(1).max(32),
+  /**
+   * The primary destination. Required on create unless `destinations` is
+   * given (the route checks): with both, it has to be their first.
+   */
+  destinationId: z.string().min(1).max(32).optional(),
+  /** Every destination, in order: each receives a copy of the same archive. */
+  destinations: z.array(policyDestinationSchema).min(1).max(MAX_COPIES).optional(),
   targets: z.array(backupTargetSchema).min(1).max(200),
   retentionCount: z.number().int().min(1).max(1000).nullable().optional(),
   retentionDays: z.number().int().min(1).max(3650).nullable().optional(),
@@ -1089,7 +1118,7 @@ export const taskSchema = z.object({
 export const taskUpdateSchema = taskSchema.partial();
 
 /** Every transport; adding one means adding it here too, and its schemas below. */
-export const destinationTypes = ["local", "s3", "sftp", "webdav", "rclone"] as const;
+export const destinationTypes = ["local", "s3", "telegram", "sftp", "webdav", "rclone"] as const;
 
 /**
  * An S3-compatible destination's configuration.
@@ -1309,6 +1338,93 @@ export const destinationConfigInputs = {
   rclone: rcloneConfigInput,
 } as const;
 
+
+/**
+ * Logging in to Telegram for a backup destination: the account's own api_id
+ * and api_hash from my.telegram.org — Telegram's terms want every app to use
+ * its own, so the panel ships none — and how: a QR code to scan from the app,
+ * or the phone number. Re-linking a destination (owner only) may leave the
+ * keys out to keep the stored ones.
+ */
+export const telegramLoginStartSchema = z
+  .object({
+    apiId: z.coerce
+      .number({ message: "L'api_id è un numero" })
+      .int("L'api_id è un numero intero")
+      .min(1, "L'api_id è un numero")
+      .max(2_147_483_647, "L'api_id non è valido")
+      .optional(),
+    apiHash: z
+      .string()
+      .trim()
+      .regex(/^[0-9a-fA-F]{32}$/, "L'api_hash è lungo 32 caratteri: cifre e lettere da a a f")
+      .optional(),
+    method: z.enum(["qr", "phone"]),
+    phone: z
+      .string()
+      .trim()
+      .max(32)
+      .regex(/^\+?[0-9][0-9 ()-]{5,30}$/, "Scrivi il numero con il prefisso internazionale, per esempio +39 333 123 4567")
+      .optional(),
+    destinationId: z.string().min(1).max(32).optional(),
+  })
+  .strict()
+  .refine((value) => value.method !== "phone" || Boolean(value.phone), {
+    message: "Scrivi il numero di telefono",
+    path: ["phone"],
+  })
+  .refine((value) => Boolean(value.destinationId) || (value.apiId !== undefined && value.apiHash !== undefined), {
+    message: "Servono api_id e api_hash",
+    path: ["apiId"],
+  });
+
+/** One step of a Telegram login: the code from the phone, or the account's two-step password. */
+export const telegramLoginStepSchema = z
+  .object({
+    code: z.string().trim().regex(/^[0-9]{4,10}$/, "Il codice è fatto di sole cifre").optional(),
+    password: z.string().min(1, "Scrivi la password").max(256).optional(),
+  })
+  .strict()
+  .refine((value) => (value.code === undefined) !== (value.password === undefined), {
+    message: "Manda il codice oppure la password",
+    path: ["code"],
+  });
+
+/**
+ * A Telegram destination as the form creates it. No session here: `loginId`
+ * names a finished login, whose session the server reads from its own memory
+ * into the encrypted config, so it never passes through the browser.
+ */
+export const telegramDestinationConfigSchema = z
+  .object({
+    loginId: z.string().min(16).max(64),
+    /** A private channel the panel creates, or the account's Saved Messages. */
+    chat: z.enum(["channel", "saved"]),
+    channelTitle: z.string().trim().min(1).max(128).optional(),
+  })
+  .strict();
+
+/**
+ * A local destination's configuration: nothing, for the panel's own archive
+ * folder, or a folder of its own — a second disk, a mounted NAS — so two local
+ * destinations can be two copies. Absolute, since a relative path would be
+ * relative to wherever the panel happened to start; whether it is outside the
+ * panel's data directory, and writable, is checked on the server.
+ */
+export const LOCAL_PATH_RULE = "Scrivi il percorso completo di una cartella, per esempio /mnt/backup";
+
+export const localConfigSchema = z
+  .object({
+    path: z
+      .string()
+      .trim()
+      .max(1024)
+      .refine((value) => value === "" || /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(value), { message: LOCAL_PATH_RULE })
+      .refine((value) => !value.includes("\u0000"), { message: LOCAL_PATH_RULE })
+      .optional(),
+  })
+  .strict();
+
 export const destinationSchema = z
   .object({
     name: z.string().min(1).max(60),
@@ -1316,18 +1432,27 @@ export const destinationSchema = z
     config: z.record(z.string(), z.unknown()).optional(),
     isDefault: z.boolean().optional(),
   })
-  // `local` needs no configuration; `s3` needs all of it, and half a
-  // configuration is worse than none — it would be accepted, encrypted, and
-  // then fail on first use.
+  // `local` needs no configuration beyond an optional folder; `s3` needs all
+  // of it, and half a configuration is worse than none — it would be
+  // accepted, encrypted, and then fail on first use.
   .refine((value) => value.type !== "s3" || s3ConfigSchema.safeParse(value.config ?? {}).success, {
     message: "Configurazione S3 incompleta o non valida",
+    path: ["config"],
+  })
+  .refine((value) => value.type !== "local" || localConfigSchema.safeParse(value.config ?? {}).success, {
+    message: LOCAL_PATH_RULE,
+    path: ["config"],
+  })
+  // Telegram takes a finished login, never a session: see the schema above.
+  .refine((value) => value.type !== "telegram" || telegramDestinationConfigSchema.safeParse(value.config ?? {}).success, {
+    message: "Collega l'account Telegram e scegli dove salvare",
     path: ["config"],
   })
   // The other remote types: the shape here, the whole once the route has
   // unsealed the key or looked up the drive (kinds.ts).
   .refine(
     (value) => {
-      if (value.type === "local" || value.type === "s3") return true;
+      if (value.type === "local" || value.type === "s3" || value.type === "telegram") return true;
       return destinationConfigInputs[value.type].safeParse(value.config ?? {}).success;
     },
     { message: "Configurazione non valida", path: ["config"] }
@@ -1344,15 +1469,36 @@ export const destinationSchema = z
 export const destinationUpdateSchema = z
   .object({
     name: z.string().trim().min(1).max(60).optional(),
-    config: z.record(z.string(), z.unknown()).optional(),
+    // Every type's fields, each optional: the route then checks the ones of the
+    // destination's own type strictly (`s3ConfigInput`, the remote inputs in
+    // kinds.ts), so a field of another type is still a 400.
+    config: z
+      .object({
+        ...s3ConfigInput.shape,
+        ...sftpConfigInput.shape,
+        ...rcloneConfigInput.shape,
+        // After SFTP's: a WebDAV user name may be longer.
+        ...webdavConfigInput.shape,
+        /** Telegram: a finished login whose account replaces the linked one. */
+        loginId: z.string().min(16).max(64).optional(),
+        /** Telegram, only to try a destination before creating it: where it would save. */
+        chat: z.enum(["channel", "saved"]).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
-/** A backup now, outside any schedule: what to save, and optionally where and under what name. */
+/**
+ * A backup now, outside any schedule: what to save, and optionally where and
+ * under what name. `destinationIds` asks for a copy on each, in order; with
+ * neither field, the one default destination.
+ */
 export const manualBackupSchema = z
   .object({
     targets: z.array(backupTargetSchema).min(1).max(50),
     destinationId: z.string().min(1).max(32).optional(),
+    destinationIds: z.array(z.string().min(1).max(32)).min(1).max(MAX_COPIES).optional(),
     name: z.string().trim().min(1).max(80).optional(),
   })
   .strict();

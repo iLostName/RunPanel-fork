@@ -48,6 +48,8 @@ export type OpsEvent =
   | { type: "backup:log"; line: string }
   | { type: "backup:status"; status: string; message?: string }
   | { type: "backup:artifact"; label: string; status: string; bytes?: number; error?: string }
+  /** One copy of the archive changed state: on its way, saved, or not (services/backup/copies.ts). */
+  | { type: "backup:copy"; copyId: string; destination: string; status: string; bytes?: number; error?: string }
   | { type: "restore:log"; line: string }
   | { type: "restore:status"; status: string; message?: string }
   | { type: "autostart:log"; line: string }

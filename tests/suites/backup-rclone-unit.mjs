@@ -188,6 +188,25 @@ export async function run({ repoRoot }) {
     const destination = (config = {}, command = fake) =>
       rclone.rcloneDestination({ id: "r1", name: "Drive", type: "rclone" }, { provider: "drive", token, folder: "RunPanel/notte 'n' giorno", ...config }, { tmpDir, command });
 
+    // --- where it writes, for a policy that refuses two copies in one place ----------
+    const otherToken = JSON.stringify({ ...TOKEN, refresh_token: "1//un-altro-account-111111" });
+    r.check("the same authorization and folder is the same place", destination().location() === destination().location());
+    r.check("another account is another place", destination().location() !== destination({ token: otherToken }).location());
+    r.check("another folder too", destination().location() !== destination({ folder: "Altro" }).location());
+    r.check("and the place never spells the token out", !destination().location().includes(TOKEN.refresh_token));
+    r.check(
+      "OneDrive is told by its drive",
+      destination({ provider: "onedrive", driveId: "b!uno", driveType: "personal" }).location().includes("drive-b!uno")
+    );
+    let progressed = 0;
+    rclone.statsProgress(JSON.stringify({ level: "notice", msg: "Transferred: 1 KiB / 5 KiB", stats: { bytes: 1234, totalBytes: 5000 } }), (done) => (progressed = done));
+    rclone.statsProgress("Transferred: 2 KiB", () => (progressed = -1));
+    r.check("rclone's JSON stats become progress, nothing else does", progressed === 1234);
+    r.check(
+      "and never a reason for a failure",
+      errors.describeRcloneFailure({ exitCode: 1, stderr: `${JSON.stringify({ level: "notice", msg: "Transferred: 1 KiB", stats: { bytes: 1 } })}\n${JSON.stringify({ level: "error", msg: "Failed to copy: storageQuotaExceeded" })}` }, { service: "Google Drive", folder: "x", step: "upload", authorize: null, secrets: [] }).detail?.includes("Transferred") === false
+    );
+
     setEnv();
     const check = await destination().test();
     r.check("Verifica passes and says the service and the version", check.ok === true && check.message.includes("Google Drive") && check.message.includes("rclone 1.68.2"), JSON.stringify(check));

@@ -5,7 +5,8 @@ import { DEFAULT_REMOTE_FOLDER, joinRemote, partialName } from "@/lib/backup-rem
 import { formatBytes } from "@/lib/format";
 import { describeNetworkError } from "./net-errors";
 import { DestinationFailure, clip, failedCheck, problem, redact, type DestinationProblem } from "./problem";
-import type { Destination, DestinationCheck } from "../types";
+import { progressLog } from "./progress";
+import type { Destination, DestinationCheck, PutOptions } from "../types";
 
 /**
  * Backups to a WebDAV folder: Nextcloud, ownCloud, a Synology with the WebDAV
@@ -194,6 +195,21 @@ export function describeWebdavStatus(input: { status: number; body?: string; loc
   return out("HTTP_" + status, `${ctx.host} ha rifiutato la richiesta (HTTP ${status})${words ? `: ${words}` : ""}.`, "Il dettaglio tecnico è qui sotto.");
 }
 
+/** The file as a stream, telling `progress` how much has gone, when someone listens. */
+function counted(localPath: string, progress?: (done: number) => void): Readable {
+  if (!progress) return fs.createReadStream(localPath);
+  let done = 0;
+  return Readable.from(
+    (async function* () {
+      for await (const chunk of fs.createReadStream(localPath)) {
+        done += (chunk as Buffer).length;
+        progress(done);
+        yield chunk as Buffer;
+      }
+    })()
+  );
+}
+
 function isValid(config: Partial<WebdavConfig>): config is WebdavConfig {
   return Boolean(config.url && config.username && config.password);
 }
@@ -352,7 +368,7 @@ export function webdavDestination(row: { id: string; name: string; type: string 
     type: row.type,
     name: row.name,
 
-    async put(localPath: string, fileName: string, opts: { signal?: AbortSignal } = {}) {
+    async put(localPath: string, fileName: string, opts: PutOptions = {}) {
       const cfg = requireConfig();
       const folder = folderOf(cfg);
       const { size } = await fs.promises.stat(localPath);
@@ -365,8 +381,10 @@ export function webdavDestination(row: { id: string; name: string; type: string 
         try {
           res = await request(cfg, "upload", "PUT", webdavUrl(cfg.url, provisional), {
             headers: { "content-length": String(size), "content-type": "application/octet-stream" },
-            // Streamed, never buffered: an archive is routinely larger than the heap.
-            body: Readable.toWeb(fs.createReadStream(localPath)) as ReadableStream,
+            // Streamed, never buffered: an archive is routinely larger than the
+            // heap. Read, never moved: the runner hands the same staged file to
+            // every destination of the policy.
+            body: Readable.toWeb(counted(localPath, opts.log ? progressLog(opts.log, size) : undefined)) as ReadableStream,
             stream: true,
             timeoutMs: null,
             signal: opts.signal,
@@ -400,6 +418,18 @@ export function webdavDestination(row: { id: string; name: string; type: string 
         throw err;
       }
       return { ref, bytes: size };
+    },
+
+    /** The same address and folder is the same place: a policy refuses two copies there. */
+    location() {
+      let root = String(config.url ?? "");
+      try {
+        const url = new URL(root);
+        root = `${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, "")}`;
+      } catch {
+        /* compared as typed */
+      }
+      return `webdav:${root}/${typeof config.folder === "string" ? config.folder : DEFAULT_REMOTE_FOLDER}`;
     },
 
     async remove(ref: string) {

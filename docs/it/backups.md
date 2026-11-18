@@ -4,7 +4,7 @@
 
 # Backup e ripristino
 
-Una *policy* dice cosa salvare, dove, ogni quanto e quanti archivi tenere. Policy, destinazioni, archivi e ripristini appartengono al server su cui stanno: con [più server](multi-server.md) ognuno ha i propri, e un archivio si decifra solo con la chiave del server che l'ha preso.
+Una *policy* dice cosa salvare, dove — una destinazione o più, con una copia dello stesso archivio in ognuna —, ogni quanto e quanti archivi tenere. Policy, destinazioni, archivi e ripristini appartengono al server su cui stanno: con [più server](multi-server.md) ognuno ha i propri, e un archivio si decifra solo con la chiave del server che l'ha preso.
 
 Chi non è proprietario salva e ripristina solo i progetti e i servizi che gestisce, uno alla volta (vedi [Utenti e permessi](users.md)).
 
@@ -20,7 +20,7 @@ Chi non è proprietario salva e ripristina solo i progetti e i servizi che gesti
 
 Ogni dump gira **dentro il container a cui appartiene**, così client e server sono della stessa versione. Lo store SQLite del pannello viene catturato con `VACUUM INTO` e verificato con `PRAGMA integrity_check`; lo store Postgres con un `pg_dump` in formato custom, in un container della stessa major.
 
-Un progetto caricato da ZIP include sempre il repository. La copia del repository salta `node_modules`, `.next`, `dist`, `build`, `vendor`, `.venv` e simili, e il `.env` scritto dal pannello.
+Un progetto caricato da ZIP include sempre il repository. La copia del repository salta `node_modules`, `.next`, `dist`, `build`, `vendor`, `.venv` e simili, e il `.env` scritto dal pannello. Per un progetto nativo con le [cartelle per versione](deploy.md#tornare-alla-versione-precedente) comprende anche i file che l'app ha creato nella versione che gira e che passeranno alla cartella del progetto solo al deploy successivo.
 
 ## I volumi dei progetti
 
@@ -59,8 +59,9 @@ Sempre da **Backup dei volumi**, per ogni volume si escludono percorsi relativi 
 
 ## Dove finiscono
 
-- **Disco locale**: sempre `data/backups/archives/<anno>/<mese>`, file 0600. Creato al primo avvio; il percorso non si cambia. Un archivio che sta solo sulla macchina che protegge si perde con lei: per questo ci sono le destinazioni qui sotto.
+- **Disco locale**: `data/backups/archives/<anno>/<mese>`, file 0600. Creato al primo avvio. Il proprietario può aggiungere altre destinazioni locali con una **cartella** propria (in **Avanzate** del modulo), per esempio un secondo disco o un NAS montato: percorso completo, fuori dalla cartella dei dati del pannello, che esista già e in cui l'utente del pannello possa scrivere; gli archivi vanno in `<cartella>/<anno>/<mese>`. La cartella non si cambia dopo: per scrivere altrove si aggiunge una destinazione nuova. Se la cartella sta sullo stesso disco dei dati del pannello, **Verifica** riesce ma lo segnala: è anche quello che succede quando il secondo disco non è montato e si scrive nel suo punto di montaggio vuoto. Un archivio che sta solo sulla macchina che protegge si perde con lei: per questo c'è S3.
 - **S3-compatibile**: Amazon S3, Cloudflare R2, Backblaze B2, Hetzner Object Storage, Wasabi, e MinIO o un server tuo. Scegliendo il servizio si riempiono endpoint e indirizzamento; di solito resta da cambiare solo la regione. Bucket, chiavi e un prefisso facoltativo completano; la configurazione è cifrata. `https://` ovunque, `http://` solo verso un indirizzo privato. L'oggetto si chiama `<prefisso>/<file>`, caricato in un'unica richiesta: su AWS vale il limite di 5 GB per oggetto. Dopo il caricamento il pannello rilegge la dimensione conservata dal bucket, e se non torna il backup fallisce.
+- **Telegram**: un canale privato creato dal pannello, o i tuoi Messaggi salvati, attraverso il tuo account. Gli archivi più grandi di un file Telegram vengono divisi in parti. Vedi [Telegram](#telegram) qui sotto.
 - **Server SFTP o NAS**: Synology, QNAP, una Storage Box di Hetzner, un altro server; con una chiave generata dal pannello. Vedi [Server SFTP o NAS](#server-sftp-o-nas).
 - **WebDAV**: Nextcloud, ownCloud, il WebDAV di un NAS, Koofr, pCloud. Vedi [WebDAV](#webdav).
 - **Google Drive, OneDrive, Dropbox** e gli altri servizi di rclone, se rclone è installato sul server. Vedi [rclone](#rclone-google-drive-onedrive-dropbox-e-gli-altri).
@@ -72,14 +73,38 @@ Gli errori di S3 sono spiegati in italiano, con causa e soluzione: access key in
 Dalla lista il proprietario può anche:
 
 - **Modifica**: nome, endpoint, regione, bucket, chiavi, prefisso. La secret non viene mai mostrata: lasciala vuota per tenere quella salvata. Il tipo non cambia. Se ci sono già archivi, cambiare bucket, endpoint o prefisso fa sì che il pannello li cerchi nel posto nuovo: il modulo lo dice.
-- **Imposta come predefinita**: dove vanno il backup notturno, le nuove pianificazioni e il backup di sicurezza di ogni ripristino. Può anche spostarci tutte le pianificazioni esistenti; gli archivi già fatti restano dove sono e si possono ancora ripristinare.
-- **Elimina**: rifiutato finché una pianificazione ci scrive (il dialog la nomina e la apre) e per l'ultima destinazione rimasta. Se contiene archivi serve il proprietario e il nome della destinazione scritto per intero: i file restano dove sono, ma il pannello non li conosce più (niente ripristino, download o retention). Se era la predefinita, il suo posto lo prende la destinazione rimasta più vecchia.
+- **Imposta come predefinita**: dove vanno il backup notturno, le nuove pianificazioni e il backup di sicurezza di ogni ripristino. Può anche spostarci tutte le pianificazioni esistenti: diventa la loro destinazione principale (al posto della vecchia, o portata in cima se ci tenevano già una copia), e le altre copie restano; gli archivi già fatti restano dove sono e si possono ancora ripristinare.
+- **Elimina**: rifiutato finché una pianificazione ci scrive, come principale o come copia (il dialog la nomina e la apre), mentre una copia è in viaggio verso di lei, e per l'ultima destinazione rimasta. Se contiene archivi serve il proprietario e il nome della destinazione scritto per intero: i file restano dove sono, ma il pannello non li conosce più (niente ripristino, download o retention da lì). I backup che hanno una copia anche altrove si ripristinano da quella. Se era la predefinita, il suo posto lo prende la destinazione rimasta più vecchia.
 
 Gli altri account con il permesso `backup` possono aggiungere destinazioni, verificarle, rinominarle ed eliminarne una vuota, ma non cambiare dove scrive una esistente né quale sia la predefinita: entrambe le cose sposterebbero gli archivi di tutti, quelli del proprietario compresi.
 
-Ogni archivio viene costruito prima in `data/backups/staging`, anche per S3 e le altre destinazioni fuori dal server: serve spazio libero in locale, e il backup si interrompe se scende sotto 2 GB.
+Ogni archivio viene costruito prima in `data/backups/staging`, anche per S3, Telegram e le altre destinazioni fuori dal server: serve spazio libero in locale, e il backup si interrompe se scende sotto 2 GB.
 
-L'archivio è uno zip con `manifest.json`, `LEGGIMI.txt` e `checksums.txt` in formato `sha256sum -c` (per i dump e i volumi; i file del repository non sono elencati). Le variabili dei progetti e le credenziali dei servizi sono cifrate con la chiave di questo server; includere la chiave stessa è una scelta esplicita a parte. Il resto (dump, volumi, codice) è in chiaro, a meno di cifrare l'archivio intero con una password: vedi qui sotto.
+### Telegram
+
+Gli archivi vanno su Telegram attraverso il **tuo account**, non un bot: un bot carica al massimo 50 MB, un account fino a 2 GB per file, 4 GB con Telegram Premium.
+
+**Le chiavi.** Telegram chiede che ogni programma usi le proprie, e il pannello non ne ha di sue:
+
+1. Apri [my.telegram.org](https://my.telegram.org) e accedi con il numero dell'account che terrà i backup: il codice arriva nell'app di Telegram.
+2. Scegli **API development tools** e crea un'app: nome e titolo a piacere (per esempio *RunPanel*), piattaforma *Other*; URL e descrizione possono restare vuoti.
+3. In **Backup › Destinazioni › Aggiungi › Telegram** copia **api_id** e **api_hash**.
+
+**Il collegamento.** Con il **codice QR**: sul telefono apri Telegram › Impostazioni › Dispositivi › Collega dispositivo e inquadralo (si rinnova da solo ogni 30 secondi). Oppure con il **numero di telefono**: Telegram manda un codice nell'app o per SMS. Se l'account ha la verifica in due passaggi, il pannello chiede anche quella password. Il collegamento resta in sospeso sul server, dieci minuti per completarlo e venti per salvare; la sessione che ne esce finisce solo nella configurazione cifrata della destinazione e non passa mai dal browser. Un collegamento abbandonato viene chiuso, anche su Telegram. Avviarne uno richiede gli stessi permessi che servono per aggiungere una destinazione; i tentativi sono limitati, perché Telegram blocca per ore un account che chiede troppi codici.
+
+**Dove.** Un **canale privato** che il pannello crea per questo server quando salvi («RunPanel · backup di» seguito dal nome del server, si può cambiare), oppure i tuoi **Messaggi salvati**. La chat si sceglie creando la destinazione e poi non cambia: gli archivi sono lì. Non eliminare né modificare a mano i loro messaggi: il pannello li ritrova dal numero del messaggio.
+
+**Le parti.** Un file su Telegram ha al massimo 4000 pezzi da 512 KiB, 8000 con Premium: 2000 e 4000 MiB. A ogni backup il pannello legge dall'account se è Premium — un abbonamento può scadere — e dalla configurazione di Telegram il numero di pezzi, e tiene un margine di 20 MiB: parti fino a 1980 MiB, o 3980 MiB con Premium. Un archivio più grande viene diviso in parti, caricate come documenti separati (`….zip.enc.001`, `.002`…), lette dal file dell'archivio senza copie temporanee. Ogni parte ha una didascalia con il nome dell'archivio, la parte («Parte 2 di 3»), la dimensione e lo sha256. Il riferimento salvato con il backup elenca i messaggi in ordine: ripristino, verifica e download riscaricano le parti in sequenza e le ricompongono nell'archivio di sempre, controllando lo sha256 di ognuna. Senza il pannello si scaricano le parti dalla chat e si uniscono con `cat nome.zip.enc.* > nome.zip.enc` (su Windows `copy /b nome.zip.enc.001 + nome.zip.enc.002 nome.zip.enc`).
+
+Nel log del backup ci sono l'account, se è Premium, in quante parti va l'archivio, l'avanzamento e le attese che Telegram chiede (FLOOD_WAIT): fino a 15 minuti il pannello aspetta e riprende da solo, oltre il backup fallisce e il successivo riprova. Una connessione caduta viene ritentata pezzo per pezzo. Se una parte non va su, quelle già caricate vengono cancellate: nella chat restano solo archivi interi. Dopo il caricamento il pannello rilegge da Telegram la dimensione di ogni parte, e se non torna il backup fallisce. **Verifica** collega l'account, dice se è Premium e quanto può essere grande una parte, poi scrive, rilegge e cancella un piccolo file nella chat.
+
+**Sicurezza.**
+
+- La sessione apre **tutto l'account**: chi la ottenesse potrebbe leggere e scrivere ogni chat. È cifrata con la chiave del pannello come ogni altro segreto e serve solo ai backup; se preferisci, usa un account Telegram dedicato. In Telegram › Impostazioni › Dispositivi compare come «RunPanel su» seguito dal nome del server: chiudendola da lì, il backup successivo fallisce con «Sessione chiusa dall'app di Telegram, o scaduta: ricollega l'account».
+- Le chat cloud di Telegram **non sono cifrate end-to-end**: Telegram può leggere quello che carichi. Attiva la [cifratura con una password](#cifratura-con-una-password); quando è spenta, il modulo della destinazione la propone.
+- Eliminare la destinazione chiude anche la sessione su Telegram; gli archivi restano nella chat.
+
+**Ricollegare.** Con la sessione chiusa, **Modifica › Ricollega l'account** rifà il collegamento (lasciando vuoto l'api_hash resta quello salvato) e la vecchia sessione viene chiusa. Un altro account è accettato solo se raggiunge ancora gli archivi: per un canale deve esserne amministratore, per i Messaggi salvati la destinazione deve essere ancora vuota. Il proprietario ricollega, come per le chiavi di S3.
 
 ### Server SFTP o NAS
 
@@ -114,6 +139,23 @@ Con [rclone](https://rclone.org), se è installato sul server del pannello: un s
 - Le operazioni sono `rclone copyto` con l'archivio preparato in `staging`, `rclone cat` per rileggerlo a flusso, `rclone deletefile` e `rclone lsjson --stat` per la dimensione. rclone controlla dimensione e, dove il servizio lo ha, hash di ogni file caricato, e questi servizi rendono visibile un file solo quando è completo; dopo il caricamento il pannello rilegge comunque la dimensione.
 - **La verifica** elenca la cartella, poi scrive, rilegge ed elimina un file di prova. Gli errori sono spiegati: rclone mancante o troppo vecchio, autorizzazione scaduta o revocata (con il comando per rifarla), credenziali non accettate, spazio dell'account esaurito, troppe richieste, permessi, cartella o archivio che non ci sono, errori di rete e di certificato.
 - Con Google Drive rclone usa un client ID condiviso da tutti i suoi utenti, che Google limita: per archivi grandi o frequenti conviene crearne uno tuo nella Google Cloud Console e usare la modalità esperto, con `client_id` e `client_secret`.
+
+## Più copie di ogni backup (3-2-1)
+
+Una pianificazione può scrivere lo stesso archivio in più destinazioni, per esempio il disco del server, un secondo disco e un bucket: perdere un disco, un bucket o un account non fa perdere i backup. È la regola 3-2-1: tre copie, su due supporti diversi, una fuori da qui.
+
+- **Dove salvare**, nel modulo della pianificazione, è una lista in ordine: la prima è la **principale**, le altre ricevono una copia identica. **Aggiungi una copia** ne mette un'altra in fondo; dal menu ⋯ di ogni riga si sposta, si rende principale o si toglie. Fino a 5 destinazioni; la stessa due volte, o due che scrivono nello stesso posto (due destinazioni locali nella stessa cartella, due S3 sullo stesso bucket e prefisso, due Telegram sullo stesso canale o sugli stessi Messaggi salvati), vengono rifiutate: lì una seconda copia non protegge da niente. Le pianificazioni che esistevano prima hanno una sola destinazione, e fanno quello che facevano.
+- L'archivio viene scritto **una volta sola**, cifrato se c'è la password dei backup, e poi copiato in ogni destinazione **una dopo l'altra**, nell'ordine della lista: la principale per prima, così il backup è ripristinabile il prima possibile. In sequenza e non in parallelo perché la connessione è una sola — due caricamenti insieme non finiscono prima di due in fila — e perché il server serve anche le tue app: un carico alla volta, prevedibile. Sullo stesso disco della cartella di lavoro la copia locale è un collegamento al file, istantaneo e senza spazio in più; su un altro disco è una copia completa, scritta accanto e rinominata solo quando è intera. Il file nella cartella di lavoro resta finché tutte le copie non hanno finito.
+- **Quanto tenerne**: ogni copia segue la regola della pianificazione, oppure una sua (**Per ogni destinazione**, con più di una destinazione): per esempio una settimana sul disco e un anno nel bucket. La retention toglie le copie destinazione per destinazione, e la copia più recente in ogni destinazione non viene mai tolta; un backup sparisce dalla cronologia solo quando non ne resta nessuna copia.
+- **Se una copia non riesce** il backup non è fallito: l'archivio c'è nelle altre. Il backup resta riuscito (o parziale, per gli elementi che mancano), la cronologia mostra "2 copie su 3" e arriva la notifica di backup concluso come avviso, con la destinazione e il motivo. Nella pagina del backup, **Copie** elenca ogni copia con stato, dimensione, dove sta e l'errore; **Riprova la copia** la rimanda partendo da una copia che c'è, dopo averla confrontata con lo sha256 dell'archivio creato. Solo se nessuna copia arriva il backup è fallito.
+- **Ripristino, download e Verifica integrità** usano la prima copia disponibile: prima quelle sul disco di questo server, poi nell'ordine della pianificazione. Una copia che non c'è più o non risponde lascia il posto alla successiva, e il log dice quale è stata usata; nel ripristino anche una copia danneggiata (sha256 diverso, un file che non si rilegge) lascia il posto alla successiva. Una password che manca o è sbagliata invece ferma subito: è la stessa per ogni copia.
+- **Eliminare un backup** elimina tutte le sue copie. Se una non si lascia cancellare, il backup resta con quelle rimaste, e lo si può riprovare.
+- **Esegui ora** su una pianificazione scrive in tutte le sue destinazioni, come quando parte da sola. Un backup fuori da ogni pianificazione — **Esegui backup ora** nella pagina di un database — va solo nella destinazione predefinita: non ha retention e resta finché non lo elimini, quindi una copia ovunque riempirebbe ogni destinazione, quelle a pagamento comprese; ed è di solito la copia veloce prima di una modifica rischiosa. Dall'API, `destinationIds` ne chiede più d'una. Anche il **backup di sicurezza** di un ripristino va solo nella predefinita: il ripristino lo aspetta, serve a tornare indietro nei minuti dopo, e non viene mai tolto dalla retention.
+- Se il pannello si ferma a metà delle copie, al riavvio il backup si chiude con le copie arrivate, e quelle interrotte compaiono come non riuscite, da riprovare.
+
+Dall'API: `destinations` in `POST`/`PUT /api/backups/policies` (`[{ destinationId, retention: { count, days, bytes } | null }]`, `null` per la regola della pianificazione), `copies` in ogni backup di `GET /api/backups/runs`, e `POST /api/backups/runs/{id}/copies/{copyId}/retry`. `destinationId` resta, ed è la principale; un client che manda solo quello cambia la principale e lascia le altre copie dove sono.
+
+L'archivio è uno zip con `manifest.json`, `LEGGIMI.txt` e `checksums.txt` in formato `sha256sum -c` (per i dump e i volumi; i file del repository non sono elencati). Le variabili dei progetti e le credenziali dei servizi sono cifrate con la chiave di questo server; includere la chiave stessa è una scelta esplicita a parte. Il resto (dump, volumi, codice) è in chiaro, a meno di cifrare l'archivio intero con una password: vedi qui sotto.
 
 ## Cifratura con una password
 
@@ -161,14 +203,14 @@ Per chi vuole leggerlo con altri strumenti: un'intestazione — `RPBKENC`, la ve
 - **Pianificazione**: si sceglie a parole — ogni N ore (1, 2, 3, 4, 6, 8 o 12, a partire da mezzanotte), ogni giorno, ogni settimana nei giorni che spunti, ogni mese in un giorno — a un'ora e un minuto. L'espressione cron a cinque campi (o `@daily` e simili) è in **Avanzate**; un'espressione che nessuna di queste forme sa dire senza cambiarne il significato (per esempio `0 3,15 * * *`) viene mostrata com'è, con quella sezione aperta. I giorni 29–31 non esistono in tutti i mesi, e cron salta quei mesi: l'editor lo dice. Non sono supportati secondi, `L`, `W`, `#` e `@reboot`. **Solo su richiesta** non ha orario.
 - **Fuso orario**: si sceglie dall'elenco completo, cercando per città. **Come il pannello** (quello di default) è il fuso impostato in **Impostazioni › Generale**, o UTC se non ce n'è uno — mai quello dell'host. Gli orari si leggono in quel fuso anche quando cambia l'ora legale: un orario che quella notte non esiste parte al primo minuto che esiste, uno che capita due volte parte una volta sola.
 - **Un backup alla volta**, e nessuno durante un ripristino. Un'esecuzione pianificata che trova il sistema occupato viene saltata, non accodata. Un'esecuzione persa a pannello spento viene recuperata solo entro il doppio dell'intervallo, o 24 ore se di più.
-- **Retention**: numero (1–1000), età (1–3650 giorni) e dimensione totale (almeno 1 MB), insieme. Viene applicata dopo un'esecuzione riuscita, e l'archivio valido più recente non viene mai tolto. Un backup fatto a mano fuori da ogni pianificazione (vedi la pagina del database, più sotto) non ha retention: resta finché non lo elimini.
+- **Retention**: numero (1–1000), età (1–3650 giorni) e dimensione totale (almeno 1 MB), insieme. Viene applicata dopo un'esecuzione riuscita, destinazione per destinazione, ognuna con la sua regola (vedi [Più copie](#più-copie-di-ogni-backup-3-2-1)), e la copia valida più recente in ogni destinazione non viene mai tolta. Un backup fatto a mano fuori da ogni pianificazione (vedi la pagina del database, più sotto) non ha retention: resta finché non lo elimini.
 
 ## Integrità
 
-Ogni backup registra lo sha256 dell'archivio, e `checksums.txt` quello di ogni dump e volume. **Verifica integrità**, nella pagina di un backup, rilegge l'archivio in background:
+Ogni backup registra lo sha256 dell'archivio, e `checksums.txt` quello di ogni dump e volume. **Verifica integrità**, nella pagina di un backup, rilegge l'archivio in background, dalla prima copia disponibile (e dice quale, se sono più d'una):
 
 - sul disco locale, per intero: lo sha256 dell'archivio, poi per ogni file il CRC-32, lo sha256 dove è elencato, e ogni `.gz` decompresso fino in fondo — un dump troncato ha comunque un checksum valido di se stesso troncato;
-- in un bucket, scorrendolo una volta per calcolarne lo sha256, senza salvarlo: dimostra che i byte sono quelli scritti; i singoli file vengono controllati di nuovo prima di ogni ripristino.
+- in un bucket o su Telegram, scorrendolo una volta per calcolarne lo sha256, senza salvarlo: dimostra che i byte sono quelli scritti; i singoli file vengono controllati di nuovo prima di ogni ripristino. Su Telegram si controlla anche lo sha256 di ogni parte.
 
 Un archivio cifrato si controlla allo stesso modo: lo sha256 è quello del file cifrato, e i file vengono letti attraverso la decifratura, che verifica ogni blocco. Se il pannello non ha più la sua password, controlla lo sha256 e dice che il contenuto non si è potuto aprire.
 
@@ -180,13 +222,13 @@ Il ripristino è un solo dialog. È tutto selezionato; ogni voce dice, in una ri
 
 Prima di fermare, copiare o sovrascrivere qualsiasi cosa:
 
-1. Un archivio su S3 viene scaricato nella cartella di lavoro del ripristino (serve lo spazio libero, più la riserva di 2 GB), con lo sha256 calcolato durante il download e confrontato con quello registrato quando è stato scritto; se non coincide il ripristino si ferma.
+1. L'archivio viene preso dalla prima copia disponibile, partendo da quelle sul disco di questo server. Uno su S3 o su Telegram viene scaricato nella cartella di lavoro del ripristino (serve lo spazio libero, più la riserva di 2 GB), con lo sha256 calcolato durante il download e confrontato con quello registrato quando è stato scritto; se non coincide, e non c'è un'altra copia da provare, il ripristino si ferma. Le parti di un archivio diviso su Telegram vengono riscaricate in ordine e ricomposte; se ne manca una, il pannello dice quale prima di scaricare alcunché, e passa alla copia successiva se c'è.
 2. I file che il ripristino userà — solo quelli — vengono controllati come fa **Verifica integrità**. Se uno è danneggiato, o la password di un archivio cifrato manca o è sbagliata, il ripristino si ferma senza aver toccato niente. Un archivio cifrato non viene mai decifrato per intero su disco: come per uno zip, il ripristino estrae solo i file che gli servono nella sua cartella di lavoro, che viene cancellata alla fine.
 3. Un **backup di sicurezza** delle destinazioni va sulla destinazione predefinita (etichetta "Sicurezza pre-ripristino", mai tolto dalla retention, si cancella a mano). Se fallisce il ripristino si ferma, a meno che tu non abbia spuntato **Procedi anche senza backup di sicurezza**.
 
 - **Volume**: il progetto si ferma; i suoi container rimasti accesi vengono fermati e riavviati alla fine, mentre un container di un altro progetto che usa il volume blocca il ripristino. I percorsi esclusi restano come sono. Un volume Compose che non esiste più si ricrea con un deploy, poi si ripete il ripristino.
 - **Database**: se il servizio appartiene a un progetto acceso, il progetto si ferma e riparte alla fine. Su Postgres il ripristino rifiuta di partire se resta aperta una connessione, perché lo script cancella i database in ordine e si fermerebbe a metà. MySQL e Mongo sovrappongono il dump a quello che c'è. Un dump completo MySQL o Mongo porta con sé gli utenti del server di origine: su un altro servizio li sostituisce, e il ripristino finisce in errore dicendo che le credenziali salvate non valgono più, con i dati già al loro posto.
-- **Repository**: i file vengono sovrascritti, quelli in più non vengono cancellati. Durante un deploy il ripristino rifiuta.
+- **Repository**: i file vengono sovrascritti, quelli in più non vengono cancellati. Durante un deploy il ripristino rifiuta. Con le cartelle per versione i file vanno dove l'app li legge: nella versione che gira, e da lì nella cartella del progetto per quelli in comune.
 - **Configurazione di un progetto**: il progetto deve esistere ancora. È cifrata con la chiave del pannello che l'ha scritta: dall'archivio di un altro pannello non si legge, e il ripristino lo dice.
 - **Store del pannello (SQLite)**: non viene ripristinato a caldo. Il database viene messo da parte ed entra in servizio al riavvio successivo, con il precedente conservato accanto. La chiave di cifratura non viene rimessa: se serve, va copiata a mano.
 - **Store del pannello (Postgres)**: il pannello rifiuta; il comando `pg_restore` da eseguire a pannello fermo è nel `manifest.json`.
@@ -205,4 +247,4 @@ Un archivio caricato resta sul server per 24 ore dall'ultimo uso, così un ripri
 
 ## Nella pagina del database
 
-La pagina di un database ha un riquadro **Backup**: le pianificazioni che lo salvano (quando e dove), i suoi archivi recenti con il segno dell'integrità, e **Ripristina…** limitato a quel database, con quel database come unica destinazione. Se nessuna pianificazione attiva lo salva propone **Salvalo ogni notte** (alle 03:00, sulla destinazione predefinita, conservando gli ultimi 7). Il proprietario ha anche **Esegui backup ora**, un backup fuori da ogni pianificazione e quindi fuori dalla retention.
+La pagina di un database ha un riquadro **Backup**: le pianificazioni che lo salvano (quando e dove), i suoi archivi recenti con il segno dell'integrità, e **Ripristina…** limitato a quel database, con quel database come unica destinazione. Se nessuna pianificazione attiva lo salva propone **Salvalo ogni notte** (alle 03:00, sulla destinazione predefinita, conservando gli ultimi 7). Il proprietario ha anche **Esegui backup ora**, un backup fuori da ogni pianificazione e quindi fuori dalla retention, sulla sola destinazione predefinita.

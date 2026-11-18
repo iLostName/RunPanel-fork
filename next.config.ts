@@ -132,8 +132,11 @@ const nextConfig: NextConfig = {
     agentUpgrade: false,
   },
 
-  // Native / driver packages that must stay outside the bundle.
-  serverExternalPackages: ["better-sqlite3", "pg"],
+  // Native / driver packages that must stay outside the bundle. GramJS
+  // (`telegram`, the Telegram backup destination) too: it loads its TL schema
+  // and its socket layer at runtime, ships optional native helpers, and is
+  // imported lazily so a panel without Telegram never loads it at all.
+  serverExternalPackages: ["better-sqlite3", "pg", "telegram"],
 
   // The version is not a secret worth keeping, but it is a free hint for
   // anyone scanning for a Next release with a known advisory.

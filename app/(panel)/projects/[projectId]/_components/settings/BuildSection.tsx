@@ -213,7 +213,7 @@ export function BuildSection({
                   non parte: è il posto giusto per le migrazioni.{" "}
                   {isDocker
                     ? "Gira in un container usa e getta creato dall'immagine appena costruita, con la stessa rete e lo stesso ambiente dell'app."
-                    : "Gira nella cartella del repository con lo stesso ambiente dell'app."}
+                    : "Gira nella cartella della nuova versione, con lo stesso ambiente e gli stessi dati dell'app."}
                 </>
               }
               onChange={(v) => setCommand("release", v)}
@@ -234,7 +234,7 @@ export function BuildSection({
         onChanged={(queued) => (queued ? onProjectChange((prev) => ({ ...prev, oneTimeCommands: queued })) : onRefresh())}
       />
 
-      <HealthcheckPanel form={form} />
+      <HealthcheckPanel form={form} releasesSupported={project.releases?.supported ?? false} />
     </div>
   );
 }

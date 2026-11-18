@@ -20,6 +20,8 @@ import { parseRepoMove, repoLocation } from "@/services/project-repo";
 import { readAccess, reportGate, syncGate } from "@/services/access";
 import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
 import { restartFromLastDeployment } from "@/services/project-restart";
+import { currentRelease, removeProjectReleases } from "@/services/project-releases";
+import { releasesSupported } from "@/lib/releases";
 import { getPreset } from "@/services/deploy-presets";
 import { queuedForProject } from "@/services/one-time-commands";
 import { folderExists } from "@/services/folders";
@@ -118,6 +120,10 @@ export async function GET(_request: NextRequest, { params }: Params) {
     // Where the checkout really is, asked of the filesystem rather than read off
     // the column: they differ exactly when something went wrong.
     repo_location: repoLocation(project.slug),
+    // Whether this server can give a native project a folder per version
+    // (not on Windows), and which one runs now: the settings say what the
+    // automatic return can do here before anyone turns it on.
+    releases: { supported: releasesSupported(process.platform), current: currentRelease(project.slug)?.id ?? null },
     repoMove: parseRepoMove(project.repo_move),
     // The queue only. It is small, and the header needs it on every poll to
     // say that the next deploy will not be an ordinary one. The history is
@@ -611,6 +617,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     // every running deploy's log stream — for as long as it took.
     const repoDir = path.join(config.reposDir, slug);
     await fs.promises.rm(repoDir, { recursive: true, force: true });
+    // And every version folder of a native project, which only links to it.
+    await removeProjectReleases(slug);
 
     // Delete generated PM2 files, including the 0600 sidecar holding the
     // project's environment and the process logs, plus the marker saying when the

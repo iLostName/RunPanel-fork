@@ -19,6 +19,8 @@ export interface VerificationView {
   startedAt: string | null;
   checkedAt: string | null;
   depth: "full" | "archive" | null;
+  /** The copy that was read; absent from a server on an older version. */
+  source?: { destinationName: string; destinationType: string } | null;
   progress: { done: number; total: number | null } | null;
   failures: { entryPath: string; reason: string }[];
 }
@@ -30,7 +32,18 @@ export interface VerificationView {
  * archive's sha256, are for expert mode: they change nothing a person does
  * next, which is take another backup.
  */
-export function IntegrityCheck({ runId, checksum, className }: { runId: string; checksum: string | null; className?: string }) {
+export function IntegrityCheck({
+  runId,
+  checksum,
+  showSource = false,
+  className,
+}: {
+  runId: string;
+  checksum: string | null;
+  /** Say which copy was read: worth saying when the run has more than one. */
+  showSource?: boolean;
+  className?: string;
+}) {
   const api = useNodeApi();
   const [polling, setPolling] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -101,7 +114,7 @@ export function IntegrityCheck({ runId, checksum, className }: { runId: string; 
               ? `${formatBytes(progress.done)}${progress.total ? ` di ${formatBytes(progress.total)}` : ""} letti`
               : "Inizio a leggere l'archivio…"
             : verification
-              ? `${verification.message}${verification.checkedAt ? ` · ${formatWhen(verification.checkedAt)}` : ""}`
+              ? `${verification.message}${showSource && verification.source ? ` · copia su «${verification.source.destinationName}»` : ""}${verification.checkedAt ? ` · ${formatWhen(verification.checkedAt)}` : ""}`
               : "Rilegge l'archivio e lo confronta con quello che è stato registrato quando è stato creato. Ogni ripristino lo fa comunque, prima di toccare qualsiasi cosa."}
         </p>
         {running && percent !== null && (

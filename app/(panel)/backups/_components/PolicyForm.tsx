@@ -10,19 +10,20 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { Segmented, SegmentedMulti } from "@/components/ui/Segmented";
-import { SelectField } from "@/components/ui/SelectField";
 import { CheckboxField } from "@/components/ui/CheckboxField";
+import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { useResource } from "@/lib/hooks/useResource";
 import { SchedulePicker } from "@/components/ui/SchedulePicker";
-import { whereItWrites } from "./destinations/kinds";
 import { BackupPasswordDialog } from "./EncryptionPanel";
-import type {
-  BackupTarget,
-  DestinationView,
-  EncryptionStatus,
-  PolicyView,
-  ProjectInclude,
-  TargetCatalog,
+import { CopyRetention, DestinationList, blankDraft, draftFrom, ruleWords, type DestinationDraft } from "./DestinationList";
+import {
+  policyDestinations,
+  type BackupTarget,
+  type DestinationView,
+  type EncryptionStatus,
+  type PolicyView,
+  type ProjectInclude,
+  type TargetCatalog,
 } from "@/components/backups/types";
 import { serviceDisplayName } from "@/lib/service-name";
 import { ServerPicker } from "@/components/cluster/ServerBits";
@@ -142,7 +143,10 @@ export function PolicyForm({ policy }: Props) {
   const [cron, setCron] = useState(policy?.cron ?? "0 3 * * *");
   /** Null follows the panel's zone, which is what a policy saved without one already did. */
   const [timezone, setTimezone] = useState<string | null>(policy?.timezone ?? null);
-  const [chosenDestination, setChosenDestination] = useState(policy?.destinationId ?? "");
+  /** Null until something is chosen: a new policy starts on the default destination once the list arrives. */
+  const [drafts, setDrafts] = useState<DestinationDraft[] | null>(() =>
+    policy ? policyDestinations(policy).map(draftFrom) : null
+  );
   // The zone a policy without its own is read in: the panel's, else UTC.
   const settings = useResource<{ timezone_effective?: string }>(api("/api/settings"));
 
@@ -181,24 +185,23 @@ export function PolicyForm({ policy }: Props) {
     .filter(Boolean)
     .join(" · ");
 
-  const retentionSummary =
-    [
-      retentionCount ? `${retentionCount} archivi` : null,
-      retentionDays ? `${retentionDays} giorni` : null,
-      retentionGb ? `${retentionGb} GB` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ") || "nessun limite";
   const [saving, setSaving] = useState(false);
 
-  // Falls back to the first destination as soon as the list arrives, without an
-  // effect writing state back into the component that just rendered.
-  // The default destination unless another is picked, not whichever came first.
-  const destinationId =
-    chosenDestination ||
-    destinations.data?.destinations.find((d) => d.isDefault)?.id ||
-    destinations.data?.destinations[0]?.id ||
-    "";
+  // Falls back to the default destination as soon as the list arrives, without
+  // an effect writing state back into the component that just rendered — the
+  // default, not whichever came first.
+  const fallbackId =
+    destinations.data?.destinations.find((d) => d.isDefault)?.id || destinations.data?.destinations[0]?.id || "";
+  const copyList: DestinationDraft[] = drafts ?? (fallbackId ? [blankDraft(fallbackId)] : []);
+  const destinationName = (id: string) =>
+    destinations.data?.destinations.find((d) => d.id === id)?.name ?? "destinazione non più configurata";
+
+  const retentionSummary = [
+    ruleWords({ count: retentionCount, days: retentionDays, gb: retentionGb }, "nessun limite"),
+    ...(copyList.length > 1
+      ? copyList.filter((draft) => draft.own).map((draft) => `«${destinationName(draft.destinationId)}»: ${ruleWords(draft)}`)
+      : []),
+  ].join(" · ");
 
   const targets = useMemo<BackupTarget[]>(() => {
     const list: BackupTarget[] = [];
@@ -270,16 +273,27 @@ export function PolicyForm({ policy }: Props) {
       toast.error(cronError);
       return;
     }
-    if (!destinationId) {
+    if (copyList.length === 0) {
       toast.error("Scegli una destinazione");
       return;
     }
 
+    const number = (value: string) => (value.trim() ? Number(value) : null);
     const payload = {
       name: name.trim(),
       cron,
       timezone,
-      destinationId,
+      // Both: a server on an older version reads the first and ignores the list.
+      destinationId: copyList[0].destinationId,
+      destinations: copyList.map((draft) => ({
+        destinationId: draft.destinationId,
+        // With one destination the policy's rule is its rule: a custom one
+        // left over from a removed copy must not apply unseen.
+        retention:
+          copyList.length > 1 && draft.own
+            ? { count: number(draft.count), days: number(draft.days), bytes: draft.gb.trim() ? Number(draft.gb) * 1024 ** 3 : null }
+            : null,
+      })),
       targets,
       retentionCount: retentionCount ? Number(retentionCount) : null,
       retentionDays: retentionDays ? Number(retentionDays) : null,
@@ -315,41 +329,40 @@ export function PolicyForm({ policy }: Props) {
 
   const services = catalog.data?.services ?? [];
   const projects = catalog.data?.projects ?? [];
-  const chosen = (destinations.data?.destinations ?? []).find((d) => d.id === destinationId);
-  const offsite = chosen ? chosen.type !== "local" : false;
+  const allDestinations = destinations.data?.destinations ?? [];
+  // The copies that leave this server: where an archive in clear matters most.
+  const offsiteNames = copyList
+    .map((draft) => allDestinations.find((d) => d.id === draft.destinationId))
+    .filter((d): d is DestinationView => Boolean(d) && d?.type !== "local")
+    .map((d) => `«${d.name}»`);
+  const offsite = offsiteNames.length > 0;
   const encrypted = encryption.data?.enabled === true;
 
   return (
     <div className="space-y-4">
       <Panel>
-        <PanelHeader title="Nome e destinazione" />
+        <PanelHeader title="Nome" />
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <TextField value={name} onChange={setName}>
             <Label>Nome</Label>
             <Input placeholder="Backup notturno" />
           </TextField>
 
-          <div>
-            <SelectField
-              label="Destinazione"
-              value={destinationId || null}
-              onChange={setChosenDestination}
-              options={(destinations.data?.destinations ?? []).map((destination) => ({
-                value: destination.id,
-                label: destination.isDefault ? `${destination.name} (predefinita)` : destination.name,
-                description: whereItWrites(destination),
-              }))}
-            />
-            <FieldHint>
-              {(destinations.data?.destinations ?? []).find((d) => d.id === destinationId)?.type !== "local"
-                ? "Gli archivi vanno in questa destinazione, fuori da questo server."
-                : "Gli archivi restano sul disco di questo server. Per averli al sicuro anche se il server si rompe, aggiungi una destinazione fuori da qui: S3, un NAS, Google Drive."}
-            </FieldHint>
-          </div>
-
           {/* Only when creating: an existing schedule belongs to the server it was made on. */}
           {!policy && <ServerPicker description="La pianificazione gira su questo server e salva i suoi progetti e servizi." />}
         </div>
+      </Panel>
+
+      <Panel>
+        <PanelHeader
+          title="Dove salvare"
+          description="L'archivio va nella prima destinazione, e una copia identica in ognuna delle altre, una dopo l'altra. Se una copia non riesce, il backup resta valido e ti avvisa."
+        />
+        {destinations.data ? (
+          <DestinationList list={copyList} destinations={allDestinations} onChange={setDrafts} />
+        ) : (
+          <SkeletonBlock className="mt-4 h-14" />
+        )}
       </Panel>
 
       {/*
@@ -386,8 +399,9 @@ export function PolicyForm({ policy }: Props) {
           )}
           {!encrypted && offsite && (
             <Hint tone="warn" className="mt-3" title="Questi archivi lasceranno il server in chiaro">
-              Andranno su «{chosen?.name}»: chi può leggere quella destinazione legge anche i database, i volumi e il codice
-              dei progetti. Con la password dei backup servono l&apos;archivio e la password insieme.
+              Andranno su {offsiteNames.join(" e ")}: chi può leggere {offsiteNames.length === 1 ? "quella destinazione" : "una di quelle destinazioni"} legge
+              anche i database, i volumi e il codice dei progetti. Con la password dei backup servono l&apos;archivio e la
+              password insieme.
               {!me.isOwner && " La cifratura la attiva il proprietario del pannello."}
             </Hint>
           )}
@@ -622,6 +636,7 @@ export function PolicyForm({ policy }: Props) {
             <Input inputMode="numeric" placeholder="nessun limite" />
           </TextField>
         </div>
+        <CopyRetention list={copyList} destinations={allDestinations} onChange={setDrafts} />
       </Section>
 
       <div className="flex items-center gap-2">

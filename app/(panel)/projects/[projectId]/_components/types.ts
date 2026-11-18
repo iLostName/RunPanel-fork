@@ -71,6 +71,12 @@ export interface Project {
   mounts: { source: string; target: string; readOnly: boolean; enabled: boolean }[];
   /** Where the checkout really is, asked of the filesystem rather than the column. */
   repo_location: { declared: string; real: string | null };
+  /**
+   * Native version folders: whether this server can make them (not on
+   * Windows), and the one the app runs from. Optional for the same reason as
+   * `permission`.
+   */
+  releases?: { supported: boolean; current: string | null };
   repo_path: string | null;
   repoMove: {
     phase: string;

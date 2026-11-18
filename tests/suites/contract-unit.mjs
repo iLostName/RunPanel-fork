@@ -66,6 +66,23 @@ export async function run({ repoRoot }) {
   r.check("legacy docker image kept", legacy.docker.image === "nginx:1.27", legacy.docker.image);
   r.check("legacy config still receives defaults", legacy.healthcheck.enabled === true);
   r.check("automatic rollback is on unless switched off", legacy.rollback.enabled === true);
+  r.check("version folders for native projects are off unless asked for", legacy.rollback.native === false);
+  r.check("an empty contract gets the same two defaults", parseContractJson("{}").rollback.enabled === true && parseContractJson("{}").rollback.native === false);
+  {
+    const kept = parseContract({ startCmd: "npm start", rollback: { native: true } });
+    r.check("a row of the old shape keeps the native opt-in", kept.rollback.native === true && kept.rollback.enabled === true, JSON.stringify(kept.rollback));
+    r.check("and its commands beside it", kept.commands.start === "npm start");
+    r.check(
+      "the old shape carries the return switched off too",
+      normalizeContractInput({ installCmd: "npm ci", rollback: { enabled: false } }).rollback?.enabled === false
+    );
+    const odd = parseContract({ startCmd: "npm start", rollback: { native: "yes" } });
+    r.check("a broken switch in an old row is dropped, not the row", odd.commands.start === "npm start" && odd.rollback.native === false);
+    const repo = stripPanelOnlyFields({ rollback: { enabled: false, native: true } });
+    r.check("a repository cannot opt a project into version folders", repo.rejected.includes("rollback.native") && repo.contract.rollback?.native === undefined);
+    r.check("but can still turn the return off, as before", resolveContract({}, repo.contract).rollback.enabled === false && resolveContract({}, repo.contract).rollback.native === false);
+    r.check("the operator's opt-in is a valid contract", deployContractSchema.safeParse({ rollback: { native: true } }).success && isContractInput({ rollback: { native: true } }));
+  }
 
   const templated = parseContract({ dockerTemplate: "nginx", dockerFields: { rootDir: "/srv" }, dockerImage: "nginx:1.27" });
   r.check("a legacy template row keeps its image", templated.docker.image === "nginx:1.27", templated.docker.image);

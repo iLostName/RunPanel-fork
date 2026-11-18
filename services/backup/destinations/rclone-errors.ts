@@ -55,8 +55,9 @@ export function rcloneMessages(stderr: string): string[] {
     if (!line) continue;
     if (line.startsWith("{")) {
       try {
-        const entry = JSON.parse(line) as { level?: string; msg?: string };
-        if (entry.msg && entry.level !== "debug" && entry.level !== "info") out.push(entry.msg);
+        const entry = JSON.parse(line) as { level?: string; msg?: string; stats?: unknown };
+        // Transfer stats are progress, not a reason.
+        if (entry.msg && entry.level !== "debug" && entry.level !== "info" && !entry.stats) out.push(entry.msg);
         continue;
       } catch {
         /* not JSON after all */
