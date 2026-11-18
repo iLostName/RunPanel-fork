@@ -229,4 +229,9 @@ export async function register() {
   // to be running. This is what comes back to check.
   const { startStatusReconciler } = await import("./services/status-reconcile");
   startStatusReconciler();
+
+  // What each app prints, kept on disk across restarts and deploys, which the
+  // runtimes' own logs do not survive. See `services/app-logs.ts`.
+  const { startAppLogCollector } = await import("./services/app-logs");
+  startAppLogCollector();
 }

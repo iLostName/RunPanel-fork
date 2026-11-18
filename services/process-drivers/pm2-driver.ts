@@ -562,7 +562,8 @@ child.on("error", (e) => { console.error("Process error:", e.message); process.e
   },
 };
 
-function pm2LogFile(slug: string, kind: "out" | "error"): string {
+/** Exported for `services/app-logs.ts`, which keeps what these files lose at every start. */
+export function pm2LogFile(slug: string, kind: "out" | "error"): string {
   return path.join(config.logsDir, "pm2", `${slug}-${kind}.log`);
 }
 

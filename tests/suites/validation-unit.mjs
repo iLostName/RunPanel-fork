@@ -23,7 +23,7 @@ export async function run({ repoRoot }) {
     },
   });
 
-  const { isBlockedRepoHost, repoUrlSchema, updateProjectSchema, createServiceSchema, envVarsSchema, envVarsIssueText } = await import(
+  const { isBlockedRepoHost, repoUrlSchema, updateProjectSchema, createServiceSchema, envVarsSchema, envVarsIssueText, appLogQuerySchema } = await import(
     pathToFileURL(join(repoRoot, "lib", "validation.ts")).href
   );
   const { SERVICE_VERSIONS } = await import(pathToFileURL(join(repoRoot, "lib", "service-versions.ts")).href);
@@ -140,6 +140,17 @@ export async function run({ repoRoot }) {
   r.check("an empty name says which row", envIssue([{ key: "", value: "1" }]) === "La variabile 1 non ha un nome");
   r.check("a long value says so", envIssue([{ key: "BIG", value: "x".repeat(70000) }])?.includes("troppo lungo") === true);
   r.check("too many variables says the limit", envIssue(Array.from({ length: 501 }, (_, i) => ({ key: `K${i}`, value: "" }))) === "Troppe variabili: il massimo è 500");
+  const repeated = envIssue([{ key: "A", value: "1" }, { key: "B", value: "2" }, { key: "A", value: "3" }]);
+  r.check("a repeated name is refused, and named", repeated?.startsWith("«A»: Nome ripetuto") === true, String(repeated));
+
+  // --- the saved app log's query ---------------------------------------------
+  const logQuery = (query) => appLogQuerySchema.safeParse(query);
+  r.check("no query means the last 500 lines", logQuery({}).data?.lines === 500);
+  r.check("lines arrive as text and are read as a number", logQuery({ lines: "2000" }).data?.lines === 2000);
+  r.check("too many lines are refused in Italian", logQuery({ lines: "9999" }).error?.issues[0]?.message === "Al massimo 5000 righe");
+  r.check("lines that are not a number are refused", !logQuery({ lines: "tante" }).success);
+  r.check("an unknown stream is refused", !logQuery({ stream: "stdlog" }).success && logQuery({ stream: "stderr" }).success);
+  r.check("a long search is refused", !logQuery({ q: "x".repeat(201) }).success);
   const repoMessage = repoUrlSchema.safeParse("http://github.com/a/b").error?.issues[0]?.message ?? "";
   r.check("a repository address that is not https is refused in Italian", repoMessage.startsWith("L'indirizzo del repository"), repoMessage);
 
