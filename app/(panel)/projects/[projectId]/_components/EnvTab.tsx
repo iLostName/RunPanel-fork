@@ -421,7 +421,9 @@ export function EnvTab({
           }
         />
 
-        {(!readOnly || (view === "table" && rows.length > SEARCH_FROM)) && (
+        {/* Not while loading: an edit made now would go with the editor that the
+            arriving data replaces. */}
+        {!loading && (!readOnly || (view === "table" && rows.length > SEARCH_FROM)) && (
           <div className="flex flex-wrap items-center gap-2">
             {view === "table" && (rows.length > SEARCH_FROM || search) && (
               <div className="min-w-0 flex-1 basis-48">
