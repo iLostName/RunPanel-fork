@@ -344,7 +344,7 @@ For TLS and reverse proxies in front of the panel, see [Putting it on the intern
 <br>
 
 - One-time commands run **at least once**, not exactly once: a panel restart mid-execution puts the command back in the queue.
-- A failed health check leaves the project in error: there is **no automatic rollback** to the previous version.
+- A failed health check **rolls back automatically only for Docker projects**: the previous image is put back online. Native and Compose projects build in place and stay in error until the next deploy.
 - Port restrictions are enforced by the panel process: with the panel stopped the port simply closes. A rule that has to hold with the panel down needs a host firewall as well.
 - **Restore** does not compare engine versions, and refuses RunPanel's own Postgres store (the `pg_restore` command is in the archive's manifest). See [Backups](docs/en/backups.md#restore).
 - Installing at boot is **Linux-only**; elsewhere the panel shows what to do by hand.

@@ -16,6 +16,12 @@
  * it as is.
  */
 
+/**
+ * What the pipeline appends to a deploy's error when it put the previous
+ * version back online (services/deploy-pipeline.ts).
+ */
+export const ROLLBACK_NOTE = "è tornata online la versione precedente";
+
 export type DeployPhase = "queued" | "source" | "build" | "start" | "health" | "done" | "failed";
 
 /**
@@ -209,14 +215,17 @@ export function explainDeployError(message: string | null | undefined, log: stri
   // The log is searched from its end: the cause is near the last lines, and an
   // older warning that merely mentions "npm ERR!" should not win over it.
   const tail = (log ?? "").slice(-20_000);
+  const rolledBack = text.includes(ROLLBACK_NOTE);
+  const note = (explanation: DeployErrorExplanation): DeployErrorExplanation =>
+    rolledBack ? { ...explanation, hint: `Intanto è tornata online la versione precedente. ${explanation.hint}` } : explanation;
   for (const rule of RULES) {
     const match = text.match(rule.test) ?? (rule.inLog ? tail.match(rule.test) : null);
-    if (match) return { code: rule.code, ...rule.explain(match) };
+    if (match) return note({ code: rule.code, ...rule.explain(match) });
   }
-  return {
+  return note({
     code: "unknown",
     title: "Il deploy non è riuscito",
     hint: "Le ultime righe del log spiegano cosa è andato storto.",
     fixes: ["logs"],
-  };
+  });
 }

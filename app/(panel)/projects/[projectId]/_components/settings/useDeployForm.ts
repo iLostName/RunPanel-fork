@@ -86,7 +86,7 @@ function partsOf(v: FormValues): Partial<Record<SettingsSectionId, unknown>> {
   return {
     general: v.name,
     source: [v.sourceType, v.sourceUrl, v.branch],
-    build: [v.runtimeType, v.contract.commands, v.contract.packageManager, v.contract.healthcheck],
+    build: [v.runtimeType, v.contract.commands, v.contract.packageManager, v.contract.healthcheck, v.contract.rollback],
     network: [v.port, v.contract.docker.network, v.contract.docker.hostname],
     resources: [v.contract.runtime, v.contract.build],
     advanced: v.contract.envFile,

@@ -255,6 +255,18 @@ export function BuildSection({
         {contract.healthcheck.enabled ? (
           <>
             <HealthcheckHint />
+            {isDocker ? (
+              <SettingToggle
+                label="Se non risponde, rimetti online la versione precedente"
+                description="La nuova versione resta come deploy fallito, da correggere; intanto l'app continua a funzionare con quella di prima."
+                isSelected={contract.rollback.enabled}
+                onChange={(enabled) => patchContract({ rollback: { enabled } })}
+              />
+            ) : (
+              <FieldHint>
+                Il ritorno automatico alla versione precedente, per ora, c&apos;è solo con il runtime Docker.
+              </FieldHint>
+            )}
             <div className="grid gap-4 sm:grid-cols-3">
               <TextField value={contract.healthcheck.path} onChange={(v) => patchContract({ healthcheck: { ...contract.healthcheck, path: v } })}>
                 <Label>Percorso</Label>

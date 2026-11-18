@@ -65,6 +65,7 @@ export async function run({ repoRoot }) {
   r.check("legacy package manager kept", legacy.packageManager === "npm", legacy.packageManager);
   r.check("legacy docker image kept", legacy.docker.image === "nginx:1.27", legacy.docker.image);
   r.check("legacy config still receives defaults", legacy.healthcheck.enabled === true);
+  r.check("automatic rollback is on unless switched off", legacy.rollback.enabled === true);
 
   const templated = parseContract({ dockerTemplate: "nginx", dockerFields: { rootDir: "/srv" }, dockerImage: "nginx:1.27" });
   r.check("a legacy template row keeps its image", templated.docker.image === "nginx:1.27", templated.docker.image);

@@ -53,6 +53,8 @@ import {
   type ComposeNetworkPlan,
 } from "./compose-network";
 import { sweep } from "./docker/gc";
+import { restartFromLastDeployment } from "./project-restart";
+import { ROLLBACK_NOTE } from "@/lib/deploy-explain";
 import { BuildLogFile } from "./build-logs";
 import { projectEvents } from "./events";
 import path from "path";
@@ -210,6 +212,10 @@ async function runDeploy(
   // one-time commands, which record the commit they ran against so the history
   // stays readable after the deployment row has been swept away.
   let commitSha: string | null = null;
+
+  // Set when the failure is the new version not answering, which is the one
+  // failure the previous version can stand in for (the rollback below).
+  let healthFailed = false;
 
   async function updateDeployment(fields: Partial<DeploymentsTable>) {
     await db.updateTable("deployments").set(fields).where("id", "=", deploymentId).execute();
@@ -839,6 +845,7 @@ async function runDeploy(
       } catch {
         appendLog(`(failed to retrieve ${driverName} logs)`);
       }
+      healthFailed = true;
       throw new Error(
         `Health check failed after ${contract.healthcheck.timeoutSec}s: ${health.reason}`
       );
@@ -964,6 +971,43 @@ async function runDeploy(
       })
       .where("id", "=", project.id)
       .execute();
+
+    /*
+      Automatic rollback: a version that never answered is replaced by the last
+      one that did, instead of leaving the app down or half up.
+
+      Docker only. Each deploy is its own image, and the previous one is still
+      on disk: the sweep that retires old images runs after a success, never
+      after a failure. Native runtimes build in the same folder, so by now the
+      previous version's files are gone and "restart the last good deploy"
+      would run the new code. Compose rebuilds the stack from the checkout,
+      with the same problem.
+
+      After the status update above, because the restart refuses a project
+      that still reads "deploying"; under the deploy's lock, which it already
+      holds. The deployment stays failed, with a note saying what came back.
+    */
+    if (healthFailed && !cancelled && project.runtime_type === "docker" && contract.rollback.enabled) {
+      appendLog("\n--- Rollback ---");
+      try {
+        const result = await restartFromLastDeployment(project.id, { underLock: true });
+        if ("success" in result) {
+          appendLog("La nuova versione non ha superato il controllo di salute: è tornata online la precedente.");
+          await db
+            .updateTable("deployments")
+            .set({ error_message: `${message} — ${ROLLBACK_NOTE}` })
+            .where("id", "=", deploymentId)
+            .execute();
+        } else {
+          appendLog(`Nessuna versione precedente da rimettere online: ${result.error}`);
+        }
+      } catch (rollbackErr) {
+        appendLog(
+          `Ritorno alla versione precedente non riuscito: ${redactGitSecrets(rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr))}`
+        );
+      }
+      logFile.flush();
+    }
   } finally {
     // Anything this deploy took and never got to goes back in the queue. A
     // no-op after a run that reached every phase; after one that failed early
