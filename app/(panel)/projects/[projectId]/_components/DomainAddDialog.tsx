@@ -12,7 +12,7 @@ import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
 import { useNodeApi } from "@/lib/hooks/useNode";
-import { hostnameFor, wwwTwin } from "@/lib/proxy-names";
+import { hostnameFor, instantDomainAddress, wwwTwin } from "@/lib/proxy-names";
 import { DOMAIN_RULE, domainNameSchema, subdomainSchema } from "@/lib/validation";
 import { PROXY_SERVES, ProxySetup, type ProxyInfo } from "@/app/(panel)/domains/_components/ProxySetup";
 import type { HostView } from "@/services/proxy";
@@ -68,7 +68,8 @@ export function DomainAddDialog({
   const [newDomainError, setNewDomainError] = useState<string | null>(null);
   const [domainBusy, setDomainBusy] = useState(false);
 
-  const domains = data.domains;
+  // A server's instant domain (`203-0-113-7.sslip.io`) is not one to pick here: its names come from "Indirizzo di prova".
+  const domains = data.domains.filter((d) => instantDomainAddress(d.name) === null);
   const chosen = domains.find((d) => d.id === domainId) ?? domains[0] ?? null;
   const typing = addingDomain || domains.length === 0;
 

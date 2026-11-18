@@ -20,11 +20,12 @@ import { formatWhen } from "@/lib/format";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
-import { wwwTwin } from "@/lib/proxy-names";
-import { HOST_PASSWORD_MIN, HOST_USER_RULE, hostAuthSchema } from "@/lib/validation";
+import { hostnameFor, isInstantHostname, wwwTwin } from "@/lib/proxy-names";
+import { HOST_PASSWORD_MIN, HOST_USER_RULE, hostAuthSchema, subdomainSchema } from "@/lib/validation";
 import { AddressBadge, addressDetail, needsAttention } from "@/app/(panel)/domains/_components/AddressStatus";
 import { PROXY_SERVES, ProxySetup, type ProxyInfo } from "@/app/(panel)/domains/_components/ProxySetup";
 import type { HostView } from "@/services/proxy";
+import type { InstantOffer } from "@/services/proxy/instant";
 import { DomainAddDialog } from "./DomainAddDialog";
 import { DomainCheckDialog } from "./DomainCheckDialog";
 
@@ -71,10 +72,18 @@ export function DomainSection({ projectId }: { projectId: string }) {
   const [authUser, setAuthUser] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authErrors, setAuthErrors] = useState<{ user?: string; password?: string }>({});
+  const [instantOpen, setInstantOpen] = useState(false);
+  const [instantLabel, setInstantLabel] = useState<string | null>(null);
+  const [instantError, setInstantError] = useState<string | null>(null);
 
   const hosts = data?.hosts ?? [];
   const canEdit = data?.canEdit ?? true;
   const canAdd = !!data && canEdit && data.canManageDomains && data.hasPort;
+  // A name with no domain, while the project has none: asked only of whoever could create it.
+  // A server on an older panel answers 404, and the offer simply does not appear.
+  const { data: instant } = useResource<InstantOffer>(
+    canAdd && hosts.length === 0 ? api(`/api/projects/${projectId}/hosts/instant`) : null
+  );
   const proxyServes = data ? PROXY_SERVES.has(data.proxy.state) : true;
   const byId = new Map(hosts.map((host) => [host.id, host]));
   // Each name, then the twin that redirects to it.
@@ -176,6 +185,40 @@ export function DomainSection({ projectId }: { projectId: string }) {
     return true;
   }
 
+  function openInstant() {
+    setInstantLabel(null);
+    setInstantError(null);
+    setInstantOpen(true);
+  }
+
+  // The label as it will be stored, and the name it makes.
+  const instantRaw = (instantLabel ?? instant?.suggestedLabel ?? "").trim().toLowerCase();
+  const instantParsed = subdomainSchema.safeParse(instantRaw);
+  const instantName =
+    instant?.domain && instantParsed.success && instantParsed.data !== "" ? hostnameFor(instantParsed.data, instant.domain) : null;
+
+  async function createInstant(): Promise<boolean> {
+    if (!instantName) return false;
+    try {
+      const res = await fetch(api(`/api/projects/${projectId}/hosts/instant`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: instantRaw }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setInstantError(body.details?.[0]?.message ?? body.error ?? MSG.saveFailed);
+        return false;
+      }
+      toast.success(`http://${instantName} è pronto`);
+      await refresh();
+      return true;
+    } catch {
+      toast.error(MSG.unreachable);
+      return false;
+    }
+  }
+
   async function remove(): Promise<boolean> {
     if (!removing) return true;
     const body = await send(`/api/projects/${projectId}/hosts/${removing.id}`, { method: "DELETE" });
@@ -213,7 +256,9 @@ export function DomainSection({ projectId }: { projectId: string }) {
       { id: "check", label: "Controlla DNS e HTTPS", icon: "solar:routing-2-linear", onAction: () => setChecking(host) },
     ];
     if (!canEdit) return actions;
-    if (data?.proxy.state === "ready" && host.certificate !== "issuing") {
+    // An instant address stays on HTTP: there is no certificate to ask for, and no www to add.
+    const testAddress = isInstantHostname(host.hostname);
+    if (data?.proxy.state === "ready" && host.certificate !== "issuing" && !testAddress) {
       actions.push({
         id: "retry",
         label: "Richiedi il certificato",
@@ -223,7 +268,7 @@ export function DomainSection({ projectId }: { projectId: string }) {
       });
     }
     const domain = data?.domains.find((d) => d.id === host.domainId);
-    const twinName = !host.redirectTo && domain ? wwwTwin(host.subdomain, domain.name)?.hostname : undefined;
+    const twinName = !host.redirectTo && domain && !testAddress ? wwwTwin(host.subdomain, domain.name)?.hostname : undefined;
     if (twinName && data?.canManageDomains && twinsOf(host).length === 0) {
       actions.push({
         id: "twin",
@@ -364,10 +409,18 @@ export function DomainSection({ projectId }: { projectId: string }) {
             Con un indirizzo il progetto si apre da <span className="font-mono">app.tuodominio.it</span>, in HTTPS, invece
             che da IP e porta.
           </p>
-          <Button size="sm" onPress={openAdd}>
-            <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
-            Aggiungi un indirizzo
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onPress={openAdd}>
+              <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+              Aggiungi un indirizzo
+            </Button>
+            {instant?.available && (
+              <Button size="sm" variant="ghost" onPress={openInstant}>
+                <Icon icon="solar:test-tube-linear" width={16} aria-hidden />
+                Non ho un dominio: indirizzo di prova
+              </Button>
+            )}
+          </div>
         </div>
       ) : null}
 
@@ -406,6 +459,60 @@ export function DomainSection({ projectId }: { projectId: string }) {
           onChanged={refresh}
         />
       )}
+
+      <FormDialog
+        isOpen={instantOpen}
+        onOpenChange={setInstantOpen}
+        title="Un indirizzo di prova, senza dominio"
+        description="Un nome che funziona subito, senza comprare un dominio né creare record DNS: per vedere l'app online."
+        submitLabel="Crea"
+        isSubmitDisabled={!instantName}
+        onSubmit={createInstant}
+      >
+        <Field
+          label="Nome"
+          hint="Una sola parola: minuscole, numeri e trattini"
+          error={
+            instantError ??
+            (instantRaw !== "" && !instantParsed.success
+              ? "Una sola parola, con minuscole, numeri e trattini (non all'inizio né alla fine)"
+              : undefined)
+          }
+        >
+          <div className="flex items-center gap-2">
+            <TextField
+              value={instantLabel ?? instant?.suggestedLabel ?? ""}
+              onChange={(value) => {
+                setInstantLabel(value);
+                setInstantError(null);
+              }}
+              aria-label="Nome"
+              className="flex-1"
+            >
+              <Input className="font-mono" autoComplete="off" />
+            </TextField>
+            <span className="text-muted shrink-0 font-mono text-sm">.{instant?.domain}</span>
+          </div>
+        </Field>
+        {instantName && (
+          <div className="bg-surface-secondary rounded-[var(--radius)] px-3 py-2.5">
+            <p className="text-muted text-xs">L&apos;indirizzo sarà</p>
+            <p className="text-foreground font-mono text-sm break-all">http://{instantName}</p>
+          </div>
+        )}
+        <Hint tone="warn" title="Solo HTTP, e il nome mostra l'IP del server">
+          Niente lucchetto: quello che passa, password comprese, viaggia in chiaro, quindi non è per un&apos;app che usi
+          davvero. Il nome funziona grazie a sslip.io, un servizio gratuito gestito da volontari: se smette di rispondere,
+          smette di funzionare anche l&apos;indirizzo. Per un sito vero usa un tuo dominio, con Aggiungi un indirizzo.
+        </Hint>
+        <Technical>
+          <FieldHint>
+            Niente HTTPS perché sslip.io non è nella Public Suffix List: Let&apos;s Encrypt conta i certificati di tutti i suoi
+            nomi su un solo limite settimanale, condiviso con chiunque lo usi, che nel 2026 si è esaurito più volte. Il nome
+            risolve a {instant?.address ?? "l'IP del server"}, e chi lo conosce sa dov&apos;è il server.
+          </FieldHint>
+        </Technical>
+      </FormDialog>
 
       <ConfirmDialog
         isOpen={removing !== null}
