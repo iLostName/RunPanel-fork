@@ -222,7 +222,8 @@ export async function sendCopies({ runId, file, fileName, bytes, emit, signal }:
       if (err instanceof S3Failure && err.problem.detail) emit(`  dettaglio: ${err.problem.detail}`);
       const message = err instanceof Error ? err.message : String(err);
       await settle(runId, copy, { status: "failed", error_message: message, finished_at: nowIso() });
-      emit(single ? `Salvataggio su «${destination.name}» non riuscito: ${message}` : `  ✗ non riuscita: ${message}`);
+      // With one destination the run itself fails with this sentence, and says it.
+      if (!single) emit(`  ✗ non riuscita: ${message}`);
     }
   }
 

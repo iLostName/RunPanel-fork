@@ -410,8 +410,14 @@ async function execute({ runId, request, startedAt, emit, log, missing }: Execut
 
     // Only after a success, and never the newest one: a disk that is full must
     // not be able to delete the last good backup while trying to make room.
-    const pruned = await applyRetention(request.policyId ?? null);
-    if (pruned.copies > 0) emit(`Retention: ${retentionLine(pruned)}`);
+    // Its own try: a destination that will not answer a delete must not turn
+    // the backup that just succeeded into a failed one.
+    try {
+      const pruned = await applyRetention(request.policyId ?? null);
+      if (pruned.copies > 0) emit(`Retention: ${retentionLine(pruned)}`);
+    } catch (err) {
+      emit(`Retention non applicata: ${err instanceof Error ? err.message : String(err)}`);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     emit(`ERRORE: ${message}`);
