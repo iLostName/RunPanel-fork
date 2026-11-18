@@ -23,17 +23,34 @@ import { formatBytes } from "@/lib/format";
 import type { Located } from "@/lib/cluster-merge";
 import { DestinationForm, type DestinationDetail } from "./DestinationForm";
 import { providerLabel } from "./providers";
-import type { DestinationView } from "@/components/backups/types";
+import { telegramWhere, type DestinationView } from "@/components/backups/types";
 
 type Row = Located<DestinationView>;
 
-/** "Backblaze B2 · bucket «runpanel»", or the local disk said as what it is. */
+/** "Backblaze B2 · bucket «runpanel»", the Telegram chat, or the local disk said as what it is. */
 function whereItWrites(destination: DestinationView): string {
   if (destination.type === "local") return "Disco di questo server";
+  if (destination.type === "telegram") return telegramWhere(destination.telegram);
   const target = destination.target;
   if (!target) return "Archivio S3";
   return `${providerLabel(target.endpoint)} · bucket «${target.bucket}»`;
 }
+
+/** Where a deleted destination's archives stay, for the sentence that says so. */
+function whereArchivesStay(destination: DestinationView): string {
+  if (destination.type === "local") return "sul disco di questo server";
+  if (destination.type === "telegram") {
+    return destination.telegram?.chat === "channel"
+      ? `su Telegram, nel canale «${destination.telegram.title ?? ""}»`
+      : "su Telegram, nei Messaggi salvati";
+  }
+  return `nel bucket «${destination.target?.bucket ?? ""}»`;
+}
+
+const ICONS: Record<string, string> = {
+  local: "solar:server-linear",
+  telegram: "solar:plain-linear",
+};
 
 function usageLine(destination: DestinationView): string {
   const used = destination.usedBy ?? [];
@@ -208,11 +225,16 @@ export function DestinationsPanel({
             <>
               <p>
                 Qui ci sono {archives} archivi{deleting.archiveBytes ? ` (${formatBytes(deleting.archiveBytes)})` : ""}.
-                Restano dove sono — {deleting.type === "local" ? "sul disco di questo server" : `nel bucket «${deleting.target?.bucket ?? ""}»`} —
+                Restano dove sono — {whereArchivesStay(deleting)} —
                 ma il pannello non li vedrà più: niente ripristino, download o pulizia automatica.
               </p>
               <p className="mt-2">Se ti servono, scaricali prima dalla Cronologia.</p>
+              {deleting.type === "telegram" && (
+                <p className="mt-2">La sessione del pannello su Telegram viene chiusa: sparisce dai dispositivi dell&apos;account.</p>
+              )}
             </>
+          ) : deleting.type === "telegram" ? (
+            "Nessuna pianificazione la usa e non contiene archivi. La sessione del pannello su Telegram viene chiusa."
           ) : (
             "Nessuna pianificazione la usa e non contiene archivi."
           )
@@ -247,7 +269,7 @@ export function DestinationsPanel({
         <EmptyState
           icon="solar:folder-linear"
           title="Nessuna destinazione"
-          description="Una destinazione è dove finiscono gli archivi: il disco di questo server o un archivio S3 fuori da qui."
+          description="Una destinazione è dove finiscono gli archivi: il disco di questo server, oppure un archivio S3 o Telegram fuori da qui."
           className="py-8"
         />
       ) : (
@@ -255,7 +277,7 @@ export function DestinationsPanel({
           {destinations.map((row) => (
             <li key={`${row.memberId}:${row.id}`}>
               <ListRow
-                icon={row.type === "local" ? "solar:server-linear" : "solar:cloud-storage-linear"}
+                icon={ICONS[row.type] ?? "solar:cloud-storage-linear"}
                 title={row.name}
                 badges={
                   <>
@@ -311,7 +333,7 @@ export function DestinationsPanel({
                               id: "default",
                               label: "Imposta come predefinita",
                               icon: "solar:star-linear",
-                              onAction: () => setDefaulting({ row, move: row.type === "s3" && elsewhere(row) > 0 }),
+                              onAction: () => setDefaulting({ row, move: row.type !== "local" && elsewhere(row) > 0 }),
                             },
                           ]
                         : []),
@@ -344,6 +366,7 @@ export function DestinationsPanel({
           editing={editing.detail}
           archives={editing.row.archives ?? 0}
           apiFor={(path) => memberApi(editing.row.memberId, path)}
+          memberId={editing.row.memberId}
         />
       )}
 

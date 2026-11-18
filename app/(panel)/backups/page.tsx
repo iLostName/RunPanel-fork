@@ -421,7 +421,7 @@ export default function BackupsPage() {
           error={destinationsError}
           description={
             isSolo
-              ? "Dove finiscono gli archivi: il disco di questo server o un archivio S3 fuori da qui."
+              ? "Dove finiscono gli archivi: il disco di questo server, oppure un archivio S3 o Telegram fuori da qui."
               : `Dove finiscono gli archivi. Una nuova va su ${nameOf(target)}.`
           }
           onChanged={refreshAll}
@@ -524,7 +524,7 @@ export default function BackupsPage() {
                       confirm={{
                         title: "Eliminare questo backup?",
                         description: `L'archivio viene cancellato ${
-                          run.destinationType === "s3" && run.destinationName
+                          run.destinationType && run.destinationType !== "local" && run.destinationName
                             ? `anche da «${run.destinationName}»`
                             : "dal disco di questo server"
                         }. Se è l'ultimo riuscito, resti senza un punto di ripristino.`,

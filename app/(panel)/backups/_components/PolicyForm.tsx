@@ -16,13 +16,14 @@ import { useResource } from "@/lib/hooks/useResource";
 import { SchedulePicker } from "@/components/ui/SchedulePicker";
 import { providerLabel } from "./providers";
 import { BackupPasswordDialog } from "./EncryptionPanel";
-import type {
-  BackupTarget,
-  DestinationView,
-  EncryptionStatus,
-  PolicyView,
-  ProjectInclude,
-  TargetCatalog,
+import {
+  telegramWhere,
+  type BackupTarget,
+  type DestinationView,
+  type EncryptionStatus,
+  type PolicyView,
+  type ProjectInclude,
+  type TargetCatalog,
 } from "@/components/backups/types";
 import { serviceDisplayName } from "@/lib/service-name";
 import { ServerPicker } from "@/components/cluster/ServerBits";
@@ -340,15 +341,19 @@ export function PolicyForm({ policy }: Props) {
                 description:
                   destination.type === "local"
                     ? "Disco di questo server"
-                    : destination.target
-                      ? `${providerLabel(destination.target.endpoint)} · bucket «${destination.target.bucket}»`
-                      : "Archivio S3",
+                    : destination.type === "telegram"
+                      ? telegramWhere(destination.telegram)
+                      : destination.target
+                        ? `${providerLabel(destination.target.endpoint)} · bucket «${destination.target.bucket}»`
+                        : "Archivio S3",
               }))}
             />
             <FieldHint>
-              {(destinations.data?.destinations ?? []).find((d) => d.id === destinationId)?.type === "s3"
+              {chosen?.type === "s3"
                 ? "Gli archivi vanno nel bucket di questa destinazione, fuori da questo server."
-                : "Gli archivi restano sul disco di questo server. Per averli al sicuro anche se il server si rompe, aggiungi una destinazione S3."}
+                : chosen?.type === "telegram"
+                  ? "Gli archivi vanno su Telegram, fuori da questo server: quelli più grandi di un file Telegram vengono divisi in parti."
+                  : "Gli archivi restano sul disco di questo server. Per averli al sicuro anche se il server si rompe, aggiungi una destinazione S3 o Telegram."}
             </FieldHint>
           </div>
 
