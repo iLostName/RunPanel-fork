@@ -12,98 +12,105 @@ import { Advanced } from "@/components/ui/Technical";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { MSG } from "@/lib/copy";
 import { useNodeApi } from "@/lib/hooks/useNode";
+import { PROVIDERS, PROVIDER_IDS, detectProvider, type ProviderId } from "./providers";
 
 type Kind = "local" | "s3";
 
-type ProviderId = "aws" | "r2" | "b2" | "hetzner" | "wasabi" | "custom";
+/** What `GET /api/backups/destinations/:id` returns: everything but the secret. */
+export interface DestinationDetail {
+  id: string;
+  name: string;
+  type: string;
+  isDefault: boolean;
+  config: {
+    endpoint: string;
+    region: string;
+    bucket: string;
+    accessKeyId: string;
+    prefix: string;
+    forcePathStyle: boolean;
+    hasSecret: boolean;
+  } | null;
+}
+
+interface CheckResult {
+  ok?: boolean;
+  warning?: boolean;
+  message?: string;
+}
+
+/** What a check found, as a toast: the same words after creating and after editing. */
+export function announceCheck(name: string, verdict: CheckResult, done: string) {
+  if (verdict.ok && verdict.warning) {
+    toast.warning(`«${name}» ${done}, con un limite`, { description: verdict.message });
+  } else if (verdict.ok) {
+    toast.success(`«${name}» ${done} e verificata: si può scrivere e rileggere.`);
+  } else {
+    toast.warning(`«${name}» ${done}, ma la verifica non è riuscita`, {
+      description: verdict.message ?? "Controlla endpoint, bucket e chiavi, poi premi Verifica.",
+    });
+  }
+}
 
 /**
- * The S3-compatible services people actually use, with what each one wants.
+ * A place for backups to go: a new one, or one being edited.
  *
- * The form used to ask for an endpoint, a region and an "addressing style" up
- * front, which is three questions nobody can answer without the provider's
- * documentation open. Picking the provider fills them; the region is the only
- * one most people change, and the endpoint follows it.
- */
-const PROVIDERS: Record<
-  ProviderId,
-  { label: string; region: string; endpoint: (region: string) => string; pathStyle: boolean; regionHint: string; note?: string }
-> = {
-  aws: {
-    label: "Amazon S3",
-    region: "eu-central-1",
-    endpoint: (r) => `https://s3.${r}.amazonaws.com`,
-    pathStyle: false,
-    regionHint: "Per esempio eu-central-1 (Francoforte), eu-west-1 (Irlanda), eu-south-1 (Milano).",
-  },
-  r2: {
-    label: "Cloudflare R2",
-    region: "auto",
-    endpoint: () => "https://<account-id>.r2.cloudflarestorage.com",
-    pathStyle: false,
-    regionHint: "Con R2 resta «auto».",
-    note: "Sostituisci <account-id> nell'endpoint con l'ID del tuo account: lo trovi nella pagina R2 di Cloudflare.",
-  },
-  b2: {
-    label: "Backblaze B2",
-    region: "eu-central-003",
-    endpoint: (r) => `https://s3.${r}.backblazeb2.com`,
-    pathStyle: false,
-    regionHint: "È nella pagina del bucket, nell'endpoint: per esempio eu-central-003.",
-  },
-  hetzner: {
-    label: "Hetzner Object Storage",
-    region: "fsn1",
-    endpoint: (r) => `https://${r}.your-objectstorage.com`,
-    pathStyle: false,
-    regionHint: "fsn1 (Falkenstein), nbg1 (Norimberga) o hel1 (Helsinki).",
-  },
-  wasabi: {
-    label: "Wasabi",
-    region: "eu-central-1",
-    endpoint: (r) => `https://s3.${r}.wasabisys.com`,
-    pathStyle: false,
-    regionHint: "Per esempio eu-central-1 (Amsterdam) o eu-south-1 (Milano).",
-  },
-  custom: {
-    label: "Altro (MinIO, Garage, un tuo server)",
-    region: "us-east-1",
-    endpoint: () => "",
-    pathStyle: true,
-    regionHint: "Molti server propri accettano qualsiasi valore: us-east-1 va bene.",
-  },
-};
-
-/**
- * A new place for backups to go.
+ * Right after saving, the destination is tested (a real file written, read
+ * back and deleted), so a wrong key shows up now and not on the night it is
+ * needed — after an edit as much as after creating it.
  *
- * Right after saving, the destination is tested (a real file written and
- * read back), so a wrong key shows up now and not on the night it is needed.
+ * Editing never shows the stored secret: the field stays empty, and empty
+ * means "keep the one you have". The type cannot change, because an archive's
+ * path means one thing on a disk and another in a bucket.
  */
 export function DestinationForm({
   isOpen,
   onOpenChange,
-  onCreated,
+  onSaved,
+  editing,
+  archives = 0,
+  canSetDefault = true,
+  apiFor,
 }: {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: () => void;
+  onSaved: () => void;
+  /** Absent when creating. */
+  editing?: DestinationDetail;
+  /** Archives already stored in the destination being edited. */
+  archives?: number;
+  /** Only the owner chooses where the safety copies go. */
+  canSetDefault?: boolean;
+  /** The server the destination lives on, when it is not the one the page is about. */
+  apiFor?: (path: string) => string;
 }) {
-  const api = useNodeApi();
-  const [kind, setKind] = useState<Kind>("s3");
-  const [name, setName] = useState("");
+  const nodeApi = useNodeApi();
+  const api = apiFor ?? nodeApi;
+  const stored = editing?.config ?? null;
+  const initialProvider: ProviderId = stored ? detectProvider(stored.endpoint) : "aws";
 
-  const [providerId, setProviderId] = useState<ProviderId>("aws");
+  const [kind, setKind] = useState<Kind>(editing ? (editing.type === "local" ? "local" : "s3") : "s3");
+  const [name, setName] = useState(editing?.name ?? "");
+
+  const [providerId, setProviderId] = useState<ProviderId>(initialProvider);
   const provider = PROVIDERS[providerId];
-  const [region, setRegion] = useState(PROVIDERS.aws.region);
+  const [region, setRegion] = useState(stored?.region ?? PROVIDERS.aws.region);
   /** Null while the endpoint follows the provider and the region. */
-  const [endpointTyped, setEndpointTyped] = useState<string | null>(null);
-  const [bucket, setBucket] = useState("");
-  const [accessKeyId, setAccessKeyId] = useState("");
+  const [endpointTyped, setEndpointTyped] = useState<string | null>(() => {
+    if (!stored) return null;
+    // A stored endpoint the provider would have produced keeps following the
+    // region; anything else was typed by hand and stays as it is.
+    return PROVIDERS[initialProvider].endpoint(stored.region) === stored.endpoint ? null : stored.endpoint;
+  });
+  const [bucket, setBucket] = useState(stored?.bucket ?? "");
+  const [accessKeyId, setAccessKeyId] = useState(stored?.accessKeyId ?? "");
   const [secretAccessKey, setSecretAccessKey] = useState("");
-  const [prefix, setPrefix] = useState("");
-  const [pathStyleTyped, setPathStyleTyped] = useState<"virtual" | "path" | null>(null);
-  const [makeDefault, setMakeDefault] = useState(true);
+  const [prefix, setPrefix] = useState(stored?.prefix ?? "");
+  const [pathStyleTyped, setPathStyleTyped] = useState<"virtual" | "path" | null>(() => {
+    if (!stored) return null;
+    return stored.forcePathStyle === PROVIDERS[initialProvider].pathStyle ? null : stored.forcePathStyle ? "path" : "virtual";
+  });
+  const [makeDefault, setMakeDefault] = useState(canSetDefault);
 
   const endpoint = endpointTyped ?? provider.endpoint(region.trim() || provider.region);
   const pathStyle = pathStyleTyped ?? (provider.pathStyle ? "path" : "virtual");
@@ -125,87 +132,104 @@ export function DestinationForm({
         ? "Serve https://, oppure http:// verso un indirizzo privato"
         : undefined;
 
+  const needsSecret = !editing || !stored?.hasSecret;
   const incomplete =
     !name.trim() ||
-    (kind === "s3" && (!trimmedEndpoint || !region.trim() || !bucket.trim() || !accessKeyId.trim() || !secretAccessKey));
+    (kind === "s3" &&
+      (!trimmedEndpoint || !region.trim() || !bucket.trim() || !accessKeyId.trim() || (needsSecret && !secretAccessKey)));
+
+  // Where the archives already stored here would be looked for after the edit.
+  const movesArchives =
+    Boolean(stored) &&
+    archives > 0 &&
+    (trimmedEndpoint !== stored?.endpoint ||
+      bucket.trim() !== stored?.bucket ||
+      prefix.trim().replace(/^\/+|\/+$/g, "") !== (stored?.prefix ?? "").replace(/^\/+|\/+$/g, ""));
+
+  const s3Config = () => ({
+    endpoint: trimmedEndpoint,
+    region: region.trim(),
+    bucket: bucket.trim(),
+    accessKeyId: accessKeyId.trim(),
+    // Empty while editing means "keep the stored one"; the server merges.
+    ...(secretAccessKey ? { secretAccessKey } : {}),
+    prefix: prefix.trim(),
+    forcePathStyle: pathStyle === "path",
+  });
+
+  async function check(id: string): Promise<CheckResult> {
+    try {
+      const res = await fetch(api(`/api/backups/destinations/${id}`), { method: "POST" });
+      return (await res.json()) as CheckResult;
+    } catch {
+      // The destination is saved; the check can be repeated from the list.
+      return {};
+    }
+  }
 
   async function submit() {
-    const res = await fetch(api("/api/backups/destinations"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: name.trim(),
-        type: kind,
-        isDefault: makeDefault,
-        config:
-          kind === "s3"
-            ? {
-                endpoint: trimmedEndpoint,
-                region: region.trim(),
-                bucket: bucket.trim(),
-                accessKeyId: accessKeyId.trim(),
-                secretAccessKey,
-                prefix: prefix.trim() || undefined,
-                forcePathStyle: pathStyle === "path",
-              }
-            : {},
-      }),
-    });
+    const res = editing
+      ? await fetch(api(`/api/backups/destinations/${editing.id}`), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim(), ...(kind === "s3" ? { config: s3Config() } : {}) }),
+        })
+      : await fetch(api("/api/backups/destinations"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name.trim(),
+            type: kind,
+            isDefault: canSetDefault && makeDefault,
+            config: kind === "s3" ? { ...s3Config(), prefix: prefix.trim() || undefined } : {},
+          }),
+        });
 
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      toast.error(body.error ?? MSG.createFailed);
+      toast.error(body.error ?? (editing ? MSG.saveFailed : MSG.createFailed));
       throw new Error(body.error ?? "destination failed");
     }
 
     // Tested straight away: a wrong key or bucket is found now, by whoever
     // just typed it, rather than by the first scheduled night.
-    let verdict: { ok?: boolean; message?: string } = {};
-    try {
-      const check = await fetch(api(`/api/backups/destinations/${body.id}`), { method: "POST" });
-      verdict = await check.json();
-    } catch {
-      /* the destination exists; the check can be repeated from the list */
-    }
-    if (verdict.ok) toast.success(`«${name.trim()}» aggiunta e verificata: si può scrivere e leggere.`);
-    else
-      toast.warning(`«${name.trim()}» aggiunta, ma la verifica non è riuscita`, {
-        description: verdict.message ?? "Controlla endpoint, bucket e chiavi, poi premi Verifica.",
-      });
+    const id = editing?.id ?? body.id;
+    announceCheck(name.trim(), await check(id), editing ? "salvata" : "aggiunta");
 
-    setName("");
     setSecretAccessKey("");
-    onCreated();
+    onSaved();
   }
 
   return (
     <FormDialog
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      title="Nuova destinazione"
-      submitLabel="Aggiungi e verifica"
-      isSubmitDisabled={incomplete || Boolean(endpointError)}
+      title={editing ? `Modifica «${editing.name}»` : "Nuova destinazione"}
+      submitLabel={editing ? "Salva e verifica" : "Aggiungi e verifica"}
+      isSubmitDisabled={incomplete || Boolean(kind === "s3" && endpointError)}
       onSubmit={submit}
     >
-      <Segmented
-        label="Tipo di destinazione"
-        value={kind}
-        onChange={setKind}
-        options={[
-          { value: "s3", label: "Archivio S3 (consigliato)" },
-          { value: "local", label: "Disco di questa macchina" },
-        ]}
-      />
+      {!editing && (
+        <Segmented
+          label="Tipo di destinazione"
+          value={kind}
+          onChange={setKind}
+          options={[
+            { value: "s3", label: "Archivio S3 (consigliato)" },
+            { value: "local", label: "Disco di questo server" },
+          ]}
+        />
+      )}
 
       <TextField value={name} onChange={setName}>
         <Label>Nome</Label>
-        <Input placeholder={kind === "s3" ? `Bucket su ${provider.label}` : "Copia locale"} />
+        <Input placeholder={kind === "s3" ? provider.label : "Copia locale"} />
       </TextField>
 
       {kind === "local" ? (
         <FieldHint>
-          Gli archivi restano su questa macchina, in <Code>data/backups</Code>. Utile come copia rapida, ma un
-          backup che si perde insieme alla macchina che protegge non è un vero backup.
+          Gli archivi restano su questo server, in <Code>data/backups</Code>. Utile come copia rapida, ma un
+          backup che si perde insieme al server che protegge non è un vero backup.
         </FieldHint>
       ) : (
         <>
@@ -213,7 +237,7 @@ export function DestinationForm({
             label="Servizio"
             value={providerId}
             onChange={(value) => chooseProvider(value as ProviderId)}
-            options={(Object.keys(PROVIDERS) as ProviderId[]).map((id) => ({ value: id, label: PROVIDERS[id].label }))}
+            options={PROVIDER_IDS.map((id) => ({ value: id, label: PROVIDERS[id].label }))}
           />
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -238,15 +262,25 @@ export function DestinationForm({
               <Label>Access key ID</Label>
               <Input className="font-mono text-sm" autoComplete="off" />
             </TextField>
-            <TextField type="password" value={secretAccessKey} onChange={setSecretAccessKey}>
-              <Label>Secret access key</Label>
-              <Input className="font-mono text-sm" autoComplete="new-password" />
-            </TextField>
+            <div>
+              <TextField type="password" value={secretAccessKey} onChange={setSecretAccessKey}>
+                <Label>Secret access key</Label>
+                <Input
+                  className="font-mono text-sm"
+                  autoComplete="new-password"
+                  placeholder={needsSecret ? undefined : "invariata"}
+                />
+              </TextField>
+              {!needsSecret && <FieldHint>Lasciala vuota per tenere quella salvata.</FieldHint>}
+            </div>
           </div>
 
           {provider.note && <Hint tone="tip">{provider.note}</Hint>}
 
-          <Advanced summary="endpoint, prefisso, indirizzamento" defaultExpanded={providerId === "custom" || providerId === "r2"}>
+          <Advanced
+            summary="endpoint, prefisso, indirizzamento"
+            defaultExpanded={providerId === "custom" || providerId === "r2" || endpointTyped !== null || undefined}
+          >
             <Field label="Endpoint" error={endpointError} hint="Ricavato dal servizio e dalla regione; cambialo solo se serve.">
               <TextField value={endpoint} onChange={setEndpointTyped} aria-label="Endpoint">
                 <Input placeholder="https://s3.eu-central-1.amazonaws.com" className="font-mono text-sm" />
@@ -276,6 +310,13 @@ export function DestinationForm({
             </div>
           </Advanced>
 
+          {movesArchives && (
+            <Hint tone="warn" title={`Qui ci sono già ${archives} archivi`}>
+              Il pannello li cercherà nel nuovo bucket, endpoint o prefisso. Se non li sposti anche tu, non potrai
+              più ripristinarli da qui. Cambiare solo le chiavi o la regione non tocca niente.
+            </Hint>
+          )}
+
           <Hint tone="warn" title="La chiave viene salvata cifrata">
             Con la chiave di questo pannello, come ogni altro segreto. Dai alla chiave i permessi minimi:
             lettura, scrittura ed eliminazione su questo solo bucket.
@@ -283,12 +324,14 @@ export function DestinationForm({
         </>
       )}
 
-      <SettingToggle
-        label="Usala per i nuovi backup"
-        description="Il backup notturno e le nuove pianificazioni salveranno qui."
-        isSelected={makeDefault}
-        onChange={setMakeDefault}
-      />
+      {!editing && canSetDefault && (
+        <SettingToggle
+          label="Usala per i nuovi backup"
+          description="Il backup notturno, le nuove pianificazioni e il backup di sicurezza dei ripristini salveranno qui."
+          isSelected={makeDefault}
+          onChange={setMakeDefault}
+        />
+      )}
     </FormDialog>
   );
 }

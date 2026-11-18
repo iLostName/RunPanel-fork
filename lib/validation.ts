@@ -963,6 +963,39 @@ export const destinationSchema = z
   });
 
 /**
+ * Editing a destination. The type is not here on purpose: an archive's path
+ * means one thing on a disk and another in a bucket, so a destination that
+ * changed type would point every archive it holds at nothing. `config` is
+ * merged over the stored one and validated whole with `s3ConfigSchema`, so an
+ * empty secret keeps the stored secret instead of erasing it.
+ */
+export const destinationUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(60).optional(),
+    config: z
+      .object({
+        endpoint: z.string().max(2048).optional(),
+        region: z.string().max(64).optional(),
+        bucket: z.string().max(255).optional(),
+        accessKeyId: z.string().max(255).optional(),
+        /** Empty or absent: keep the stored one. */
+        secretAccessKey: z.string().max(255).optional(),
+        prefix: z.string().max(255).optional(),
+        forcePathStyle: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export const destinationDefaultSchema = z
+  .object({
+    /** Point every existing policy at it too, not only the ones created from now on. */
+    movePolicies: z.boolean().optional(),
+  })
+  .strict();
+
+/**
  * A restore request.
  *
  * `confirm` carries what the operator typed. It is checked in the browser too,

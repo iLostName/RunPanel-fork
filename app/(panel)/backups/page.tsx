@@ -12,7 +12,7 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DeleteButton } from "@/components/ui/DangerAction";
-import { DestinationForm } from "./_components/DestinationForm";
+import { DestinationsPanel } from "./_components/DestinationsPanel";
 import { Hint } from "@/components/ui/Hint";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatTile } from "@/components/ui/StatTile";
@@ -100,7 +100,6 @@ export default function BackupsPage() {
   const cluster = useResource<ClusterBackups>(isSolo ? null : "/api/cluster/backups", { intervalMs: poll5000 });
 
   const [busy, setBusy] = useState<string | null>(null);
-  const [addingDestination, setAddingDestination] = useState(false);
 
   const self = selfId ?? "";
   const tag = <T,>(list: T[] | undefined): Located<T>[] => (list ?? []).map((x) => ({ ...x, memberId: self, memberName: "" }));
@@ -218,13 +217,6 @@ export default function BackupsPage() {
     }
     toast.success("Backup eliminato, archivio compreso");
     refreshAll();
-  }
-
-  async function testDestination(destination: Located<DestinationView>) {
-    const body = await post(`/api/backups/destinations/${destination.id}`, "Verifica", destination.memberId);
-    if (!body) return;
-    if (body.ok) toast.success(body.message);
-    else toast.error(body.message);
   }
 
   if ((isSolo ? runs.loading && !runs.data : cluster.loading && !cluster.data)) {
@@ -413,65 +405,17 @@ export default function BackupsPage() {
 
         {/* Above the history, not under it: the nightly preset needs a destination,
             and below 25 rows of runs nobody found where to add one. */}
-        <Panel padding="flush">
-          <div className="p-4 sm:p-5">
-            <PanelHeader
-              title="Destinazioni"
-              description={isSolo ? "Dove finiscono gli archivi" : `Dove finiscono gli archivi. Una nuova va su ${nameOf(target)}.`}
-              actions={
-                <Button size="sm" variant="secondary" onPress={() => setAddingDestination(true)}>
-                  <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
-                  Aggiungi
-                </Button>
-              }
-            />
-          </div>
-          {destinationsError && !destinationsLoaded ? (
-            <LoadError
-              what="le destinazioni"
-              error={destinationsError}
-              onRetry={refreshAll}
-              className="px-4 pb-4 sm:px-5"
-            />
-          ) : !destinationsLoaded ? (
-            <div className="space-y-2 px-4 pb-4 sm:px-5">
-              <SkeletonBlock className="h-12" />
-            </div>
-          ) : destinationList.length === 0 ? (
-            <EmptyState
-              icon="solar:folder-linear"
-              title="Nessuna destinazione"
-              description="Una destinazione è dove finiscono gli archivi: una cartella su questa macchina o uno storage remoto."
-              className="py-8"
-            />
-          ) : (
-          <ul className="divide-border divide-y">
-            {destinationList.map((destination) => (
-              <li
-                key={`${destination.memberId}:${destination.id}`}
-                className="flex items-center gap-3 px-4 py-3 sm:px-5"
-              >
-                <Icon icon="solar:folder-linear" width={16} className="text-muted" aria-hidden />
-                <div className="min-w-0 flex-1">
-                  <p className="text-foreground flex items-center gap-2 truncate text-sm">
-                    {destination.name}
-                    <ServerBadge memberId={destination.memberId} />
-                  </p>
-                  <p className="text-muted text-xs">{destination.type}</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => testDestination(destination)}
-                  isPending={busy === `/api/backups/destinations/${destination.id}`}
-                >
-                  Verifica
-                </Button>
-              </li>
-            ))}
-          </ul>
-          )}
-        </Panel>
+        <DestinationsPanel
+          destinations={destinationList}
+          loaded={destinationsLoaded}
+          error={destinationsError}
+          description={
+            isSolo
+              ? "Dove finiscono gli archivi: il disco di questo server o un archivio S3 fuori da qui."
+              : `Dove finiscono gli archivi. Una nuova va su ${nameOf(target)}.`
+          }
+          onChanged={refreshAll}
+        />
 
         <Panel padding="flush">
           <div className="p-4 sm:p-5">
@@ -548,12 +492,6 @@ export default function BackupsPage() {
             </ul>
           )}
         </Panel>
-
-        <DestinationForm
-          isOpen={addingDestination}
-          onOpenChange={setAddingDestination}
-          onCreated={refreshAll}
-        />
 
         <Hint tone="warn" title="Gli archivi contengono segreti">
           Le variabili e le credenziali dei database vengono salvate cifrate con la chiave di questo

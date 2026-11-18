@@ -98,6 +98,8 @@ export const ACTION_LABEL: Record<string, string> = {
   "backup.destination.create": "Destinazione creata",
   "backup.destination.update": "Destinazione modificata",
   "backup.destination.delete": "Destinazione eliminata",
+  "backup.destination.test": "Destinazione verificata",
+  "backup.destination.default": "Destinazione predefinita cambiata",
   "cluster.token.issue": "Token di collegamento creato",
   "cluster.member.join": "Server collegato",
   "cluster.member.update": "Server modificato",

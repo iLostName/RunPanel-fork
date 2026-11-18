@@ -69,6 +69,14 @@ export interface DestinationView {
   type: string;
   isDefault: boolean;
   createdAt: string;
+  /** Where an S3 destination writes; null for the local disk. Never the keys. */
+  target?: { endpoint: string; region: string; bucket: string; prefix: string | null; pathStyle: boolean } | null;
+  /** The policies writing here that this account can see. */
+  usedBy?: { id: string; name: string }[];
+  /** All of them, seen or not. */
+  usedByCount?: number;
+  archives?: number;
+  archiveBytes?: number;
 }
 
 export interface RunsResponse {
