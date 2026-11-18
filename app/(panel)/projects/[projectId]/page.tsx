@@ -19,6 +19,7 @@ import { parseContractJson } from "@/lib/deploy-contract";
 
 import { ProjectHeader } from "./_components/ProjectHeader";
 import { ProjectStats } from "./_components/ProjectStats";
+import { ProjectHealth } from "@/components/metrics/ProjectHealth";
 import { LogsTab } from "./_components/LogsTab";
 import { DeploymentsTab } from "./_components/DeploymentsTab";
 import { ProjectEnvTab } from "./_components/EnvTab";
@@ -421,6 +422,7 @@ export default function ProjectDetailPage() {
       />
 
       <ProjectStats info={processInfo} />
+      <ProjectHealth projectId={projectId} />
 
       <Tabs tabs={tabs} value={shownTab} onChange={setActiveTab} label="Sezioni del progetto" />
 

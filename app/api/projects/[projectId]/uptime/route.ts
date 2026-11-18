@@ -34,10 +34,13 @@ export async function GET(request: NextRequest, { params }: Params) {
   const tz = Number.isFinite(rawTz) && Math.abs(rawTz) <= 14 * 60 ? rawTz : 0;
 
   const plan = planFor(project, await runningContract(project.id));
-  const summary = await uptimeSummary(project.id, Date.now(), tz);
+  const now = Date.now();
+  const summary = await uptimeSummary(project.id, now, tz);
 
   return NextResponse.json(
     {
+      // The clock every duration on the card is measured against.
+      now,
       watch: {
         active: plan.target !== null,
         skip: plan.skip,
