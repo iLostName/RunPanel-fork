@@ -26,6 +26,8 @@ Three steps, and the project is created only at the end: source (GitHub, or a ZI
 - Settings have a side menu (Generale, Sorgente, Build e avvio, Indirizzi, Rete, Risorse, Automazioni, Backup, Avanzate, Permessi, Zona pericolosa) and a single save bar. The old "Aggiungi al progetto › App" path is gone: the source is changed from **Impostazioni › Sorgente**.
 - A failed deploy states its cause and the fix in words; for Docker projects, when the new version does not answer, the previous one comes back online by itself.
 - From **Altro**: Duplica, Esporta configurazione, Vedi attività. An exported configuration is imported from the wizard in expert mode.
+- **Variabili**: a table or a `.env` text view, paste a `.env` choosing whether to overwrite or skip existing keys, values hidden until shown, the error on the row that is wrong, linked databases' variables with where they come from, and **Salva e ridistribuisci** (save and redeploy).
+- **Log**: search, errors only, pause, download. The panel keeps each app's log on disk, rotated, and it can be searched after a restart too.
 
 ## The database page
 

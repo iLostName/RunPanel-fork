@@ -26,6 +26,8 @@ Tre passi, e il progetto viene creato solo alla fine: sorgente (GitHub o ZIP tra
 - Le impostazioni hanno un menu laterale (Generale, Sorgente, Build e avvio, Indirizzi, Rete, Risorse, Automazioni, Backup, Avanzate, Permessi, Zona pericolosa) e una sola barra per salvare. Il vecchio passaggio «Aggiungi al progetto › App» non c'è più: la sorgente si cambia da **Impostazioni › Sorgente**.
 - Un deploy fallito dice la causa in parole e il rimedio; per i progetti Docker, se la nuova versione non risponde, torna online da sola quella precedente.
 - Dal menu **Altro**: Duplica, Esporta configurazione, Vedi attività. Una configurazione esportata si importa dal wizard in modalità esperto.
+- **Variabili**: vista a tabella o come testo `.env`, incolla un `.env` scegliendo se sovrascrivere o saltare le chiavi che ci sono già, valori nascosti finché non li mostri, l'errore sulla riga sbagliata, le variabili dei database collegati con la loro provenienza, e **Salva e ridistribuisci**.
+- **Log**: ricerca, solo errori, pausa, download. Il pannello conserva il log di ogni app su disco, a rotazione, e lo si cerca anche dopo un riavvio.
 
 ## La pagina del database
 
