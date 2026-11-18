@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireOwner } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
+import { clearRateLimit, consumeRateLimit } from "@/lib/rate-limit";
 import { backupIdSchema, backupPasswordAttemptSchema } from "@/lib/validation";
 import { UploadError, unlockUpload } from "@/services/backup/uploads";
 
 type Params = { params: Promise<{ uploadId: string }> };
+
+/** Each try costs a scrypt already; this keeps a script from queueing thousands. */
+const ATTEMPTS = 10;
+const WINDOW_MS = 15 * 60_000;
 
 /**
  * The password of an uploaded archive that is encrypted with one this panel
@@ -22,6 +27,15 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Caricamento non trovato" }, { status: 404 });
     }
 
+    const limitKey = `backup-upload-unlock:${uploadId}`;
+    const limit = await consumeRateLimit(limitKey, ATTEMPTS, WINDOW_MS);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: `Troppi tentativi per questo archivio: riprova tra ${Math.max(1, Math.ceil(limit.retryAfter / 60))} minuti` },
+        { status: 429, headers: { "Retry-After": String(limit.retryAfter) } }
+      );
+    }
+
     let body: unknown;
     try {
       body = await request.json();
@@ -34,7 +48,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     try {
-      return NextResponse.json({ upload: await unlockUpload(uploadId, parsed.data.password) }, { status: 202 });
+      const upload = await unlockUpload(uploadId, parsed.data.password);
+      await clearRateLimit(limitKey);
+      return NextResponse.json({ upload }, { status: 202 });
     } catch (err) {
       if (err instanceof UploadError) return NextResponse.json({ error: err.message }, { status: err.status });
       throw err;
