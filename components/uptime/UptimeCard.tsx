@@ -151,6 +151,10 @@ export function UptimeView({ data, className }: { data: UptimeData; className?: 
   const [showAll, setShowAll] = useState(false);
   const head = headline(data);
   const hasHistory = data.days.some((d) => d.ratio !== null) || data.incidents.length > 0;
+  // A project that is not running and never was checked has nothing to say
+  // here: its header already says it is stopped, and a never-deployed one has
+  // a page of its own about what to do first.
+  if (!data.watch.active && data.watch.skip === "not-running" && !hasHistory) return null;
   const incidents = showAll ? data.incidents : data.incidents.slice(0, 3);
   const goodDays = data.days.filter((d) => d.ratio !== null && d.ratio >= 0.9995).length;
   const badDays = data.days.filter((d) => d.ratio !== null && d.ratio < 0.9995).length;

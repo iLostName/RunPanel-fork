@@ -276,7 +276,9 @@ export function toSeries(rows: readonly Sample[], range: MetricRange, now: numbe
     if (values.some((v) => v !== null)) series[field] = values;
   }
   return {
-    from,
+    // From the start of the first bucket, which can begin a little before the
+    // range does: a point placed before the axis would be drawn outside it.
+    from: spec.step > 0 ? bucketStart(from, spec.step) : from,
     to: now,
     step: spec.step > 0 ? spec.step : SAMPLE_INTERVAL_MS,
     t: points.map((p) => p.ts),

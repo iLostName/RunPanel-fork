@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { Panel } from "@/components/ui/Panel";
 import { Badge } from "@/components/ui/Badge";
 import { Hint } from "@/components/ui/Hint";
@@ -52,14 +53,17 @@ export function ChartsSkeleton({ count = 4 }: { count?: number }) {
  * The machine over time: CPU, memory, disk and network, the four numbers the
  * Panoramica shows as they are now. For the Monitor; `memberId` draws another
  * server of the cluster.
+ *
+ * Memoised: the Monitor around it polls every three seconds, and the charts
+ * change only when their own history does.
  */
-export function HostCharts({ range, memberId }: { range: MetricRange; memberId?: string | null }) {
+export const HostCharts = memo(function HostCharts({ range, memberId }: { range: MetricRange; memberId?: string | null }) {
   const { data, error, loading, stale, refresh } = useMetricHistory("host", null, range, { memberId });
 
   if (!data && loading) return <ChartsSkeleton />;
   if (!data) return <LoadError what="lo storico del server" error={error ?? "Nessuna risposta"} onRetry={() => void refresh()} />;
   return <HostChartsView data={data} stale={stale} />;
-}
+});
 
 /** The charts themselves, from an answer already in hand. */
 export function HostChartsView({ data, stale = false }: { data: MetricHistory; stale?: boolean }) {

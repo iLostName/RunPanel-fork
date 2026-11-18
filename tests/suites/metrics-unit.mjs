@@ -102,7 +102,11 @@ export async function run({ repoRoot }) {
     for (let ts = now - 25 * HOUR; ts <= now; ts += MIN) rows.push(sample(ts, { cpu: 5, mem: 100 }, { n: 2 }));
     const day = m.toSeries(rows, "24h", now, ["cpu", "mem", "disk"]);
     r.check("a day is a few hundred points", day.t.length >= 288 && day.t.length <= 290, String(day.t.length));
-    r.check("a day keeps its range", day.t[0] >= now - 24 * HOUR && day.from === now - 24 * HOUR);
+    r.check(
+      "a day keeps its range, starting on the first bucket",
+      day.from === m.bucketStart(now - 24 * HOUR, 5 * MIN) && day.t[0] >= day.from && day.to === now,
+      JSON.stringify({ from: day.from, first: day.t[0] })
+    );
     r.check("a field with nothing in it is left out", day.series.disk === undefined && day.series.cpu?.length === day.t.length);
     r.check("the step is the range's", day.step === 5 * MIN);
 

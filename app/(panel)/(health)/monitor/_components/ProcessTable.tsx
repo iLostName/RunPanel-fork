@@ -172,7 +172,7 @@ export function TableHead({ first }: { first: string }) {
             per cui un processo che ne occupa uno intero qui vale 100 diviso il numero dei core.
           </InfoTip>
         </span>
-        <span className="w-28 text-right">RAM · del server</span>
+        <span className="w-28 text-right">RAM (% del server)</span>
         <span className="hidden w-16 text-right sm:inline">Uptime</span>
       </span>
     </div>

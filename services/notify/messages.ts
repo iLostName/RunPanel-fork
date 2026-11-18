@@ -759,7 +759,7 @@ export function describe(event: NotifyEvent): NotifyMessage {
           event.metric === "memory"
             ? html`Quando la memoria finisce il sistema chiude il processo più grande, che di solito è un database o l'app stessa.`
             : html`Finché dura, tutte le app di questo server rispondono più lentamente.`,
-          html`In Salute → Monitor vedi chi sta usando di più. Ti avviso di nuovo quando torna sotto l'80%.`,
+          html`In Salute › Monitor vedi chi sta usando di più. Ti avviso di nuovo quando torna sotto l'80%.`,
         ]),
       };
     }
