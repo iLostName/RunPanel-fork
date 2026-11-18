@@ -11,10 +11,11 @@ import { Field } from "@/components/ui/Field";
 import { Advanced, Technical } from "@/components/ui/Technical";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { MSG } from "@/lib/copy";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNode, useNodeApi } from "@/lib/hooks/useNode";
 import { PROVIDERS, PROVIDER_IDS, detectProvider, type ProviderId } from "./providers";
+import { TelegramFields, type TelegramChoice, type TelegramDetail } from "./TelegramFields";
 
-type Kind = "local" | "s3";
+type Kind = "local" | "s3" | "telegram";
 
 /** What `GET /api/backups/destinations/:id` returns: everything but the secret. */
 export interface DestinationDetail {
@@ -31,6 +32,8 @@ export interface DestinationDetail {
     forcePathStyle: boolean;
     hasSecret: boolean;
   } | null;
+  /** Absent from a server on an older version. */
+  telegram?: TelegramDetail | null;
 }
 
 interface CheckResult {
@@ -63,6 +66,10 @@ function announceCheck(name: string, verdict: CheckResult, done: string) {
  * nothing and says why; "Salva comunque" is there for a bucket that is
  * deliberately unreachable from here today.
  *
+ * Telegram is checked the other way round: the login already proved the
+ * account works, and its channel does not exist until the destination is
+ * saved, so the server creates it, checks it and answers with the verdict.
+ *
  * Editing never shows the stored secret: the field stays empty, and empty
  * means "keep the one you have". The type cannot change, because an archive's
  * path means one thing on a disk and another in a bucket.
@@ -75,6 +82,7 @@ export function DestinationForm({
   archives = 0,
   canSetDefault = true,
   apiFor,
+  memberId,
 }: {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -87,14 +95,20 @@ export function DestinationForm({
   canSetDefault?: boolean;
   /** The server the destination lives on, when it is not the one the page is about. */
   apiFor?: (path: string) => string;
+  /** That server's id, for the backup password a Telegram destination suggests setting. */
+  memberId?: string | null;
 }) {
   const nodeApi = useNodeApi();
+  const { selected } = useNode();
   const api = apiFor ?? nodeApi;
   const stored = editing?.config ?? null;
   const initialProvider: ProviderId = stored ? detectProvider(stored.endpoint) : "aws";
 
-  const [kind, setKind] = useState<Kind>(editing ? (editing.type === "local" ? "local" : "s3") : "s3");
+  const [kind, setKind] = useState<Kind>(
+    editing ? (editing.type === "local" ? "local" : editing.type === "telegram" ? "telegram" : "s3") : "s3"
+  );
   const [name, setName] = useState(editing?.name ?? "");
+  const [telegram, setTelegram] = useState<TelegramChoice>({ linked: null, chat: "channel", channelTitle: "" });
 
   const [providerId, setProviderId] = useState<ProviderId>(initialProvider);
   const provider = PROVIDERS[providerId];
@@ -142,7 +156,11 @@ export function DestinationForm({
   const incomplete =
     !name.trim() ||
     (kind === "s3" &&
-      (!trimmedEndpoint || !region.trim() || !bucket.trim() || !accessKeyId.trim() || (needsSecret && !secretAccessKey)));
+      (!trimmedEndpoint || !region.trim() || !bucket.trim() || !accessKeyId.trim() || (needsSecret && !secretAccessKey))) ||
+    // A new Telegram destination needs a linked account and, for a channel, its name.
+    (kind === "telegram" &&
+      !editing &&
+      (!telegram.linked || (telegram.chat === "channel" && !telegram.channelTitle.trim())));
 
   // Where the archives already stored here would be looked for after the edit.
   const movesArchives =
@@ -185,7 +203,48 @@ export function DestinationForm({
     }
   }
 
+  /**
+   * Telegram: the session is on the server, named by the login id. Creating
+   * makes the channel and answers with the check run on it; editing renames,
+   * and with a new login re-links the account, then checks.
+   */
+  async function submitTelegram() {
+    const res = editing
+      ? await fetch(api(`/api/backups/destinations/${editing.id}`), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name.trim(),
+            ...(telegram.linked ? { config: { loginId: telegram.linked.loginId } } : {}),
+          }),
+        })
+      : await fetch(api("/api/backups/destinations"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name.trim(),
+            type: "telegram",
+            isDefault: canSetDefault && makeDefault,
+            config: {
+              loginId: telegram.linked?.loginId,
+              chat: telegram.chat,
+              ...(telegram.chat === "channel" ? { channelTitle: telegram.channelTitle.trim() } : {}),
+            },
+          }),
+        });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(body.error ?? (editing ? MSG.saveFailed : MSG.createFailed));
+      throw new Error(body.error ?? "destination failed");
+    }
+    if (body.check) announceCheck(name.trim(), body.check as CheckResult, editing ? "ricollegata" : "aggiunta");
+    else toast.success(`«${name.trim()}» salvata.`);
+    onSaved();
+  }
+
   async function submit() {
+    if (kind === "telegram") return submitTelegram();
+
     // A wrong key or bucket is found now, by whoever just typed it, rather
     // than by the first scheduled night — and before it is saved, so a typo
     // never becomes a destination the nightly can pick.
@@ -234,8 +293,22 @@ export function DestinationForm({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       title={editing ? `Modifica «${editing.name}»` : "Nuova destinazione"}
-      submitLabel={showFailure ? "Salva comunque" : editing ? "Verifica e salva" : "Verifica e aggiungi"}
+      submitLabel={
+        kind === "telegram"
+          ? editing
+            ? telegram.linked
+              ? "Salva e verifica"
+              : "Salva"
+            : "Aggiungi e verifica"
+          : showFailure
+            ? "Salva comunque"
+            : editing
+              ? "Verifica e salva"
+              : "Verifica e aggiungi"
+      }
       isSubmitDisabled={incomplete || Boolean(kind === "s3" && endpointError)}
+      // Room for the QR code beside its instructions, and the two chats side by side.
+      wide={kind === "telegram"}
       onSubmit={submit}
     >
       {showFailure && (
@@ -260,6 +333,7 @@ export function DestinationForm({
           onChange={setKind}
           options={[
             { value: "s3", label: "Archivio S3 (consigliato)" },
+            { value: "telegram", label: "Telegram" },
             { value: "local", label: "Disco di questo server" },
           ]}
         />
@@ -267,7 +341,7 @@ export function DestinationForm({
 
       <TextField value={name} onChange={setName}>
         <Label>Nome</Label>
-        <Input placeholder={kind === "s3" ? provider.label : "Copia locale"} />
+        <Input placeholder={kind === "s3" ? provider.label : kind === "telegram" ? "Telegram" : "Copia locale"} />
       </TextField>
 
       {kind === "local" ? (
@@ -275,6 +349,14 @@ export function DestinationForm({
           Gli archivi restano su questo server, in <Code>data/backups</Code>. Utile come copia rapida, ma un
           backup che si perde insieme al server che protegge non è un vero backup.
         </FieldHint>
+      ) : kind === "telegram" ? (
+        <TelegramFields
+          api={api}
+          memberId={memberId ?? selected}
+          editing={editing ? { destinationId: editing.id, detail: editing.telegram ?? null } : undefined}
+          value={telegram}
+          onChange={setTelegram}
+        />
       ) : (
         <>
           <SelectField
