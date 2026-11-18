@@ -126,6 +126,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
         .select(["hostname", "status", "auth_hash"])
         .where("project_id", "=", projectId)
         .where("apply_error", "is", null)
+        // A www twin only redirects to its main name: the header opens the app.
+        .where("redirect_to", "is", null)
         .orderBy("hostname", "asc")
         .execute()
     ).map((host) => ({

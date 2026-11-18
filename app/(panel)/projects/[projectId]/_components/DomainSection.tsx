@@ -354,7 +354,7 @@ export function DomainSection({ projectId }: { projectId: string }) {
 
       {!data ? null : !data.hasPort ? (
         <FieldHint>
-          Per avere un indirizzo il progetto deve avere una porta: impostala nel campo Porta, in Applicazione, e salva.
+          Per avere un indirizzo il progetto deve avere una porta: impostala in Impostazioni › Rete e salva.
         </FieldHint>
       ) : !canEdit ? null : !data.canManageDomains ? (
         <FieldHint>Un nuovo indirizzo lo aggiunge chi ha il permesso Accesso all&apos;host.</FieldHint>
