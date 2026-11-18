@@ -53,7 +53,7 @@ const BLOCKED = [
   /^\/api\/upload$/,
   /^\/api\/mcp$/,
   /^\/api\/api-tokens$/,
-  /^\/api\/cluster\/(join|directory|leave|ping|secret)$/,
+  /^\/api\/cluster\/(join|directory|leave|ping|secret|folders\/sync)$/,
 ];
 
 const MAX_BODY_CHARS = 120_000;

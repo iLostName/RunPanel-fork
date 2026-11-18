@@ -20,7 +20,7 @@ const INTERNAL = [
   /^upload$/,
   /^mcp$/,
   /^api-tokens$/,
-  /^cluster\/(join|directory|leave|ping|secret)$/,
+  /^cluster\/(join|directory|leave|ping|secret|folders\/sync)$/,
 ];
 
 const HANDLER = /export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(/g;
