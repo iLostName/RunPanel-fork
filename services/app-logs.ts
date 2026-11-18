@@ -179,15 +179,19 @@ function collectNative(project: ProjectRow): number {
   if (entries.length > 0) archiveFor(project.id).append(entries.map(toArchiveLine));
 
   // Everything up to here is in the archive: a file past its cap can go back to
-  // empty. Only when the read reached its end, so no unread line goes with it.
+  // empty. Only when the read reached its end, so no unread line goes with it,
+  // and only when the file was read from its start: a long file met for the
+  // first time — an app that ran for months before this existed — had only its
+  // end read, and the rest is left for the next start to clear, as before.
   for (const [file, , key] of sources) {
-    if (!full.includes(file)) continue;
+    const read = next[key];
+    if (!full.includes(file) || !read || (read.from ?? 0) !== 0) continue;
     try {
-      if (fs.statSync(file).size !== next[key]?.offset) continue;
+      if (fs.statSync(file).size !== read.offset) continue;
     } catch {
       continue;
     }
-    if (truncateLogFile(file)) next[key] = { offset: 0, mark: "" };
+    if (truncateLogFile(file)) next[key] = { offset: 0, mark: "", from: 0 };
   }
 
   if (entries.length > 0 || JSON.stringify(next) !== JSON.stringify(previous)) {

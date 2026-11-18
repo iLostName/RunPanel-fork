@@ -35,7 +35,8 @@ const MAX_LINES = 5000;
 export function LogHistory({ projectId, query, stream }: { projectId: string; query: string; stream: "all" | LogStream }) {
   const api = useNodeApi();
   const [limit, setLimit] = useState(FIRST_PAGE);
-  const search = useDebounced(query.trim(), 350);
+  // Capped at what the API accepts, so a long paste narrows the search instead of failing it.
+  const search = useDebounced(query.trim().slice(0, 200), 350);
 
   const params = new URLSearchParams({ lines: String(limit) });
   if (search) params.set("q", search);
@@ -71,7 +72,7 @@ export function LogHistory({ projectId, query, stream }: { projectId: string; qu
         highlight={search || undefined}
         className="h-[320px] sm:h-[440px]"
         ariaLabel="Log salvati dell'app"
-        emptyMessage={query.trim() !== search ? "Cerco…" : empty}
+        emptyMessage={query.trim().slice(0, 200) !== search ? "Cerco…" : empty}
       />
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

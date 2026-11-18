@@ -356,6 +356,12 @@ export class RotatingLogFile {
 export interface FileCursor {
   offset: number;
   mark: string;
+  /**
+   * Where reading this file began: 0 when it was read from its start, more
+   * when a long file was first met and only its end was read. Whoever empties
+   * a file after reading it needs to know nothing older was skipped.
+   */
+  from?: number;
 }
 
 const MARK_BYTES = 64;
@@ -434,7 +440,8 @@ export function readNewLines(
       .toString("utf8")
       .split("\n")
       .filter((line) => line.trim() !== "");
-    return { lines, cursor: { offset, mark }, restarted };
+    const from = cursor && !restarted ? (cursor.from ?? 0) : start;
+    return { lines, cursor: { offset, mark, from }, restarted };
   } finally {
     fs.closeSync(fd);
   }

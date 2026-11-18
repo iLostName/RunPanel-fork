@@ -156,6 +156,9 @@ export async function run({ repoRoot }) {
     read = readNewLines(big, null, 1000);
     r.check("a long file is first read from its end", read.lines.at(-1) === "row 4999" && read.lines.length < 200);
     r.check("from a whole line", /^row \d+$/.test(read.lines[0]));
+    r.check("and the cursor says the start was skipped", read.cursor.from > 0);
+    r.check("which later reads remember", readNewLines(big, read.cursor, 1000).cursor.from === read.cursor.from);
+    r.check("a file read from its start says so", readNewLines(pm2, null, 1024).cursor.from === 0);
     let backlog = readNewLines(big, { offset: 0, mark: "" }, 1000);
     let rounds = 1;
     while (backlog.lines.length > 0 && rounds < 200) {
