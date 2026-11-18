@@ -63,6 +63,15 @@ export const config = {
     return path.join(config.backupsDir, "uploads");
   },
   /**
+   * The copies this server keeps for the other servers of its cluster, one
+   * folder per source (services/backup/peer-host.ts). Beside `backups/` and
+   * not inside it: they are someone else's archives, never this server's own,
+   * and nothing that tidies this server's backups may ever touch them.
+   */
+  get peerBackupsDir() {
+    return path.join(env().dataDir, "peer-backups");
+  },
+  /**
    * Where the updater parks a copy of the store before it resets the tree.
    *
    * A directory of its own rather than a loose file under `dataDir`, so the one
@@ -90,22 +99,23 @@ export function ensureDataDirs() {
     config.backupArchivesDir,
     config.backupStagingDir,
     config.backupUploadsDir,
+    config.peerBackupsDir,
     config.panelUpdateDir,
   ];
   for (const dir of dirs) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  // Both hold a whole copy of the panel's store — encrypted env vars, registry
+  // Each holds a whole copy of a panel's store — encrypted env vars, registry
   // logins, session hashes — and on a shared host the default 0755 would let
-  // any local user read last night's backup, or the copy the updater took
-  // twenty minutes ago.
+  // any local user read last night's backup, another server's kept here, or
+  // the copy the updater took twenty minutes ago.
   //
   // The data directory as a whole too: checkouts, uploads, logs and the store
   // are the panel's and nobody else's. Containers are not affected: the daemon
   // resolves a bind mount as root, and inside the container only the mounted
   // directory's own mode counts.
-  for (const dir of [config.dataDir, config.backupsDir, config.panelUpdateDir]) {
+  for (const dir of [config.dataDir, config.backupsDir, config.peerBackupsDir, config.panelUpdateDir]) {
     try {
       fs.chmodSync(dir, 0o700);
     } catch {

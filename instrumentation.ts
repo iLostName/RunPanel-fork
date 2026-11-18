@@ -57,6 +57,11 @@ export async function register() {
   const { removeStaleSshFolders } = await import("./services/backup/destinations/ssh-transport");
   const { config: panelConfig } = await import("./lib/config");
   removeStaleSshFolders(panelConfig.tmpDir);
+  // And the pieces of another server's copies that were arriving when this
+  // process stopped: their running sha256 went with it, so none can finish.
+  const { sweepPeerUploads } = await import("./services/backup/peer-hosting");
+  const swept = sweepPeerUploads();
+  if (swept > 0) console.log(`[backup] Rimossi ${swept} caricamenti incompleti di copie di altri server`);
 
   const { sealStoredBuildEnv } = await import("./services/build-env");
   await sealStoredBuildEnv().catch((err) => {
