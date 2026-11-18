@@ -338,7 +338,37 @@ export type NotifyEvent =
       to: string | null;
       branch: string | null;
     }
-  | { key: "panel.restarted"; version: string; sha: string | null; afterUpdate: boolean };
+  | { key: "panel.restarted"; version: string; sha: string | null; afterUpdate: boolean }
+  /**
+   * CPU or memory at 90% or more for five minutes, and back under 80% for five
+   * more — `RESOURCE_ALERT_RULE` in lib/metrics-math.ts. `up` is the way back.
+   */
+  | {
+      key: "metrics.high";
+      up: boolean;
+      scope: "host" | "project";
+      /** The project; null for the server itself. */
+      name: string | null;
+      metric: "cpu" | "memory";
+      /** The reading that decided it, in percent. */
+      percent: number;
+      /** The highest reading while it lasted. */
+      peak: number;
+      /** How long it stayed high; set on the way back. */
+      durationMs: number | null;
+    }
+  /** An app that stopped answering its uptime check, and later answered again. */
+  | {
+      key: "uptime.down";
+      up: boolean;
+      name: string;
+      /** Why the checks failed, already in words — see `causeLabel` in lib/uptime-math.ts. */
+      cause: string | null;
+      /** What was asked: `GET /health · porta 3000`. */
+      target: string | null;
+      /** How long it did not answer; set on the way back. */
+      durationMs: number | null;
+    };
 
 /**
  * Whether a finished deploy is news.
@@ -700,5 +730,59 @@ export function describe(event: NotifyEvent): NotifyMessage {
             : html`Se non l'hai riavviato tu, è caduto e il supervisore l'ha rimesso su.`,
         ]),
       };
+
+    case "metrics.high": {
+      // "La CPU", "la memoria": both feminine, so one agreement serves both.
+      const what = event.metric === "cpu" ? "CPU" : "memoria";
+      const subject = event.scope === "host" ? `${event.metric === "cpu" ? "CPU" : "Memoria"} del server` : `${event.name ?? "Progetto"}: ${what}`;
+
+      if (event.up) {
+        return {
+          level: "ok",
+          title: `${subject} tornata normale`,
+          body: join([
+            html`Sotto l'80% da 5 minuti: ora è al ${event.percent}%.`,
+            line("È rimasta alta per", duration(event.durationMs)),
+            line("Picco", html`${event.peak}%`),
+          ]),
+        };
+      }
+      return {
+        level: "warn",
+        title: `${subject} al ${event.percent}%`,
+        body: join([
+          event.scope === "host"
+            ? html`Sopra il 90% da almeno 5 minuti.`
+            : event.metric === "cpu"
+              ? html`${bold(event.name ?? "")} usa da almeno 5 minuti più del 90% della CPU del server.`
+              : html`${bold(event.name ?? "")} usa da almeno 5 minuti più del 90% della memoria che ha a disposizione.`,
+          event.metric === "memory"
+            ? html`Quando la memoria finisce il sistema chiude il processo più grande, che di solito è un database o l'app stessa.`
+            : html`Finché dura, tutte le app di questo server rispondono più lentamente.`,
+          html`In Salute › Monitor vedi chi sta usando di più. Ti avviso di nuovo quando torna sotto l'80%.`,
+        ]),
+      };
+    }
+
+    case "uptime.down":
+      return event.up
+        ? {
+            level: "ok",
+            title: `L'app risponde di nuovo — ${event.name}`,
+            body: join([
+              html`${bold(event.name)} risponde di nuovo, da qualche minuto senza interruzioni.`,
+              line("Non ha risposto per", duration(event.durationMs)),
+            ]),
+          }
+        : {
+            level: "danger",
+            title: `L'app non risponde — ${event.name}`,
+            body: join([
+              html`${bold(event.name)} non ha risposto a due controlli di fila.`,
+              textLine("Motivo", event.cause),
+              line("Controllo", event.target ? code(event.target) : null),
+              html`Il pannello riprova ogni minuto e ti avvisa quando torna a rispondere.`,
+            ]),
+          };
   }
 }

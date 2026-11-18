@@ -20,6 +20,7 @@ import { deploymentActive, deploymentSucceeded, explainDeployError, type DeployF
 import { parseContractJson } from "@/lib/deploy-contract";
 import { cn } from "@/lib/utils";
 import { projectHasSource } from "./project-facts";
+import { ProjectHealth } from "@/components/metrics/ProjectHealth";
 import type { ProcessInfo, Project, SettingsSectionId, TabId } from "./types";
 
 interface LinkedService {
@@ -277,6 +278,9 @@ export const ProjectOverview = memo(function ProjectOverview({
           />
         </div>
       )}
+
+      {/* Uptime and the resource history, once there is something running to measure. */}
+      {project.last_success_at && <ProjectHealth projectId={project.id} />}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel className="space-y-3">

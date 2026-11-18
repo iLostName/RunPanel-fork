@@ -20,16 +20,19 @@ export function Sparkline({
   values,
   tone = "accent",
   height = 36,
+  ceiling,
   className,
 }: {
   values: ReadonlyArray<number | null | undefined>;
   tone?: keyof typeof TONE;
   height?: number;
+  /** The top of the scale for a value with a natural maximum: 100 for a percentage. */
+  ceiling?: number;
   className?: string;
 }) {
   // A fixed coordinate box; the SVG stretches to its container's width.
   const width = 120;
-  const path = sparkPath(values, width, height);
+  const path = sparkPath(values, width, height, 2, ceiling);
   if (!path.last) return <div aria-hidden className={cn("w-full", className)} style={{ height }} />;
 
   return (

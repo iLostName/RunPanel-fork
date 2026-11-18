@@ -176,6 +176,16 @@ export async function register() {
   const { startNotifyWatch } = await import("./services/notify/watch");
   startNotifyWatch();
 
+  // The Monitor's history and its CPU and memory alarms: a look at the host and
+  // at whatever runs on it every thirty seconds, condensed and purged by itself.
+  // Then the uptime check, one request a minute to every app with a health check
+  // and a port. Behind the flag like the rest: a throwaway instance must not
+  // fill its store with the real host's numbers, nor knock on its apps.
+  const { startMetricsCollector } = await import("./services/metrics/collector");
+  startMetricsCollector();
+  const { startUptimeChecker } = await import("./services/uptime/checker");
+  startUptimeChecker();
+
   /*
     "I am back."
 

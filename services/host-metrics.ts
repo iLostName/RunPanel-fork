@@ -1,4 +1,5 @@
 import os from "os";
+import fs from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { isWindows } from "./env-utils";
@@ -11,6 +12,8 @@ export interface HostMetrics {
   disk: { total: number; used: number; free: number };
   uptime: number;
   loadAverage: number[];
+  /** Logical CPUs: what a process's `cpu` (a percent of one core) is divided by to become a share of the host. */
+  cores: number;
 }
 
 /**
@@ -21,13 +24,19 @@ export interface HostMetrics {
  * average, a number that barely moves and tells you nothing about now. The
  * only way to get current usage is to compare two samples.
  */
-interface CpuSample {
+export interface CpuSample {
   idle: number;
   total: number;
   at: number;
 }
 
-function sampleCpu(): CpuSample {
+/**
+ * The tick counters now. Exported for the metrics collector, which keeps its
+ * own previous sample: sharing this module's would make its reading the usage
+ * since whichever page last asked, three seconds ago, rather than over the
+ * thirty seconds the chart point stands for.
+ */
+export function sampleCpu(): CpuSample {
   let idle = 0;
   let total = 0;
   for (const cpu of os.cpus()) {
@@ -68,7 +77,7 @@ async function cpuUsage(): Promise<number> {
   return lastUsage;
 }
 
-function percentBetween(a: CpuSample, b: CpuSample): number {
+export function percentBetween(a: CpuSample, b: CpuSample): number {
   const totalDelta = b.total - a.total;
   const idleDelta = b.idle - a.idle;
   if (totalDelta <= 0) return 0;
@@ -76,7 +85,7 @@ function percentBetween(a: CpuSample, b: CpuSample): number {
   return Math.round(Math.max(0, Math.min(100, used)) * 10) / 10;
 }
 
-interface DiskUsage {
+export interface DiskUsage {
   total: number;
   used: number;
   free: number;
@@ -95,7 +104,7 @@ const DISK_TTL_MS = 30_000;
  * path of a dashboard request for a number that changes by the minute. After
  * the first reading the caller never waits.
  */
-async function diskUsage(): Promise<DiskUsage> {
+export async function diskUsage(): Promise<DiskUsage> {
   const fresh = diskCache && Date.now() - diskCache.at < DISK_TTL_MS;
   if (fresh) return diskCache!.value;
 
@@ -112,9 +121,39 @@ async function diskUsage(): Promise<DiskUsage> {
   return diskCache.value;
 }
 
+/**
+ * The same three numbers `df` prints, from one `statfs` call.
+ *
+ * The metrics collector reads the disk every thirty seconds for the life of
+ * the panel, which is where spawning `df` — or PowerShell, at hundreds of
+ * milliseconds a time — stops being a detail. Same volume as before: `/`, or
+ * the drive the panel runs from. Null when the call is not available or
+ * answers nonsense, and the process below is asked instead.
+ */
+async function statfsDisk(): Promise<DiskUsage | null> {
+  try {
+    const root = isWindows ? `${process.cwd().charAt(0)}:\\` : "/";
+    const stat = await fs.promises.statfs(root);
+    const block = Number(stat.bsize);
+    const total = block * Number(stat.blocks);
+    if (!Number.isFinite(total) || total <= 0) return null;
+    // `df`'s columns: used is what is taken, free what an ordinary process can
+    // still write. They do not add up to the total — the rest is root's reserve.
+    return { total, used: total - block * Number(stat.bfree), free: block * Number(stat.bavail) };
+  } catch {
+    return null;
+  }
+}
+
 async function measureDisk(): Promise<DiskUsage> {
   const empty: DiskUsage = { total: 0, used: 0, free: 0 };
   let value = empty;
+
+  const quick = await statfsDisk();
+  if (quick) {
+    diskCache = { value: quick, at: Date.now() };
+    return quick;
+  }
 
   try {
     if (isWindows) {
@@ -156,5 +195,6 @@ export async function hostMetrics(): Promise<HostMetrics> {
     disk,
     uptime: os.uptime(),
     loadAverage: os.loadavg(),
+    cores: Math.max(1, os.cpus().length),
   };
 }
