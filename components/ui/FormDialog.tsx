@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Button, Modal } from "@heroui/react";
 import { outsideToasts, toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
+import { SheetGrip } from "./SheetGrip";
 
 /**
  * The dialog that asks for something, rather than asking whether.
@@ -25,6 +26,9 @@ import { MSG } from "@/lib/copy";
  * `onSubmit` may be async and the dialog stays open, pending, until it settles
  * — so a slow save cannot be submitted twice and a failure leaves the user's
  * input on screen instead of discarding it.
+ *
+ * On a phone it is a bottom sheet (globals.css) that a swipe down closes, until
+ * something has been typed into it or its submit is running: see `SheetGrip`.
  */
 export function FormDialog({
   isOpen,
@@ -138,6 +142,7 @@ function DialogBody({
 
   return (
     <>
+      <SheetGrip disabled={pending} />
       <Modal.Header>
         <Modal.Heading>{title}</Modal.Heading>
       </Modal.Header>
