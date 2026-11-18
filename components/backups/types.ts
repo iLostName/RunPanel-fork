@@ -83,14 +83,46 @@ export interface RunDetail extends RunView {
   log: string;
 }
 
+export interface S3TargetView {
+  endpoint: string;
+  region: string;
+  bucket: string;
+  prefix: string | null;
+  pathStyle: boolean;
+}
+
+export interface SftpTargetView {
+  host: string;
+  port: number;
+  folder: string;
+  /** `SHA256:…` of the host key pinned on first use; null until then. */
+  hostKeyFingerprint: string | null;
+}
+
+export interface WebdavTargetView {
+  host: string;
+  url: string;
+  folder: string;
+}
+
+export interface RcloneTargetView {
+  provider: string;
+  /** "Google Drive", or "rclone («nas», sftp)". */
+  service: string;
+  folder: string;
+}
+
 export interface DestinationView {
   id: string;
   name: string;
   type: string;
   isDefault: boolean;
   createdAt: string;
-  /** Where an S3 destination writes; null for the local disk. Never the keys. */
-  target?: { endpoint: string; region: string; bucket: string; prefix: string | null; pathStyle: boolean } | null;
+  /**
+   * Where a destination writes, by type; null for the local disk. Never the
+   * keys, never a user name.
+   */
+  target?: S3TargetView | SftpTargetView | WebdavTargetView | RcloneTargetView | null;
   /** The policies writing here that this account can see. */
   usedBy?: { id: string; name: string }[];
   /** All of them, seen or not. */

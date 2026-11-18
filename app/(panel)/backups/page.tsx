@@ -524,7 +524,7 @@ export default function BackupsPage() {
                       confirm={{
                         title: "Eliminare questo backup?",
                         description: `L'archivio viene cancellato ${
-                          run.destinationType === "s3" && run.destinationName
+                          run.destinationType !== "local" && run.destinationName
                             ? `anche da «${run.destinationName}»`
                             : "dal disco di questo server"
                         }. Se è l'ultimo riuscito, resti senza un punto di ripristino.`,

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Input, Label, TextField } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import { FormDialog } from "@/components/ui/FormDialog";
+import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { Segmented } from "@/components/ui/Segmented";
 import { SelectField } from "@/components/ui/SelectField";
 import { SettingToggle } from "@/components/ui/SettingToggle";
@@ -13,24 +14,31 @@ import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { MSG } from "@/lib/copy";
 import { useNodeApi } from "@/lib/hooks/useNode";
 import { PROVIDERS, PROVIDER_IDS, detectProvider, type ProviderId } from "./providers";
+import { REMOTE_KINDS, remoteKind } from "./destinations/kinds";
+import type { KindState } from "./destinations/types";
 
-type Kind = "local" | "s3";
+/** `local`, `s3`, or one of the remote kinds in destinations/kinds.ts. */
+type Kind = string;
 
-/** What `GET /api/backups/destinations/:id` returns: everything but the secret. */
+/** An S3 destination as the edit form gets it: everything but the secret. */
+interface S3Detail {
+  endpoint: string;
+  region: string;
+  bucket: string;
+  accessKeyId: string;
+  prefix: string;
+  forcePathStyle: boolean;
+  hasSecret: boolean;
+}
+
+/** What `GET /api/backups/destinations/:id` returns: everything but the secrets. */
 export interface DestinationDetail {
   id: string;
   name: string;
   type: string;
   isDefault: boolean;
-  config: {
-    endpoint: string;
-    region: string;
-    bucket: string;
-    accessKeyId: string;
-    prefix: string;
-    forcePathStyle: boolean;
-    hasSecret: boolean;
-  } | null;
+  /** S3's fields for S3, the remote kind's own view (kinds.ts on the server) for the others, null for the local disk. */
+  config: S3Detail | Record<string, unknown> | null;
 }
 
 interface CheckResult {
@@ -39,6 +47,8 @@ interface CheckResult {
   message?: string;
   code?: string;
   detail?: string | null;
+  /** What the check learned and the destination keeps: an SFTP server's host key. */
+  learned?: Record<string, string>;
 }
 
 /** What a check found, as a toast: the same words after creating and after editing. */
@@ -49,7 +59,7 @@ function announceCheck(name: string, verdict: CheckResult, done: string) {
     toast.success(`«${name}» ${done}: verificata, si può scrivere e rileggere.`);
   } else {
     toast.warning(`«${name}» ${done} senza una verifica riuscita`, {
-      description: verdict.message ?? "Controlla endpoint, bucket e chiavi, poi premi Verifica.",
+      description: verdict.message ?? "Controlla i dati della destinazione, poi premi Verifica.",
     });
   }
 }
@@ -66,6 +76,11 @@ function announceCheck(name: string, verdict: CheckResult, done: string) {
  * Editing never shows the stored secret: the field stays empty, and empty
  * means "keep the one you have". The type cannot change, because an archive's
  * path means one thing on a disk and another in a bucket.
+ *
+ * The local disk and S3 are laid out here; every other type brings its own
+ * fields (destinations/kinds.ts) and reports its config and whether it is
+ * complete, and goes through the same check and save as S3. What a check
+ * learns — an SFTP server's host key on first contact — is saved with it.
  */
 export function DestinationForm({
   isOpen,
@@ -74,6 +89,7 @@ export function DestinationForm({
   editing,
   archives = 0,
   canSetDefault = true,
+  isOwner = canSetDefault,
   apiFor,
 }: {
   isOpen: boolean;
@@ -85,16 +101,23 @@ export function DestinationForm({
   archives?: number;
   /** Only the owner chooses where the safety copies go. */
   canSetDefault?: boolean;
+  /** Only the owner pastes an rclone configuration. */
+  isOwner?: boolean;
   /** The server the destination lives on, when it is not the one the page is about. */
   apiFor?: (path: string) => string;
 }) {
   const nodeApi = useNodeApi();
   const api = apiFor ?? nodeApi;
-  const stored = editing?.config ?? null;
+  const stored = editing?.type === "s3" ? ((editing.config as S3Detail | null) ?? null) : null;
   const initialProvider: ProviderId = stored ? detectProvider(stored.endpoint) : "aws";
 
-  const [kind, setKind] = useState<Kind>(editing ? (editing.type === "local" ? "local" : "s3") : "s3");
+  const [kind, setKind] = useState<Kind>(editing ? editing.type : "s3");
   const [name, setName] = useState(editing?.name ?? "");
+  /** What a remote kind's fields last reported, tagged with the kind, so a switch never reuses another's. */
+  const [remote, setRemote] = useState<{ kind: Kind; state: KindState } | null>(null);
+  const remoteEntry = remoteKind(kind);
+  const remoteState = remote && remote.kind === kind ? remote.state : null;
+  const report = useCallback((state: KindState) => setRemote({ kind, state }), [kind]);
 
   const [providerId, setProviderId] = useState<ProviderId>(initialProvider);
   const provider = PROVIDERS[providerId];
@@ -142,7 +165,8 @@ export function DestinationForm({
   const incomplete =
     !name.trim() ||
     (kind === "s3" &&
-      (!trimmedEndpoint || !region.trim() || !bucket.trim() || !accessKeyId.trim() || (needsSecret && !secretAccessKey)));
+      (!trimmedEndpoint || !region.trim() || !bucket.trim() || !accessKeyId.trim() || (needsSecret && !secretAccessKey))) ||
+    (remoteEntry !== null && !remoteState?.complete);
 
   // Where the archives already stored here would be looked for after the edit.
   const movesArchives =
@@ -163,8 +187,12 @@ export function DestinationForm({
     forcePathStyle: pathStyle === "path",
   });
 
+  /** The config of whichever type is chosen, as the API takes it. */
+  const kindConfig = (): Record<string, unknown> =>
+    kind === "s3" ? s3Config() : remoteEntry ? (remoteState?.config ?? {}) : {};
+
   /** What was checked, so a failure stops counting as soon as a field changes. */
-  const signature = JSON.stringify([kind, kind === "s3" ? s3Config() : null]);
+  const signature = JSON.stringify([kind, kind === "local" ? null : kindConfig()]);
 
   /** Tried with exactly what the form holds, before anything is stored. */
   async function precheck(): Promise<CheckResult> {
@@ -174,7 +202,7 @@ export function DestinationForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: kind,
-          config: kind === "s3" ? s3Config() : {},
+          config: kindConfig(),
           ...(editing ? { destinationId: editing.id } : {}),
         }),
       });
@@ -199,11 +227,17 @@ export function DestinationForm({
       }
     }
 
+    // A remote kind keeps what the check learned — an SFTP server's host key,
+    // trusted on this first contact and pinned from now on.
+    const remoteConfig = remoteEntry ? { ...(remoteState?.config ?? {}), ...(verdict.learned ?? {}) } : null;
     const res = editing
       ? await fetch(api(`/api/backups/destinations/${editing.id}`), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: name.trim(), ...(kind === "s3" ? { config: s3Config() } : {}) }),
+          body: JSON.stringify({
+            name: name.trim(),
+            ...(kind === "s3" ? { config: s3Config() } : remoteConfig ? { config: remoteConfig } : {}),
+          }),
         })
       : await fetch(api("/api/backups/destinations"), {
           method: "POST",
@@ -212,7 +246,7 @@ export function DestinationForm({
             name: name.trim(),
             type: kind,
             isDefault: canSetDefault && makeDefault,
-            config: kind === "s3" ? { ...s3Config(), prefix: prefix.trim() || undefined } : {},
+            config: kind === "s3" ? { ...s3Config(), prefix: prefix.trim() || undefined } : (remoteConfig ?? {}),
           }),
         });
 
@@ -236,6 +270,8 @@ export function DestinationForm({
       title={editing ? `Modifica «${editing.name}»` : "Nuova destinazione"}
       submitLabel={showFailure ? "Salva comunque" : editing ? "Verifica e salva" : "Verifica e aggiungi"}
       isSubmitDisabled={incomplete || Boolean(kind === "s3" && endpointError)}
+      // The type cards side by side, and the longer forms of the remote types.
+      wide={!editing || Boolean(remoteEntry)}
       onSubmit={submit}
     >
       {showFailure && (
@@ -254,20 +290,39 @@ export function DestinationForm({
       )}
 
       {!editing && (
-        <Segmented
-          label="Tipo di destinazione"
-          value={kind}
-          onChange={setKind}
-          options={[
-            { value: "s3", label: "Archivio S3 (consigliato)" },
-            { value: "local", label: "Disco di questo server" },
-          ]}
-        />
+        <ChoiceGroup label="Tipo di destinazione">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <ChoiceCard
+              selected={kind === "s3"}
+              onSelect={() => setKind("s3")}
+              icon="solar:cloud-storage-linear"
+              title="Archivio S3 (consigliato)"
+              description="Amazon S3, Cloudflare R2, Backblaze B2, MinIO."
+            />
+            {REMOTE_KINDS.map((entry) => (
+              <ChoiceCard
+                key={entry.type}
+                selected={kind === entry.type}
+                onSelect={() => setKind(entry.type)}
+                icon={entry.icon}
+                title={entry.label}
+                description={entry.description}
+              />
+            ))}
+            <ChoiceCard
+              selected={kind === "local"}
+              onSelect={() => setKind("local")}
+              icon="solar:server-linear"
+              title="Disco di questo server"
+              description="Una copia rapida, che però si perde con il server."
+            />
+          </div>
+        </ChoiceGroup>
       )}
 
       <TextField value={name} onChange={setName}>
         <Label>Nome</Label>
-        <Input placeholder={kind === "s3" ? provider.label : "Copia locale"} />
+        <Input placeholder={kind === "s3" ? provider.label : remoteEntry ? remoteEntry.label : "Copia locale"} />
       </TextField>
 
       {kind === "local" ? (
@@ -275,6 +330,16 @@ export function DestinationForm({
           Gli archivi restano su questo server, in <Code>data/backups</Code>. Utile come copia rapida, ma un
           backup che si perde insieme al server che protegge non è un vero backup.
         </FieldHint>
+      ) : remoteEntry ? (
+        // Keyed by type: switching starts the next type's fields from scratch.
+        <remoteEntry.Fields
+          key={remoteEntry.type}
+          stored={editing && editing.type === remoteEntry.type ? (editing.config as Record<string, unknown> | null) : null}
+          api={api}
+          isOwner={isOwner}
+          archives={archives}
+          onChange={report}
+        />
       ) : (
         <>
           <SelectField

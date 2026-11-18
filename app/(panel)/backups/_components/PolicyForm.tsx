@@ -14,7 +14,7 @@ import { SelectField } from "@/components/ui/SelectField";
 import { CheckboxField } from "@/components/ui/CheckboxField";
 import { useResource } from "@/lib/hooks/useResource";
 import { SchedulePicker } from "@/components/ui/SchedulePicker";
-import { providerLabel } from "./providers";
+import { whereItWrites } from "./destinations/kinds";
 import { BackupPasswordDialog } from "./EncryptionPanel";
 import type {
   BackupTarget,
@@ -337,18 +337,13 @@ export function PolicyForm({ policy }: Props) {
               options={(destinations.data?.destinations ?? []).map((destination) => ({
                 value: destination.id,
                 label: destination.isDefault ? `${destination.name} (predefinita)` : destination.name,
-                description:
-                  destination.type === "local"
-                    ? "Disco di questo server"
-                    : destination.target
-                      ? `${providerLabel(destination.target.endpoint)} · bucket «${destination.target.bucket}»`
-                      : "Archivio S3",
+                description: whereItWrites(destination),
               }))}
             />
             <FieldHint>
-              {(destinations.data?.destinations ?? []).find((d) => d.id === destinationId)?.type === "s3"
-                ? "Gli archivi vanno nel bucket di questa destinazione, fuori da questo server."
-                : "Gli archivi restano sul disco di questo server. Per averli al sicuro anche se il server si rompe, aggiungi una destinazione S3."}
+              {(destinations.data?.destinations ?? []).find((d) => d.id === destinationId)?.type !== "local"
+                ? "Gli archivi vanno in questa destinazione, fuori da questo server."
+                : "Gli archivi restano sul disco di questo server. Per averli al sicuro anche se il server si rompe, aggiungi una destinazione fuori da qui: S3, un NAS, Google Drive."}
             </FieldHint>
           </div>
 

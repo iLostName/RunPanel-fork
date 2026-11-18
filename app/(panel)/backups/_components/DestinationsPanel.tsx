@@ -22,18 +22,10 @@ import { useMemberApi, useServerHref } from "@/lib/hooks/useNode";
 import { formatBytes } from "@/lib/format";
 import type { Located } from "@/lib/cluster-merge";
 import { DestinationForm, type DestinationDetail } from "./DestinationForm";
-import { providerLabel } from "./providers";
+import { destinationIcon, technicalLine, whereItWrites, wherePlace } from "./destinations/kinds";
 import type { DestinationView } from "@/components/backups/types";
 
 type Row = Located<DestinationView>;
-
-/** "Backblaze B2 · bucket «runpanel»", or the local disk said as what it is. */
-function whereItWrites(destination: DestinationView): string {
-  if (destination.type === "local") return "Disco di questo server";
-  const target = destination.target;
-  if (!target) return "Archivio S3";
-  return `${providerLabel(target.endpoint)} · bucket «${target.bucket}»`;
-}
 
 function usageLine(destination: DestinationView): string {
   const used = destination.usedBy ?? [];
@@ -208,7 +200,7 @@ export function DestinationsPanel({
             <>
               <p>
                 Qui ci sono {archives} archivi{deleting.archiveBytes ? ` (${formatBytes(deleting.archiveBytes)})` : ""}.
-                Restano dove sono — {deleting.type === "local" ? "sul disco di questo server" : `nel bucket «${deleting.target?.bucket ?? ""}»`} —
+                Restano dove sono — {wherePlace(deleting)} —
                 ma il pannello non li vedrà più: niente ripristino, download o pulizia automatica.
               </p>
               <p className="mt-2">Se ti servono, scaricali prima dalla Cronologia.</p>
@@ -247,7 +239,7 @@ export function DestinationsPanel({
         <EmptyState
           icon="solar:folder-linear"
           title="Nessuna destinazione"
-          description="Una destinazione è dove finiscono gli archivi: il disco di questo server o un archivio S3 fuori da qui."
+          description="Una destinazione è dove finiscono gli archivi: il disco di questo server, o fuori da qui — un archivio S3, un NAS, Google Drive."
           className="py-8"
         />
       ) : (
@@ -255,7 +247,7 @@ export function DestinationsPanel({
           {destinations.map((row) => (
             <li key={`${row.memberId}:${row.id}`}>
               <ListRow
-                icon={row.type === "local" ? "solar:server-linear" : "solar:cloud-storage-linear"}
+                icon={destinationIcon(row.type)}
                 title={row.name}
                 badges={
                   <>
@@ -270,13 +262,7 @@ export function DestinationsPanel({
                 description={
                   <>
                     {whereItWrites(row)}
-                    <Technical>
-                      {row.type === "local"
-                        ? " · data/backups/archives"
-                        : row.target
-                          ? ` · ${row.target.region} · ${row.target.endpoint}${row.target.prefix ? ` · /${row.target.prefix}` : ""}`
-                          : ""}
-                    </Technical>
+                    <Technical>{technicalLine(row)}</Technical>
                   </>
                 }
                 meta={usageLine(row)}
@@ -311,7 +297,7 @@ export function DestinationsPanel({
                               id: "default",
                               label: "Imposta come predefinita",
                               icon: "solar:star-linear",
-                              onAction: () => setDefaulting({ row, move: row.type === "s3" && elsewhere(row) > 0 }),
+                              onAction: () => setDefaulting({ row, move: row.type !== "local" && elsewhere(row) > 0 }),
                             },
                           ]
                         : []),
@@ -333,7 +319,7 @@ export function DestinationsPanel({
 
       {/* Mounted only while open, so a cancelled form starts empty next time. */}
       {adding && (
-        <DestinationForm isOpen onOpenChange={setAdding} onSaved={onChanged} canSetDefault={me.isOwner} />
+        <DestinationForm isOpen onOpenChange={setAdding} onSaved={onChanged} canSetDefault={me.isOwner} isOwner={me.isOwner} />
       )}
       {editing && (
         <DestinationForm
