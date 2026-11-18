@@ -152,6 +152,12 @@ export function SourceSection({
                 <div className="bg-accent h-full transition-[width]" style={{ width: `${progress * 100}%` }} />
               </div>
             )}
+            {project.runtime_type === "compose" && (
+              <Hint tone="warn" title="Sostituisce anche compose.yaml">
+                Un&apos;app installata dal catalogo vive nel suo compose.yaml: uno ZIP lo rimpiazza. Per cambiarne il
+                comportamento modifica le variabili, non i file.
+              </Hint>
+            )}
             <FieldHint>
               Fino a 100 MB. Sostituisce tutti i file del progetto; uno ZIP con una sola cartella dentro va bene (
               <Code>progetto.zip → progetto/package.json</Code>). Senza repository non ci sono aggiornamenti automatici.
