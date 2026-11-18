@@ -115,10 +115,15 @@ export interface Destination {
   id: string;
   type: string;
   name: string;
-  /** Move the finished archive in. Returns the handle used to find it again. */
-  put(localPath: string, fileName: string): Promise<{ ref: string; bytes: number }>;
+  /**
+   * Move the finished archive in. Returns the handle used to find it again.
+   *
+   * `signal` stops an upload or a download in flight; the remote drivers
+   * (SFTP, WebDAV, rclone) honour it, the local disk and S3 do not need to.
+   */
+  put(localPath: string, fileName: string, opts?: { signal?: AbortSignal }): Promise<{ ref: string; bytes: number }>;
   remove(ref: string): Promise<void>;
-  open(ref: string): Promise<Readable>;
+  open(ref: string, opts?: { signal?: AbortSignal }): Promise<Readable>;
   stat(ref: string): Promise<{ bytes: number; exists: boolean }>;
   /** Behind the "Verifica" button, so a broken destination is found before the night it matters. */
   test(): Promise<DestinationCheck>;
@@ -134,4 +139,9 @@ export interface DestinationCheck {
   code?: string;
   /** The provider's own words. Never a secret. */
   detail?: string | null;
+  /**
+   * What the check learned that the destination keeps: an SFTP server's host
+   * key on first contact. A form being saved sends it back with the config.
+   */
+  learned?: Record<string, string>;
 }
