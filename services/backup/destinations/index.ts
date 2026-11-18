@@ -99,6 +99,26 @@ export async function destinationUsage(): Promise<
   return usage;
 }
 
+/**
+ * A destination that exists only for one check: what the form would save,
+ * tried before it is saved, so a wrong key never becomes a stored row.
+ */
+export function transientDestination(type: string, config: Record<string, unknown>): Destination {
+  const factory = FACTORIES[type];
+  if (!factory) throw new Error(`Destinazione di tipo "${type}" non supportata`);
+  const now = new Date().toISOString();
+  const row: BackupDestinationsTable = {
+    id: "check",
+    name: "verifica",
+    type: type as BackupDestinationsTable["type"],
+    config: "",
+    is_default: 0,
+    created_at: now,
+    updated_at: now,
+  };
+  return factory(row, config);
+}
+
 export async function loadDestination(id: string): Promise<Destination> {
   const db = await getDb();
   const row = await db

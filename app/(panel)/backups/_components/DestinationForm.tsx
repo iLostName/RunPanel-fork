@@ -8,7 +8,7 @@ import { Segmented } from "@/components/ui/Segmented";
 import { SelectField } from "@/components/ui/SelectField";
 import { SettingToggle } from "@/components/ui/SettingToggle";
 import { Field } from "@/components/ui/Field";
-import { Advanced } from "@/components/ui/Technical";
+import { Advanced, Technical } from "@/components/ui/Technical";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { MSG } from "@/lib/copy";
 import { useNodeApi } from "@/lib/hooks/useNode";
@@ -37,16 +37,18 @@ interface CheckResult {
   ok?: boolean;
   warning?: boolean;
   message?: string;
+  code?: string;
+  detail?: string | null;
 }
 
 /** What a check found, as a toast: the same words after creating and after editing. */
-export function announceCheck(name: string, verdict: CheckResult, done: string) {
+function announceCheck(name: string, verdict: CheckResult, done: string) {
   if (verdict.ok && verdict.warning) {
     toast.warning(`«${name}» ${done}, con un limite`, { description: verdict.message });
   } else if (verdict.ok) {
-    toast.success(`«${name}» ${done} e verificata: si può scrivere e rileggere.`);
+    toast.success(`«${name}» ${done}: verificata, si può scrivere e rileggere.`);
   } else {
-    toast.warning(`«${name}» ${done}, ma la verifica non è riuscita`, {
+    toast.warning(`«${name}» ${done} senza una verifica riuscita`, {
       description: verdict.message ?? "Controlla endpoint, bucket e chiavi, poi premi Verifica.",
     });
   }
@@ -55,9 +57,11 @@ export function announceCheck(name: string, verdict: CheckResult, done: string) 
 /**
  * A place for backups to go: a new one, or one being edited.
  *
- * Right after saving, the destination is tested (a real file written, read
+ * Before saving, what the form holds is tried for real (a file written, read
  * back and deleted), so a wrong key shows up now and not on the night it is
- * needed — after an edit as much as after creating it.
+ * needed — after an edit as much as when creating. A failed check saves
+ * nothing and says why; "Salva comunque" is there for a bucket that is
+ * deliberately unreachable from here today.
  *
  * Editing never shows the stored secret: the field stays empty, and empty
  * means "keep the one you have". The type cannot change, because an archive's
@@ -111,6 +115,8 @@ export function DestinationForm({
     return stored.forcePathStyle === PROVIDERS[initialProvider].pathStyle ? null : stored.forcePathStyle ? "path" : "virtual";
   });
   const [makeDefault, setMakeDefault] = useState(canSetDefault);
+  /** The last check that failed, and what it was run on. */
+  const [failedCheck, setFailedCheck] = useState<{ signature: string; verdict: CheckResult } | null>(null);
 
   const endpoint = endpointTyped ?? provider.endpoint(region.trim() || provider.region);
   const pathStyle = pathStyleTyped ?? (provider.pathStyle ? "path" : "virtual");
@@ -157,17 +163,42 @@ export function DestinationForm({
     forcePathStyle: pathStyle === "path",
   });
 
-  async function check(id: string): Promise<CheckResult> {
+  /** What was checked, so a failure stops counting as soon as a field changes. */
+  const signature = JSON.stringify([kind, kind === "s3" ? s3Config() : null]);
+
+  /** Tried with exactly what the form holds, before anything is stored. */
+  async function precheck(): Promise<CheckResult> {
     try {
-      const res = await fetch(api(`/api/backups/destinations/${id}`), { method: "POST" });
-      return (await res.json()) as CheckResult;
+      const res = await fetch(api("/api/backups/destinations/check"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: kind,
+          config: kind === "s3" ? s3Config() : {},
+          ...(editing ? { destinationId: editing.id } : {}),
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      return res.ok ? (body as CheckResult) : { ok: false, message: body.error ?? "Verifica non riuscita" };
     } catch {
-      // The destination is saved; the check can be repeated from the list.
-      return {};
+      return { ok: false, message: MSG.unreachable };
     }
   }
 
   async function submit() {
+    // A wrong key or bucket is found now, by whoever just typed it, rather
+    // than by the first scheduled night — and before it is saved, so a typo
+    // never becomes a destination the nightly can pick.
+    const saveAnyway = failedCheck?.signature === signature;
+    let verdict: CheckResult = failedCheck?.verdict ?? {};
+    if (!saveAnyway) {
+      verdict = await precheck();
+      if (!verdict.ok) {
+        setFailedCheck({ signature, verdict });
+        throw new Error("check failed");
+      }
+    }
+
     const res = editing
       ? await fetch(api(`/api/backups/destinations/${editing.id}`), {
           method: "PATCH",
@@ -191,24 +222,37 @@ export function DestinationForm({
       throw new Error(body.error ?? "destination failed");
     }
 
-    // Tested straight away: a wrong key or bucket is found now, by whoever
-    // just typed it, rather than by the first scheduled night.
-    const id = editing?.id ?? body.id;
-    announceCheck(name.trim(), await check(id), editing ? "salvata" : "aggiunta");
-
+    announceCheck(name.trim(), verdict, editing ? "salvata" : "aggiunta");
     setSecretAccessKey("");
     onSaved();
   }
+
+  const showFailure = failedCheck?.signature === signature ? failedCheck.verdict : null;
 
   return (
     <FormDialog
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       title={editing ? `Modifica «${editing.name}»` : "Nuova destinazione"}
-      submitLabel={editing ? "Salva e verifica" : "Aggiungi e verifica"}
+      submitLabel={showFailure ? "Salva comunque" : editing ? "Verifica e salva" : "Verifica e aggiungi"}
       isSubmitDisabled={incomplete || Boolean(kind === "s3" && endpointError)}
       onSubmit={submit}
     >
+      {showFailure && (
+        <Hint tone="warn" title="La verifica non è riuscita: niente è stato salvato">
+          <p>{showFailure.message}</p>
+          <Technical>
+            {showFailure.detail && (
+              <p className="mt-1 font-mono text-meta">
+                {showFailure.code ? `${showFailure.code} · ` : ""}
+                {showFailure.detail}
+              </p>
+            )}
+          </Technical>
+          <p className="mt-1">Correggi e riprova, oppure salva comunque e verifica più tardi dalla lista.</p>
+        </Hint>
+      )}
+
       {!editing && (
         <Segmented
           label="Tipo di destinazione"
