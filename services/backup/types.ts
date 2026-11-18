@@ -115,13 +115,33 @@ export interface Destination {
   id: string;
   type: string;
   name: string;
-  /** Move the finished archive in. Returns the handle used to find it again. */
+  /**
+   * Store a copy of the finished archive. Returns the handle used to find it
+   * again.
+   *
+   * The file at `localPath` must be left where it is: a policy with several
+   * destinations hands the same staged archive to each of them in turn, and
+   * the runner removes it once they have all finished.
+   */
   put(localPath: string, fileName: string): Promise<{ ref: string; bytes: number }>;
   remove(ref: string): Promise<void>;
   open(ref: string): Promise<Readable>;
   stat(ref: string): Promise<{ bytes: number; exists: boolean }>;
   /** Behind the "Verifica" button, so a broken destination is found before the night it matters. */
   test(): Promise<DestinationCheck>;
+  /**
+   * Where a stored archive is on this server's disk, for a destination that
+   * keeps its archives here: a restore or an integrity check reads it in place
+   * instead of downloading it, and a copy on this disk is the first one read.
+   * Absent for anything reached over the network.
+   */
+  localPath?(ref: string): string;
+  /**
+   * Where it writes, as a string two destinations share only when they write
+   * to the same place: a policy refuses two copies there. Absent when it
+   * cannot be told.
+   */
+  location?(): string;
 }
 
 /** What "Verifica" found. `message` is plain Italian; `code` and `detail` are for expert mode. */
