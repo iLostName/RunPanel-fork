@@ -139,7 +139,7 @@ async function createDialect(): Promise<Dialect> {
   return new PostgresDialect({ pool });
 }
 
-async function runMigrations(db: Kysely<Database>): Promise<void> {
+async function runMigrations(db: Kysely<Database>, { quiet = false } = {}): Promise<void> {
   // Before the Migrator reads its table: a recorded name it no longer knows
   // stops it from migrating at all. See `lib/db/renamed-migrations.ts`.
   const forgotten = await forgetRenamedMigrations(db);
@@ -162,7 +162,7 @@ async function runMigrations(db: Kysely<Database>): Promise<void> {
   for (const result of results ?? []) {
     if (result.status === "Error") {
       console.error(`[RunPanel] Migration failed: ${result.migrationName}`);
-    } else if (result.status === "Success") {
+    } else if (result.status === "Success" && !quiet) {
       console.log(`[RunPanel] Applied migration ${result.migrationName}`);
     }
   }
@@ -265,7 +265,42 @@ async function recoverFromCrash(db: Kysely<Database>): Promise<void> {
   }
 }
 
+/**
+ * True inside `next build`, which sets this before it renders any page.
+ *
+ * The build renders every page once to learn which ones are static, and the
+ * panel's pages reach the store while doing it. That build runs next to the
+ * panel that is serving — the self-update builds the new version while the
+ * old one is still up — so with the configured store it migrated the live
+ * database to a schema the running version does not know (if the update then
+ * fails and rolls back, the old version can no longer boot: Kysely refuses a
+ * recorded migration it has no file for), ran crash recovery over a deploy
+ * started in the meantime and marked it failed, and could move a legacy store
+ * aside. None of that belongs to a build.
+ */
+function isBuildPhase(): boolean {
+  return process.env.NEXT_PHASE === "phase-production-build";
+}
+
+/**
+ * The store while building: an empty SQLite in memory, whatever the panel is
+ * configured with — a Postgres install must not be reached by its build either.
+ * Migrated, so a page that queries it while being probed gets empty results
+ * instead of "no such table"; the pages that matter read cookies and are
+ * rendered per request anyway. Each build worker gets its own, and nothing it
+ * holds outlives the build.
+ */
+async function createBuildDb(): Promise<Kysely<Database>> {
+  const { default: SQLite } = await import("better-sqlite3");
+  const { SqliteDialect } = await import("kysely");
+  const db = new Kysely<Database>({ dialect: new SqliteDialect({ database: new SQLite(":memory:") }) });
+  await runMigrations(db, { quiet: true });
+  return db;
+}
+
 async function createDb(): Promise<Kysely<Database>> {
+  if (isBuildPhase()) return createBuildDb();
+
   const dialect = await createDialect();
   const db = new Kysely<Database>({ dialect });
 
