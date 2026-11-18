@@ -323,7 +323,7 @@ export default function LoginPage() {
                     <Label>Token di collegamento</Label>
                     <Input className="font-mono text-sm" autoComplete="off" />
                   </TextField>
-                  <FieldHint>Lo genera il pannello in Sistema › Server › Collega un server. Vale un&apos;ora.</FieldHint>
+                  <FieldHint>Lo genera il pannello in Impostazioni › Server collegati › Collega un server. Vale un&apos;ora.</FieldHint>
                 </div>
                 <TextField value={serverName} onChange={setServerName}>
                   <Label>Nome di questo server</Label>

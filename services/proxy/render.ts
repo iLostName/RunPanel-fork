@@ -650,7 +650,7 @@ async function cleanup() {
 }
 
 try {
-  if (!token) throw new Error("manca il token Cloudflare: ricollegalo da Sistema › Domini.");
+  if (!token) throw new Error("manca il token Cloudflare: ricollegalo dalla pagina Domini.");
   if (!domain || !value) throw new Error("certbot non ha passato il nome o il valore da pubblicare.");
   if (process.argv[2] === "auth") await auth();
   else if (process.argv[2] === "cleanup") await cleanup();

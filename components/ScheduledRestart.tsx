@@ -184,7 +184,7 @@ export function ScheduledRestart({
             Cinque campi: minuto, ora, giorno del mese, mese, giorno della settimana. L&apos;ora è quella
             del fuso scelto in{" "}
             <Link href={href("/settings")} className="text-accent hover:underline">
-              Impostazioni › Pannello
+              Impostazioni › Generale
             </Link>
             .
           </FieldHint>

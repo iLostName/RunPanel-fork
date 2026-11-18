@@ -510,7 +510,7 @@ async function issue(hostId: string): Promise<void> {
   if (challenge === "cloudflare" && !env) {
     await setHost(hostId, {
       status: "error",
-      last_error: "Il dominio è su Cloudflare, ma il pannello non ha più il token: ricollegalo da Sistema › Domini.",
+      last_error: "Il dominio è su Cloudflare, ma il pannello non ha più il token: ricollegalo dalla pagina Domini.",
     });
     return;
   }

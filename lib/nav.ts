@@ -14,10 +14,13 @@ import type { GlobalPermission } from "./authz";
  * is an identifier rather than something the reader is meant to read.
  *
  * Two levels. `NAV_PAGES` is every page, which is what the palette searches and
- * what the breadcrumb names. `NAV_ITEMS` is the sidebar: eight entries, three of
- * which (Sistema, Accessi, Impostazioni) stand for a group of pages shown as
- * tabs (`NAV_SECTIONS`). The sidebar had grown to thirteen flat entries, most of
- * them opened once a month, and the four used daily were lost among them.
+ * what the breadcrumb names. `NAV_ITEMS` is the sidebar: the things people work
+ * on every day first (projects, databases, domains, backups), then two entries
+ * that stand for a group of pages shown as tabs (`NAV_SECTIONS`): Salute, for
+ * how the machine is doing, and Team, for who can do what. Settings sit at the
+ * bottom. Domains used to be the fourth tab of "Sistema", although every
+ * project needs one; health was split between a top-level Monitor and a
+ * Diagnostica tab. Every URL stayed where it was: only the grouping changed.
  */
 
 /** A permission, or a list of which any one is enough. */
@@ -77,7 +80,7 @@ const PAGE = {
     keys: "g p",
   },
   services: {
-    label: "Servizi",
+    label: "Database",
     href: "/services",
     icon: "solar:database-linear",
     iconActive: "solar:database-bold-duotone",
@@ -120,14 +123,14 @@ const PAGE = {
     iconActive: "solar:refresh-circle-bold-duotone",
   },
   storage: {
-    label: "Pulizia Docker",
+    label: "Spazio disco",
     href: "/storage",
     permission: "storage",
     icon: "solar:ssd-square-linear",
     iconActive: "solar:ssd-square-bold-duotone",
   },
   servers: {
-    label: "Server",
+    label: "Server collegati",
     href: "/servers",
     permission: "nodes",
     icon: "solar:server-2-linear",
@@ -161,7 +164,7 @@ const PAGE = {
     iconActive: "solar:user-circle-bold-duotone",
   },
   settings: {
-    label: "Pannello",
+    label: "Generale",
     href: "/settings",
     // The owner sees all of it; anyone else only the parts they may manage.
     permission: ["notifications", "registries"],
@@ -183,19 +186,26 @@ const PAGE = {
   },
 } satisfies Record<string, NavPage>;
 
-export type NavSectionId = "system" | "access" | "settings";
+export type NavSectionId = "health" | "team" | "settings";
 
 /**
  * The groups of pages that share a sidebar entry. Each page keeps its own URL;
  * the route group's layout draws the tabs above it (`SectionTabs`).
  */
-export const NAV_SECTIONS: Record<NavSectionId, { label: string; tabs: NavPage[] }> = {
-  system: {
-    label: "Sistema",
-    tabs: [PAGE.diagnostics, PAGE.autostart, PAGE.updates, PAGE.domains, PAGE.storage, PAGE.servers],
+export const NAV_SECTIONS: Record<NavSectionId, { label: string; href: string; tabs: NavPage[] }> = {
+  health: {
+    label: "Salute",
+    href: "/health",
+    tabs: [PAGE.monitor, PAGE.diagnostics, PAGE.autostart, PAGE.storage],
   },
-  access: { label: "Accessi", tabs: [PAGE.users, PAGE.audit] },
-  settings: { label: "Impostazioni", tabs: [PAGE.account, PAGE.settings, PAGE.github, PAGE.mcp] },
+  team: { label: "Team", href: "/team", tabs: [PAGE.users, PAGE.audit] },
+  // "Generale" first: the owner opening Impostazioni means the panel's settings;
+  // anyone without them lands on their own Account, the next tab.
+  settings: {
+    label: "Impostazioni",
+    href: "/preferences",
+    tabs: [PAGE.settings, PAGE.account, PAGE.github, PAGE.mcp, PAGE.updates, PAGE.servers],
+  },
 };
 
 /** Every permission any tab of a section needs; any one shows the entry. */
@@ -217,29 +227,29 @@ export const NAV_ITEMS: NavItem[] = [
   { ...PAGE.home, group: "main" },
   { ...PAGE.projects, group: "infra" },
   { ...PAGE.services, group: "infra" },
+  { ...PAGE.domains, group: "infra" },
   { ...PAGE.backups, group: "infra" },
-  { ...PAGE.monitor, group: "ops" },
   {
-    label: "Sistema",
-    href: "/system",
-    icon: "solar:server-square-linear",
-    iconActive: "solar:server-square-bold-duotone",
+    label: "Salute",
+    href: "/health",
+    icon: "solar:pulse-2-linear",
+    iconActive: "solar:pulse-2-bold-duotone",
     group: "ops",
-    owns: sectionOwns("system"),
-    permission: sectionPermission("system"),
+    owns: sectionOwns("health"),
+    permission: sectionPermission("health"),
   },
   {
-    label: "Accessi",
-    href: "/access",
-    icon: "solar:shield-user-linear",
-    iconActive: "solar:shield-user-bold-duotone",
+    label: "Team",
+    href: "/team",
+    icon: "solar:users-group-two-rounded-linear",
+    iconActive: "solar:users-group-two-rounded-bold-duotone",
     group: "ops",
-    owns: sectionOwns("access"),
-    permission: sectionPermission("access"),
+    owns: sectionOwns("team"),
+    permission: sectionPermission("team"),
   },
   {
     label: "Impostazioni",
-    href: "/account",
+    href: "/preferences",
     icon: "solar:settings-linear",
     iconActive: "solar:settings-bold-duotone",
     group: "footer",
@@ -255,7 +265,7 @@ export const NAV_ITEMS: NavItem[] = [
 export const NAV_GROUPS: { id: NavGroupId; label?: string }[] = [
   { id: "main" },
   { id: "infra", label: "Infrastruttura" },
-  { id: "ops", label: "Gestione" },
+  { id: "ops", label: "Amministrazione" },
 ];
 
 /** `allowed` answers for the signed-in user; see `useAllowedNav` in lib/hooks/useMe. */

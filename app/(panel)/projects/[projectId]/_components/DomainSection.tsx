@@ -173,10 +173,10 @@ export function DomainSection({ projectId }: { projectId: string }) {
   const proxyServes = data ? SERVES.has(data.proxy.state) : true;
   const domainsLink = data?.canManageDomains ? (
     <Link href={href("/domains")} className="text-accent hover:underline">
-      Sistema › Domini
+      Domini
     </Link>
   ) : (
-    "Sistema › Domini (serve il permesso Accesso all'host)"
+    "Domini (serve il permesso Accesso all'host)"
   );
 
   return (

@@ -177,7 +177,7 @@ export default function ServicesPage() {
   return (
     <>
       <PageHeader
-        title="Servizi"
+        title="Database"
         description="Database e cache provisionati da RunPanel"
         actions={
           <>

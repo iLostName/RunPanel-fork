@@ -4,7 +4,7 @@ import { SectionTabs } from "@/components/SectionTabs";
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <>
-      <SectionTabs section="access" />
+      <SectionTabs section="team" />
       {children}
     </>
   );

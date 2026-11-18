@@ -77,7 +77,7 @@ export function ServerCardView({ server: s, active, onSelect }: { server: Server
         </>
       ) : s.outdated ? (
         <p className="text-muted mt-2 text-xs">
-          Ha una versione più vecchia di questo pannello: aggiornalo da Sistema › Aggiornamenti per vederne CPU, disco e progetti.
+          Ha una versione più vecchia di questo pannello: aggiornalo da Impostazioni › Aggiornamenti per vederne CPU, disco e progetti.
         </p>
       ) : (
         <p className="text-danger mt-2 text-xs" title={s.error ?? undefined}>

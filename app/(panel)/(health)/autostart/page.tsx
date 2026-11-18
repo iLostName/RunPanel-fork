@@ -463,7 +463,7 @@ export default function AutostartPage() {
             />
           ) : (
             <>
-              <Group title="Servizi" entries={services} onEdit={edit} />
+              <Group title="Database" entries={services} onEdit={edit} />
               <Group title="Progetti" entries={projects} onEdit={edit} />
             </>
           )}

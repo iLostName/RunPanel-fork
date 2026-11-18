@@ -131,7 +131,7 @@ const ACTION_LABEL: Record<string, string> = {
   "registries.update": "Registry salvato",
   "registries.delete": "Registry eliminato",
   "settings.update": "Impostazioni del pannello",
-  "storage.clean": "Pulizia Docker",
+  "storage.clean": "Spazio disco liberato",
   "updates.apply": "Aggiornamento del pannello",
 };
 

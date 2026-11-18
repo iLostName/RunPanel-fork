@@ -160,7 +160,7 @@ export default function StoragePage() {
   if (loading && !data) {
     return (
       <>
-        <PageHeader title="Pulizia Docker" description="Immagini, volumi e cache che RunPanel possiede su questo host" />
+        <PageHeader title="Spazio disco" description="Immagini, volumi e cache che RunPanel possiede su questo host" />
         <div className="space-y-4">
           <SkeletonBlock className="h-40" />
           <SkeletonBlock className="h-28" />
@@ -177,7 +177,7 @@ export default function StoragePage() {
   if (!data && loadError) {
     return (
       <>
-        <PageHeader title="Pulizia Docker" description="Immagini, volumi e cache che RunPanel possiede su questo host" />
+        <PageHeader title="Spazio disco" description="Immagini, volumi e cache che RunPanel possiede su questo host" />
         <LoadError what="lo stato di Docker" error={loadError} onRetry={() => void load()} />
       </>
     );
@@ -186,7 +186,7 @@ export default function StoragePage() {
   if (!data?.dockerAvailable) {
     return (
       <>
-        <PageHeader title="Pulizia Docker" description="Immagini, volumi e cache che RunPanel possiede su questo host" />
+        <PageHeader title="Spazio disco" description="Immagini, volumi e cache che RunPanel possiede su questo host" />
         <Panel>
           <EmptyState
             icon="solar:danger-triangle-linear"
@@ -207,7 +207,7 @@ export default function StoragePage() {
   return (
     <>
       <PageHeader
-        title="Pulizia Docker"
+        title="Spazio disco"
         description="Immagini, volumi e cache che RunPanel possiede su questo host"
         actions={
           <Button
