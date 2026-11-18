@@ -46,7 +46,10 @@ const NIGHTLY_PRESET = {
   targets: [
     { kind: "all-services" as const },
     { kind: "panel" as const },
-    { kind: "all-projects" as const, include: ["config" as const] },
+    // The files the apps write, as well as how they are configured: the project
+    // page used to warn that no schedule held its volumes, right after this
+    // one-click preset had been taken as "everything".
+    { kind: "all-projects" as const, include: ["config" as const, "volumes" as const] },
   ],
   retentionCount: 7,
 };
@@ -149,7 +152,10 @@ export default function BackupsPage() {
   }
 
   async function createPreset() {
-    const destinationId = destinationList.find((d) => d.memberId === target)?.id;
+    // The destination marked as default on that server, not whichever comes first:
+    // the local disk is created first, so an S3 bucket added later was never used.
+    const onTarget = destinationList.filter((d) => d.memberId === target);
+    const destinationId = (onTarget.find((d) => d.isDefault) ?? onTarget[0])?.id;
     if (!destinationId) {
       toast.error("Nessuna destinazione configurata");
       return;
@@ -352,6 +358,7 @@ export default function BackupsPage() {
                       {policy.schedule}
                       {policy.timezone ? ` · ${policy.timezone}` : ""} ·{" "}
                       {policy.targets.map((t) => describeTarget(t, catalogFor(policy.memberId))).join(" · ")}
+                      {policy.destinationName ? ` → ${policy.destinationName}` : ""}
                     </p>
                   </div>
 
@@ -545,10 +552,10 @@ export default function BackupsPage() {
         />
 
         <Hint tone="warn" title="Gli archivi contengono segreti">
-          Le variabili d&apos;ambiente e le credenziali dei servizi vengono salvate cifrate con la
-          chiave di questo pannello, e i file stanno in <code>data/backups</code> con permessi 0600.
-          Un archivio portato altrove resta illeggibile senza quella chiave, a meno che tu non abbia
-          scelto di includerla.
+          Le variabili e le credenziali dei database vengono salvate cifrate con la chiave di questo
+          pannello: un archivio portato altrove resta illeggibile senza quella chiave, a meno che tu
+          non abbia scelto di includerla. Sul disco locale gli archivi stanno in{" "}
+          <code>data/backups</code>, leggibili solo dal pannello.
         </Hint>
       </div>
 

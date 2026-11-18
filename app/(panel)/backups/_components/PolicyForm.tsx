@@ -78,7 +78,8 @@ function initialSelection(policy?: PolicyView): Selection {
     panel: true,
     projectScope: "all",
     projects: {},
-    include: ["config"],
+    // The files the apps write as well: see the nightly preset on the Backup page.
+    include: ["config", "volumes"],
   };
   if (!policy) return empty;
 
@@ -187,7 +188,12 @@ export function PolicyForm({ policy }: Props) {
 
   // Falls back to the first destination as soon as the list arrives, without an
   // effect writing state back into the component that just rendered.
-  const destinationId = chosenDestination || destinations.data?.destinations[0]?.id || "";
+  // The default destination unless another is picked, not whichever came first.
+  const destinationId =
+    chosenDestination ||
+    destinations.data?.destinations.find((d) => d.isDefault)?.id ||
+    destinations.data?.destinations[0]?.id ||
+    "";
 
   // The preview comes from the server's parser, not from a second guess written
   // in the browser — otherwise the form can accept what the scheduler rejects.
@@ -355,7 +361,11 @@ export function PolicyForm({ policy }: Props) {
                 label: destination.name,
               }))}
             />
-            <FieldHint>Gli archivi restano su questa macchina, in data/backups.</FieldHint>
+            <FieldHint>
+              {(destinations.data?.destinations ?? []).find((d) => d.id === destinationId)?.type === "s3"
+                ? "Gli archivi vanno nel bucket S3 di questa destinazione, fuori da questa macchina."
+                : "Gli archivi restano su questa macchina, in data/backups. Per averli al sicuro anche se il disco si rompe, aggiungi una destinazione S3."}
+            </FieldHint>
           </div>
 
           {/* Only when creating: an existing schedule belongs to the server it was made on. */}
