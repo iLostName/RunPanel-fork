@@ -205,6 +205,26 @@ export async function run({ base, repoRoot }) {
     r.check("aggregated projects include B's project, tagged with B", aggregated.some((p) => p.id === projectId && p.memberId === memberB.id && p.memberName === "nodo-b"), JSON.stringify(aggregated).slice(0, 300));
     r.check("and report how each server answered", res.body.members?.length === 2 && res.body.members.every((m) => m.ok), JSON.stringify(res.body.members));
 
+    // --- the public status page, with a project of B ----------------------------------
+    // A asks B for it, signed and for no user, and puts it under the name it was given.
+    res = await a.call("/api/status-page", {
+      method: "PUT",
+      body: JSON.stringify({ enabled: true, slug: "stato-cluster", projects: [{ server: memberB.id, projectId, name: "Servizio su B" }] }),
+    });
+    r.check("A's status page takes a project of B", res.status === 200 && res.body.projects?.[0]?.server === memberB.id, `${res.status} ${JSON.stringify(res.body).slice(0, 200)}`);
+    const statusPage = await fetch(`${base}/status/stato-cluster`);
+    const statusHtml = await statusPage.text();
+    r.check(
+      "and shows it with B's answer: a project that is not running does not answer",
+      statusPage.status === 200 && statusHtml.includes("Servizio su B") && statusHtml.includes("Non risponde") && !statusHtml.includes("Nessun dato degli ultimi"),
+      String(statusPage.status)
+    );
+    r.check("never under B's own name for it, nor its id", !statusHtml.includes("Rinominato") && !statusHtml.includes(projectId));
+    res = await a.call(`/api/nodes/${memberB.id}/cluster/status-page?ids=${projectId}`);
+    r.check("B's lookup refuses a request forwarded for a user", res.status >= 400, `${res.status} ${JSON.stringify(res.body).slice(0, 120)}`);
+    res = await a.call("/api/status-page", { method: "PUT", body: JSON.stringify({ enabled: false, projects: [] }) });
+    r.check("and the page is switched off again", res.status === 200 && res.body.enabled === false, String(res.status));
+
     res = await a.call("/api/cluster/services");
     r.check("aggregated services answer", res.status === 200 && Array.isArray(res.body.items), String(res.status));
     res = await a.call("/api/cluster/folders");
