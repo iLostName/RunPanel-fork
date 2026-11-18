@@ -15,6 +15,7 @@ import { ListRow, RowMenu } from "@/components/ui/ListRow";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useMe } from "@/lib/hooks/useMe";
 import { useResource } from "@/lib/hooks/useResource";
+import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { formatBytes, formatWhen } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -90,6 +91,8 @@ export default function UploadRestorePage() {
   const api = useNodeApi();
   const href = useServerHref();
   const me = useMe();
+  // The trail would otherwise say "upload".
+  useCrumbLabel("upload", "Da un archivio");
 
   const list = useResource<{ uploads: UploadRecord[] }>(me.isOwner ? api("/api/backups/uploads") : null, {
     intervalMs: 0,
