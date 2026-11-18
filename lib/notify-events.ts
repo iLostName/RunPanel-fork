@@ -155,7 +155,7 @@ export const NOTIFY_GROUPS: NotifyEventGroup[] = [
         key: "task.failed",
         label: "Un'attività pianificata non riesce",
         description:
-          "Quando un'esecuzione a orario fallisce o supera il tempo massimo, e di nuovo quando torna a riuscire. Finché continua a fallire te lo ricorda al massimo ogni 12 ore. Le esecuzioni saltate e quelle lanciate a mano con «Esegui ora» non mandano niente.",
+          "Quando un'esecuzione a orario fallisce o supera il tempo massimo, e di nuovo quando torna a riuscire. Finché continua a fallire te lo ricorda al massimo ogni 12 ore. Le esecuzioni saltate non mandano niente, e nemmeno un «Esegui ora» che fallisce: lo stai guardando.",
       },
     ],
   },
