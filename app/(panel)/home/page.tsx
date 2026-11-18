@@ -74,6 +74,8 @@ interface Project {
   deploy_count: number;
   folder_id: string | null;
   services: Service[];
+  /** Where it answers; absent from servers that do not send it yet. */
+  hosts?: { hostname: string; url: string }[];
   permission?: Access;
   /** A last known copy: the server holding it did not answer. */
   unreachable?: boolean;
@@ -240,7 +242,14 @@ const ProjectCard = memo(function ProjectCard({
             <div className="mt-1 flex min-w-0 items-center gap-2">
               {showServer && <ServerBadge memberId={project.memberId} />}
               <p className="text-muted truncate text-xs">
-                {runtimeLabel(project.runtime_type)} · {deployCountLabel(project.deploy_count)}
+                {/* The address first, when there is one: it is what people come to open. */}
+                {project.hosts?.[0] ? (
+                  <span className="text-foreground/80 font-mono">{project.hosts[0].hostname}</span>
+                ) : (
+                  runtimeLabel(project.runtime_type)
+                )}
+                {" · "}
+                {deployCountLabel(project.deploy_count)}
                 {project.port ? (
                   <Technical>
                     <span className="font-mono"> · :{project.port}</span>
