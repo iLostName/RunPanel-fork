@@ -49,6 +49,8 @@ An address is added from the project page: the panel shows the DNS record to cre
 
 History of CPU, memory, disk and network for the server, projects and databases, with 1-hour, 24-hour and 7-day charts; alerts when CPU or RAM stay above 90% for 5 minutes; a check every minute that apps answer, with uptime and incidents. The Monitor sorts, and shows Compose containers and the ones the panel does not manage.
 
+**Public status page**, optional and off by default: an address to give the people using the apps, which opens without signing in and says whether the apps you choose answer, with uptime over the last 24 hours and 30 days and the recent outages. It shows only the title, the message and the names you write, projects of linked servers included; while off, its address answers "Pagina non trovata" (page not found). Set it up in **Impostazioni › Generale**. See [Operations](operations.md#public-status-page).
+
 ## Backups
 
 - The one-click nightly backup includes project volumes and uses the default destination.
