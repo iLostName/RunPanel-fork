@@ -34,6 +34,7 @@ import * as metricSamples from "./033-metric-samples";
 import * as uptime from "./034-uptime";
 import * as twoFactor from "./035-two-factor";
 import * as hostRedirect from "./037-host-redirect";
+import * as panelHost from "./040-panel-host";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -78,6 +79,7 @@ export const migrations: Record<string, Migration> = {
   "034-uptime": uptime,
   "035-two-factor": twoFactor,
   "037-host-redirect": hostRedirect,
+  "040-panel-host": panelHost,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

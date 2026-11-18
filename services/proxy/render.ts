@@ -308,6 +308,156 @@ export function renderSite(input: SiteInput): string {
 }
 
 /**
+ * The panel's own name: what the owner opens instead of `http://<ip>:3000`.
+ *
+ * The panel keeps listening on its port as before — this is a second way in,
+ * never the only one — so a block nginx refuses, a certificate that lapses or
+ * nginx itself being down can cost the name, never the panel.
+ */
+export interface PanelSiteInput {
+  hostname: string;
+  /** The panel's own port, on loopback. */
+  upstreamPort: number;
+  /** Present once certbot has issued one; until then port 80 only says it is on its way. */
+  certificate: { fullchain: string; privkey: string } | null;
+  checkToken: string;
+  ipv6: boolean;
+  http2: Http2Syntax;
+  /** The name is on the Cloudflare account: the visitor is read from `CF-Connecting-IP`. */
+  cloudflare: boolean;
+  /**
+   * The owner made this the panel's public address: from then on browsers are
+   * told to use HTTPS only (HSTS). Until then turning the name off must leave
+   * every browser exactly as it was, so no HSTS at all.
+   */
+  hsts: boolean;
+}
+
+/** Between two reads of a long-lived answer: the project page's events, a terminal, a log that is followed. */
+export const PANEL_READ_TIMEOUT = "3600s";
+/** The panel's own two years, without `includeSubDomains` — see `renderPanelSite`. */
+export const PANEL_HSTS = "max-age=63072000";
+/** What port 80 answers before the certificate exists. ASCII and no `$`: nginx would read one as a variable. */
+const PANEL_WAITING = "RunPanel: il certificato HTTPS di questo indirizzo sta arrivando. Nel frattempo apri il pannello dal suo solito indirizzo.";
+
+/**
+ * The panel's name, on the same two ports as a project's and with the same
+ * challenge and routing check, but in front of the panel. Where it differs:
+ *
+ *   - No plain HTTP to the panel, ever. A project is served over HTTP while it
+ *     waits for its certificate; the panel already has a plain-HTTP way in, its
+ *     port, and a second one on a public name would only be one more place a
+ *     password crosses the internet in clear. Port 80 answers the challenge and
+ *     the check, and then either says the certificate is coming or redirects.
+ *   - Long-lived and unbuffered, both ways. The project page streams its events
+ *     (SSE), a terminal stays open, an upload goes straight through instead of
+ *     waiting in a temporary file: an hour between reads where a project gets
+ *     five minutes, and nginx's gzip off so it never holds an event back.
+ *   - No body limit of nginx's own: each route of the panel enforces its own
+ *     (100 MB for an archive), and a second, different one here would only turn
+ *     an upload the panel accepts into a 413 it never saw.
+ *   - The forwarded headers are nginx's alone. `X-Forwarded-For` is set to the
+ *     peer, not appended to what the visitor sent, so through this block nobody
+ *     can hand the panel an address of their choosing; `Host`,
+ *     `X-Forwarded-Host` and `X-Forwarded-Proto` replace the visitor's too.
+ *     Whether the panel believes `X-Forwarded-For` at all is still
+ *     `RUNPANEL_TRUSTED_PROXY_HOPS`: its port stays open, and there the header
+ *     is whatever the client typed.
+ *   - HSTS is set here, not passed on. The panel's own header carries
+ *     `includeSubDomains`, which on a name like `esempio.it` would pin every
+ *     project of the domain — some of them still waiting for a certificate —
+ *     to HTTPS for two years. And it is only sent once the owner adopted the
+ *     name (`hsts`).
+ *   - The check answers on 443 too, readable from any origin: the browser of
+ *     whoever is setting it up proves the name reaches this server with a valid
+ *     certificate before the panel offers to make it its address. The token is
+ *     public anyway — port 80 hands it to anyone who asks.
+ */
+export function renderPanelSite(input: PanelSiteInput): string {
+  assertSite({ ...input, allow: null, auth: null, redirect: null });
+  const v6 = (line: string) => (input.ipv6 ? [line] : []);
+  const http2Listen = input.http2 === "listen" ? " http2" : "";
+  const realIp = input.cloudflare
+    ? [...CLOUDFLARE_RANGES.map((range) => `    set_real_ip_from ${range};`), "    real_ip_header CF-Connecting-IP;", ""]
+    : [];
+  const check = (readableAnywhere: boolean) => [
+    `    location = ${CHECK_PATH} {`,
+    '        default_type "text/plain";',
+    ...(readableAnywhere
+      ? ['        add_header Access-Control-Allow-Origin "*" always;', '        add_header Cache-Control "no-store" always;']
+      : []),
+    `        return 200 "${input.checkToken}";`,
+    "    }",
+  ];
+
+  const http = [
+    "server {",
+    "    listen 80;",
+    ...v6("    listen [::]:80;"),
+    `    server_name ${input.hostname};`,
+    "",
+    ...realIp,
+    "    location ^~ /.well-known/acme-challenge/ {",
+    `        root ${WEBROOT_DIR};`,
+    '        default_type "text/plain";',
+    "        try_files $uri =404;",
+    "    }",
+    "",
+    ...check(false),
+    "",
+    "    location / {",
+    ...(input.certificate
+      ? ["        return 301 https://$host$request_uri;"]
+      : ['        default_type "text/plain";', `        return 503 "${PANEL_WAITING}";`]),
+    "    }",
+    "}",
+  ];
+
+  const https = input.certificate
+    ? [
+        "",
+        "server {",
+        `    listen 443 ssl${http2Listen};`,
+        ...v6(`    listen [::]:443 ssl${http2Listen};`),
+        ...(input.http2 === "directive" ? ["    http2 on;"] : []),
+        `    server_name ${input.hostname};`,
+        "",
+        ...realIp,
+        `    ssl_certificate ${input.certificate.fullchain};`,
+        `    ssl_certificate_key ${input.certificate.privkey};`,
+        "    ssl_protocols TLSv1.2 TLSv1.3;",
+        "",
+        ...check(true),
+        "",
+        "    location / {",
+        `        proxy_pass http://127.0.0.1:${input.upstreamPort};`,
+        "        proxy_http_version 1.1;",
+        "        proxy_set_header Host $host;",
+        "        proxy_set_header X-Real-IP $remote_addr;",
+        "        proxy_set_header X-Forwarded-For $remote_addr;",
+        "        proxy_set_header X-Forwarded-Proto $scheme;",
+        "        proxy_set_header X-Forwarded-Host $host;",
+        "        proxy_set_header Upgrade $http_upgrade;",
+        "        proxy_set_header Connection $runpanel_connection_upgrade;",
+        "        proxy_buffering off;",
+        "        proxy_request_buffering off;",
+        "        gzip off;",
+        `        proxy_read_timeout ${PANEL_READ_TIMEOUT};`,
+        `        proxy_send_timeout ${PANEL_READ_TIMEOUT};`,
+        "        client_max_body_size 0;",
+        "        proxy_hide_header Strict-Transport-Security;",
+        ...(input.hsts ? [`        add_header Strict-Transport-Security "${PANEL_HSTS}" always;`] : []),
+        "    }",
+        "}",
+      ]
+    : [];
+
+  return [MANAGED, `# The panel itself: its own port ${input.upstreamPort} stays open, this is a second way in.`, ...http, ...https, ""].join(
+    "\n"
+  );
+}
+
+/**
  * The one file RunPanel adds to nginx's own configuration.
  *
  * The map every block uses lives here, ahead of the include, rather than in a

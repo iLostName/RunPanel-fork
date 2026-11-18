@@ -205,6 +205,88 @@ export async function run({ repoRoot }) {
   r.check("a file name is only made from a valid hostname", throws(() => render.siteFileName("../../etc/x")));
   r.check("the site file is the hostname", render.siteFileName("app.esempio.it") === "app.esempio.it.conf");
 
+  // --- the panel's own name ------------------------------------------------------------------
+  // In front of the panel itself, so a mistake here is the owner's way in: every
+  // directive the project page's live events, an upload or the sign-in depend
+  // on is pinned, and so is what the block must never do.
+  const panelBase = {
+    hostname: "pannello.esempio.it",
+    upstreamPort: 3000,
+    certificate: null,
+    checkToken: token,
+    ipv6: true,
+    http2: "directive",
+    cloudflare: false,
+    hsts: false,
+  };
+  const panelWaiting = render.renderPanelSite(panelBase);
+  r.check("the panel's block names the host on 80, both families", panelWaiting.includes("server_name pannello.esempio.it;") && panelWaiting.includes("    listen 80;") && panelWaiting.includes("    listen [::]:80;"));
+  r.check("before its certificate it answers the challenge and the check", panelWaiting.includes("/.well-known/acme-challenge/") && panelWaiting.includes(`return 200 "${token}";`));
+  r.check("before its certificate the panel is never served over plain HTTP", !panelWaiting.includes("proxy_pass") && !panelWaiting.includes("443"));
+  r.check("anyone else is told the certificate is on its way", /return 503 "RunPanel: [^"$;]+";/.test(panelWaiting));
+  r.check("the block says the panel's port stays open", panelWaiting.includes("its own port 3000 stays open"));
+
+  const panelCertificate = render.certificatePaths("pannello.esempio.it");
+  const panelTls = render.renderPanelSite({ ...panelBase, certificate: panelCertificate });
+  const [panel80, panel443] = panelTls.split("\nserver {").slice(1);
+  const panelApp = panel443?.slice(panel443.indexOf("    location / {")) ?? "";
+  r.check("with it, port 80 redirects and still answers the challenge", panel80.includes("return 301 https://$host$request_uri;") && panel80.includes("/.well-known/acme-challenge/") && !panel80.includes("proxy_pass"));
+  r.check("443 carries the panel's certificate", panel443?.includes(`ssl_certificate ${panelCertificate.fullchain};`) && panel443.includes(`ssl_certificate_key ${panelCertificate.privkey};`));
+  r.check("443 proxies to the panel's port on loopback", panelApp.includes("proxy_pass http://127.0.0.1:3000;") && panelApp.includes("proxy_http_version 1.1;"));
+  r.check("WebSockets go through to the panel", panelApp.includes("proxy_set_header Upgrade $http_upgrade;") && panelApp.includes("proxy_set_header Connection $runpanel_connection_upgrade;"));
+  r.check("the live events are never held back: buffering and gzip off", panelApp.includes("proxy_buffering off;") && panelApp.includes("gzip off;"));
+  r.check("an upload streams through instead of waiting on nginx's disk", panelApp.includes("proxy_request_buffering off;"));
+  r.check("long-lived answers get an hour between reads", panelApp.includes(`proxy_read_timeout ${render.PANEL_READ_TIMEOUT};`) && panelApp.includes(`proxy_send_timeout ${render.PANEL_READ_TIMEOUT};`) && render.PANEL_READ_TIMEOUT === "3600s");
+  r.check("the panel's own body limits are the only ones", panelApp.includes("client_max_body_size 0;"));
+  r.check("Host and the forwarded scheme and host are nginx's", panelApp.includes("proxy_set_header Host $host;") && panelApp.includes("proxy_set_header X-Forwarded-Proto $scheme;") && panelApp.includes("proxy_set_header X-Forwarded-Host $host;"));
+  r.check("X-Forwarded-For is set to the peer, never appended to what the visitor sent", panelApp.includes("proxy_set_header X-Forwarded-For $remote_addr;") && !panelTls.includes("$proxy_add_x_forwarded_for"));
+  r.check("the panel's own HSTS is never passed on", panelApp.includes("proxy_hide_header Strict-Transport-Security;"));
+  r.check("HSTS stays off until the name is the public address", !panelTls.includes("add_header Strict-Transport-Security"));
+  const panelAdopted = render.renderPanelSite({ ...panelBase, certificate: panelCertificate, hsts: true });
+  r.check("once adopted, HSTS goes on", panelAdopted.includes(`add_header Strict-Transport-Security "${render.PANEL_HSTS}" always;`));
+  r.check("and never for the domain's other names", !panelAdopted.includes("includeSubDomains") && !render.PANEL_HSTS.includes("includeSubDomains"));
+  r.check("the check answers on 443 too, readable by the owner's browser", panel443?.includes(`return 200 "${token}";`) && panel443.includes('add_header Access-Control-Allow-Origin "*" always;'));
+  r.check("CORS is opened on the check alone, never on the panel", !panelApp.includes("Access-Control-Allow-Origin"));
+  r.check("the panel's name has no allow list and no password", !panelTls.includes("deny all") && !panelTls.includes("auth_basic"));
+  r.check("a recent nginx gets http2 on the panel too", panelTls.includes("    http2 on;"));
+  r.check("an older one the listen parameter", render.renderPanelSite({ ...panelBase, certificate: panelCertificate, http2: "listen" }).includes("listen 443 ssl http2;"));
+  r.check("without IPv6 the panel's block has no [::] listen", !render.renderPanelSite({ ...panelBase, certificate: panelCertificate, ipv6: false }).includes("[::]"));
+  const panelProxied = render.renderPanelSite({ ...panelBase, certificate: panelCertificate, cloudflare: true });
+  r.check("behind Cloudflare the panel reads the visitor from CF-Connecting-IP, only from its ranges", panelProxied.includes("real_ip_header CF-Connecting-IP;") && panelProxied.match(/set_real_ip_from /g).length === 2 * render.CLOUDFLARE_RANGES.length);
+  r.check("the panel's block uses the same file name as any name", render.siteFileName("pannello.esempio.it") === "pannello.esempio.it.conf");
+  r.check("a panel name with a directive in it is refused", throws(() => render.renderPanelSite({ ...panelBase, hostname: "pannello.esempio.it; return 200" })));
+  r.check("a panel port out of range is refused", throws(() => render.renderPanelSite({ ...panelBase, upstreamPort: 0 })) && throws(() => render.renderPanelSite({ ...panelBase, upstreamPort: 65536 })));
+  r.check("a panel token with a quote is refused", throws(() => render.renderPanelSite({ ...panelBase, checkToken: 'abcdefghijklmnop"; x' })));
+  r.check("a panel certificate outside the proxy's directory is refused", throws(() => render.renderPanelSite({ ...panelBase, certificate: { fullchain: "/etc/shadow", privkey: "/etc/shadow" } })));
+
+  // --- reading the panel's checks --------------------------------------------------------------
+  const checks = await import(pathToFileURL(join(repoRoot, "services", "proxy", "panel-checks.ts")).href);
+  r.check("the sign-in check of a RunPanel is recognised by its shape", checks.isPanelCheckAnswer(200, JSON.stringify({ authenticated: false, firstRun: false, emailRequired: false, role: null })));
+  r.check("nginx's error page is not the panel", !checks.isPanelCheckAnswer(502, "<html>Bad Gateway</html>") && !checks.isPanelCheckAnswer(200, "<html>Welcome to nginx!</html>"));
+  r.check("another app's JSON is not the panel", !checks.isPanelCheckAnswer(200, JSON.stringify({ ok: true })));
+  r.check("an expired certificate is said so", checks.explainTlsFailure("CERT_HAS_EXPIRED", "pannello.esempio.it").includes("scaduto"));
+  r.check("another name's certificate is said so", checks.explainTlsFailure("ERR_TLS_CERT_ALTNAME_INVALID", "pannello.esempio.it").includes("pannello.esempio.it"));
+  r.check("an unknown failure keeps its code", checks.explainTlsFailure("EWHATEVER", "x.it").includes("EWHATEVER"));
+  r.check("a 502 through nginx names the panel's port", checks.explainProxiedAnswer(502, 3000).includes("127.0.0.1:3000"));
+
+  // --- instant addresses, and the panel's public address --------------------------------------
+  r.check("an IPv4 makes a dashed instant domain", names.instantDomainFor("203.0.113.7") === "203-0-113-7.sslip.io");
+  r.check("an IPv6 too, with its double colon as two dashes", names.instantDomainFor("2001:db8::1") === "2001-db8--1.sslip.io");
+  r.check("an IPv6 ending in :: cannot be a label", names.instantDomainFor("2001:db8::") === null);
+  for (const bad of ["", "sslip.io", "1.2.3", "256.1.1.1", "example.com", "1.2.3.4; x"]) {
+    r.check(`no instant domain for ${JSON.stringify(bad)}`, names.instantDomainFor(bad) === null);
+  }
+  r.check("an instant domain reads back as its address", names.instantDomainAddress("203-0-113-7.sslip.io") === "203.0.113.7" && names.instantDomainAddress("2001-db8--1.sslip.io") === "2001:db8::1");
+  r.check("nip.io reads the same", names.instantDomainAddress("8-8-8-8.nip.io") === "8.8.8.8");
+  r.check("a real domain is not an instant one", names.instantDomainAddress("esempio.it") === null && names.instantDomainAddress("app.sslip.io") === null && names.instantDomainAddress("abcd.sslip.io") === null);
+  r.check("an instant domain is a domain the store accepts", normalizeDomain("203-0-113-7.sslip.io") === "203-0-113-7.sslip.io" && normalizeDomain("2001-db8--1.sslip.io") === "2001-db8--1.sslip.io");
+  r.check("any name under those services is instant", names.isInstantHostname("app.203-0-113-7.sslip.io") && names.isInstantHostname("x.nip.io") && names.isInstantHostname("SSLIP.IO."));
+  r.check("a name that only ends alike is not", !names.isInstantHostname("notsslip.io") && !names.isInstantHostname("app.esempio.it"));
+  r.check("a label is made from a project's name", names.labelFrom("Il Mio Sito!") === "il-mio-sito" && names.labelFrom("Caffè") === "caffe");
+  r.check("and is never empty or too long", names.labelFrom("!!!") === "app" && names.labelFrom("a".repeat(80)).length === 40 && names.labelFrom(`${"a".repeat(39)}-b`) === "a".repeat(39));
+  r.check("the panel's public address is its HTTPS name", names.isPanelAddress("https://pannello.esempio.it", "pannello.esempio.it") && names.isPanelAddress(" https://pannello.esempio.it:443/ ", "pannello.esempio.it"));
+  r.check("over http, on another port or another name it is not", !names.isPanelAddress("http://pannello.esempio.it", "pannello.esempio.it") && !names.isPanelAddress("https://pannello.esempio.it:8443", "pannello.esempio.it") && !names.isPanelAddress("https://altro.esempio.it", "pannello.esempio.it") && !names.isPanelAddress("", "pannello.esempio.it") && !names.isPanelAddress(null, "pannello.esempio.it"));
+
   // --- shared files ------------------------------------------------------------------------
   const include = render.renderInclude();
   r.check("the include defines the map under RunPanel's own name", include.includes("map $http_upgrade $runpanel_connection_upgrade"));
