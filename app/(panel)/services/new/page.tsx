@@ -2,13 +2,11 @@
 
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Code, Hint } from "@/components/ui/Hint";
 import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
-import { Panel } from "@/components/ui/Panel";
 import { DOCKER_TEMPLATES, dockerTemplate } from "./_data/catalog";
 import { AppForm } from "@/components/AppForm";
 import { DatabaseForm } from "./_components/DatabaseForm";
@@ -36,6 +34,21 @@ export default function NewServicePage() {
   const href = useServerHref();
   const projectId = searchParams.get("projectId") ?? "";
   const [choice, setChoice] = useState<Choice | null>(null);
+
+  // From the Database list there is only one thing to make: the form itself,
+  // not a choice screen where every other card sent you to Projects.
+  if (!projectId) {
+    return (
+      <>
+        <PageHeader
+          title="Nuovo database"
+          description="PostgreSQL, MySQL, Redis o MongoDB, con backup e console"
+          back={{ href: href("/services"), label: "Torna ai database" }}
+        />
+        <DatabaseForm />
+      </>
+    );
+  }
 
   if (choice) {
     const title =
@@ -95,54 +108,26 @@ export default function NewServicePage() {
   return (
     <>
       <PageHeader
-        title={projectId ? "Aggiungi al progetto" : "Nuovo servizio"}
-        description={projectId ? "Scegli cosa aggiungere" : "Un database o una cache, con o senza progetto"}
+        title="Aggiungi al progetto"
+        description="Scegli cosa aggiungere"
       />
 
-      {projectId ? (
-        <Hint tone="tip" icon="solar:link-circle-linear" className="mb-4">
-          Un progetto tiene insieme l&apos;app e ciò che le serve. Tutto quello che aggiungi qui
-          finisce sulla stessa rete Docker: un database creato adesso arriva all&apos;app come{" "}
-          <Code>DATABASE_URL</Code> al primo deploy, senza che tu debba copiare credenziali da
-          nessuna parte.
-        </Hint>
-      ) : (
-        <Hint icon="solar:database-linear" className="mb-4">
-          Un database creato da qui è autonomo: nessun progetto lo possiede e nessuna variabile
-          viene iniettata da sola. Alla fine trovi la sua connection string pronta da incollare
-          dove ti serve — anche in più progetti. Puoi comunque assegnarlo a un progetto qui sotto,
-          e in quel caso torna a collegarsi da solo.
-        </Hint>
-      )}
+      <Hint tone="tip" icon="solar:link-circle-linear" className="mb-4">
+        Un progetto tiene insieme l&apos;app e ciò che le serve. Un database aggiunto qui arriva
+        all&apos;app come <Code>DATABASE_URL</Code> al prossimo deploy, senza credenziali da copiare.
+      </Hint>
 
       <ChoiceGroup label="Cosa aggiungere" className="gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {cards.map((card) => {
-          const needsProject = card.key !== "database" && !projectId;
-
-          // A link, not a choice: it leads to where this option lives.
-          return needsProject ? (
-            <Link key={card.key} href={href("/projects")} className="block min-w-0">
-              <Panel interactive padding="compact" className="flex h-full items-start gap-3 border-dashed">
-                <Icon icon={card.icon} width={20} className="text-muted mt-0.5 shrink-0" aria-hidden />
-                <span className="min-w-0 flex-1">
-                  <span className="text-muted block truncate text-sm font-medium">{card.title}</span>
-                  <span className="text-muted mt-0.5 block text-xs">
-                    Si configura da dentro un progetto
-                  </span>
-                </span>
-              </Panel>
-            </Link>
-          ) : (
-            <ChoiceCard
-              key={card.key}
-              selected={false}
-              onSelect={card.onSelect}
-              title={card.title}
-              description={card.description}
-              icon={card.icon}
-            />
-          );
-        })}
+        {cards.map((card) => (
+          <ChoiceCard
+            key={card.key}
+            selected={false}
+            onSelect={card.onSelect}
+            title={card.title}
+            description={card.description}
+            icon={card.icon}
+          />
+        ))}
       </ChoiceGroup>
     </>
   );

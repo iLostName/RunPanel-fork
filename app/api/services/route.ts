@@ -20,6 +20,7 @@ import { AccessRow, syncGate } from "@/services/access";
 import { describeInjection } from "@/services/service-injection";
 import { parseContractJson } from "@/lib/deploy-contract";
 import { allocateLoopbackPort } from "@/services/access-gate";
+import { firstFreePort, portsInUse } from "@/lib/ports";
 
 export async function GET() {
   const denied = await requireUser();
@@ -142,6 +143,26 @@ export async function POST(request: NextRequest) {
           error: projectSlug
             ? `Il progetto ha già un servizio chiamato "${name}".`
             : `Esiste già un servizio "${name}". I servizi senza progetto condividono un unico spazio di nomi.`,
+        },
+        { status: 409 }
+      );
+    }
+
+    // A port another service or project already publishes would make Docker
+    // refuse the container halfway through, in Docker's own words. Said here,
+    // with a free port to use instead.
+    const [servicePorts, projectPorts] = await Promise.all([
+      db.selectFrom("services").select(["name", "port", "access_port"]).execute(),
+      db.selectFrom("projects").select(["name", "port", "access_port"]).execute(),
+    ]);
+    const portOwner = [...servicePorts, ...projectPorts].find((row) => row.port === port || row.access_port === port);
+    if (portOwner) {
+      const free = firstFreePort(port, portsInUse([...servicePorts, ...projectPorts]));
+      return NextResponse.json(
+        {
+          error: `La porta ${port} è già usata da «${portOwner.name}»: scegline un'altra, per esempio ${free}.`,
+          code: "port_taken",
+          suggestedPort: free,
         },
         { status: 409 }
       );

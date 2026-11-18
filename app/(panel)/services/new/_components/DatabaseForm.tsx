@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "@/lib/toast";
@@ -11,15 +11,31 @@ import { SettingToggle } from "@/components/ui/SettingToggle";
 import { SelectField } from "@/components/ui/SelectField";
 import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { Field } from "@/components/ui/Field";
+import { Advanced } from "@/components/ui/Technical";
 import { connectionEnvKey } from "@/lib/service-env";
 import { serviceCredentialsSchema } from "@/lib/validation";
+import { firstFreePort, portsInUse } from "@/lib/ports";
 import { DATABASE_OPTIONS, databaseOption, type ServiceType } from "../_data/catalog";
 import { ServerPicker } from "@/components/cluster/ServerBits";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
-/** Mirrors `serviceNameSchema`: a bad name should not need a round trip. */
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
+/** A name nobody has to invent: "shop-db", "shop-cache", or "postgresql-db" with no project. */
+function suggestedName(type: ServiceType, projectSlug: string | undefined): string {
+  const suffix = type === "redis" ? "cache" : "db";
+  return projectSlug ? `${projectSlug}-${suffix}` : `${type}-${suffix}`;
+}
+
+/**
+ * A new database, for someone who only knows they need "a database".
+ *
+ * Three decisions are in view: which engine, its name (proposed), and the
+ * project it belongs to. Everything a developer may want to set (the port on
+ * the host, who may connect, the credentials) is under "Avanzate", already
+ * filled with values that work: a free port, the local networks, generated
+ * credentials. Expert mode opens it by default.
+ */
 export function DatabaseForm({ projectId }: { projectId?: string }) {
   const api = useNodeApi();
   const href = useServerHref();
@@ -36,13 +52,12 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
     left at "16" while the list moved on.
   */
   const [version, setVersion] = useState(databaseOption("postgresql").versions[0]);
-  const [port, setPort] = useState("5432");
+  /** Null until typed: until then the port follows the engine and what is free. */
+  const [portTyped, setPortTyped] = useState<string | null>(null);
   const [user, setUser] = useState("runpanel");
   const [password, setPassword] = useState("");
   const [database, setDatabase] = useState("runpanel_db");
   const [restrict, setRestrict] = useState(false);
-  // Seeded from the entry point, then editable: arriving from a project
-  // pre-selects it, arriving from Servizi starts on "nessuno".
   const [projectChoice, setProject] = useState(projectId ?? "");
 
   const { data: networkData } = useResource<{ networks: { cidr: string; kind: string }[] }>(
@@ -52,33 +67,35 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
     .filter((network) => network.kind === "lan")
     .map((network) => network.cidr);
 
-  const { data: projectsData } = useResource<{ id: string; name: string; slug: string }[]>(
+  const { data: projectsData } = useResource<{ id: string; name: string; slug: string; port: number | null }[]>(
     api("/api/projects")
   );
-  const projects = Array.isArray(projectsData) ? projectsData : [];
-  // Switching server swaps the list: a project picked on the other one no longer exists here.
+  const { data: servicesData } = useResource<{ port: number; access_port?: number | null }[]>(api("/api/services"));
+  const projects = useMemo(() => (Array.isArray(projectsData) ? projectsData : []), [projectsData]);
   const project = projectsData && !projects.some((p) => p.id === projectChoice) ? "" : projectChoice;
   const projectSlug = projects.find((p) => p.id === project)?.slug;
 
   const option = databaseOption(type);
+  const used = useMemo(
+    () => portsInUse([...(Array.isArray(servicesData) ? servicesData : []), ...projects]),
+    [servicesData, projects]
+  );
+  const freePort = firstFreePort(option.defaultPort, used);
+  const port = portTyped ?? String(freePort);
+  const nameValue = name.trim() || suggestedName(type, projectSlug);
 
   function chooseType(next: ServiceType) {
     const opt = databaseOption(next);
     setType(next);
     setVersion(opt.versions[0]);
-    setPort(String(opt.defaultPort));
+    setPortTyped(null);
     setUser(opt.credentialled ? "runpanel" : "");
     setDatabase(opt.credentialled ? "runpanel_db" : "0");
     setPassword("");
   }
 
   async function create() {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      toast.error("Serve un nome per il servizio");
-      return;
-    }
-    if (!NAME_PATTERN.test(trimmed)) {
+    if (!NAME_PATTERN.test(nameValue)) {
       toast.error("Il nome può contenere solo minuscole, numeri, trattini e underscore");
       return;
     }
@@ -87,8 +104,6 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
       password: password || undefined,
       database: database.trim() || undefined,
     };
-    // The server would answer only "Dati non validi": the rule's own sentence
-    // says which field to fix.
     const checked = serviceCredentialsSchema.safeParse(credentials);
     if (!checked.success) {
       toast.error(checked.error.issues[0].message);
@@ -101,7 +116,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: trimmed,
+          name: nameValue,
           type,
           version,
           port: Number.parseInt(port, 10),
@@ -112,12 +127,12 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
       });
       const data = await res.json();
       if (!res.ok) {
+        // A port taken since the page loaded: take the free one the panel found.
+        if (data.code === "port_taken" && typeof data.suggestedPort === "number") setPortTyped(String(data.suggestedPort));
         toast.error(data.error ?? "Creazione non riuscita");
         return;
       }
-      toast.success("Servizio creato");
-      // Without a project there is nowhere else to go that shows what was just
-      // made — and the connection string is the reason someone created it.
+      toast.success(project ? "Database creato: arriva all'app al prossimo deploy" : "Database creato");
       router.push(href(project ? `/projects/${project}` : `/services/${data.id}`));
     } catch {
       toast.error("Creazione non riuscita");
@@ -130,47 +145,22 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
 
   return (
     <div className="max-w-3xl space-y-4">
-      {project ? (
-        <Hint tone="tip" icon="solar:link-circle-linear" title="Cosa succede dopo">
-          Il container viene creato subito, con un volume dedicato per i dati. Dal deploy successivo
-          il progetto riceve <Code>{envKey}</Code> già pronta — host, porta, utente e password
-          corretti per il runtime che stai usando. Non devi copiare niente a mano. Se un giorno
-          preferisci una connection string tua, spegni l&apos;iniezione dal collegamento e il progetto
-          torna a usare le sue variabili.
-        </Hint>
-      ) : (
-        <Hint icon="solar:database-linear" title="Cosa succede dopo">
-          Il container viene creato subito, con un volume dedicato per i dati. Senza progetto
-          nessuna variabile viene iniettata da nessuna parte: la pagina del servizio ti dà la
-          connection string pronta, e la incolli come <Code>{envKey}</Code> tra le variabili di chi
-          lo deve usare — quanti progetti vuoi.
-        </Hint>
-      )}
+      <Hint tone={project ? "tip" : "info"} icon={project ? "solar:link-circle-linear" : "solar:database-linear"}>
+        {project ? (
+          <>
+            Il database parte subito, con i suoi dati al sicuro in un volume dedicato. Al prossimo deploy
+            l&apos;app riceve <Code>{envKey}</Code> già pronta: niente credenziali da copiare.
+          </>
+        ) : (
+          <>
+            Il database parte subito, con i suoi dati al sicuro in un volume dedicato. Senza progetto,
+            nella sua pagina trovi l&apos;indirizzo di connessione da incollare dove serve.
+          </>
+        )}
+      </Hint>
 
       <Panel className="space-y-4">
-        <PanelHeader title="Progetto" description="Facoltativo: decide solo chi lo riceve in automatico" />
-
-        <ServerPicker description="Il servizio gira su questo server, insieme ai progetti che lo usano." />
-
-        <div>
-          <SelectField
-            label="Progetto"
-            value={project}
-            onChange={setProject}
-            options={[
-              { value: "", label: "Nessuno — servizio autonomo" },
-              ...projects.map((p) => ({ value: p.id, label: p.name })),
-            ]}
-          />
-          <FieldHint>
-            Con un progetto: stessa rete Docker e <Code>{envKey}</Code> iniettata a ogni deploy.
-            Senza: il servizio resta a sé e lo colleghi copiando la sua URL dove serve.
-          </FieldHint>
-        </div>
-      </Panel>
-
-      <Panel className="space-y-4">
-        <PanelHeader title="Tipo" description="Il container viene provisionato con un volume dedicato" />
+        <PanelHeader title="Che database ti serve?" description="Se non sai quale, PostgreSQL va bene quasi sempre" />
 
         <ChoiceGroup label="Tipo di database" className="grid-cols-2 sm:grid-cols-4">
           {DATABASE_OPTIONS.map((opt) => (
@@ -187,28 +177,18 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <TextField value={name} onChange={setName}>
-              <Label>Nome del servizio</Label>
-              <Input placeholder="db" />
+              <Label>Nome</Label>
+              <Input placeholder={suggestedName(type, projectSlug)} />
             </TextField>
             <FieldHint>
-              Diventa il nome del container:{" "}
-              <Code>
-                runpanel-svc-{projectSlug ? `${projectSlug}-` : ""}
-                {name.trim() || "nome"}
-              </Code>
-              . Solo minuscole, numeri, trattini e underscore.
-              {!project && " Senza progetto il nome deve essere unico tra i servizi autonomi."}
+              Lascialo vuoto per usare <Code>{suggestedName(type, projectSlug)}</Code>. Minuscole, numeri,
+              trattini e underscore.
             </FieldHint>
           </div>
 
           <Field
             label="Versione"
-            hint={
-              <>
-                Il tag dell&apos;immagine ufficiale. Sceglila uguale a quella che usi in sviluppo: un
-                dump ripristinato su una major diversa è il modo classico per perdere un pomeriggio.
-              </>
-            }
+            hint="Quella proposta è la più recente. Se l'app la usa già in sviluppo con un'altra, scegli quella."
           >
             <ChoiceGroup label="Versione" className="flex flex-wrap">
               {option.versions.map((v) => (
@@ -224,17 +204,34 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
             </ChoiceGroup>
           </Field>
         </div>
+      </Panel>
 
+      <Panel className="space-y-4">
+        <PanelHeader title="Per quale progetto?" description="Facoltativo: con un progetto si collega da solo" />
+
+        <ServerPicker description="Il database gira su questo server, insieme ai progetti che lo usano." />
+
+        <SelectField
+          label="Progetto"
+          value={project}
+          onChange={setProject}
+          options={[
+            { value: "", label: "Nessuno: database autonomo" },
+            ...projects.map((p) => ({ value: p.id, label: p.name })),
+          ]}
+        />
+      </Panel>
+
+      <Advanced summary="porta, chi può collegarsi, credenziali">
         <div>
-          <TextField value={port} onChange={setPort}>
+          <TextField value={port} onChange={setPortTyped}>
             <Label>Porta sull&apos;host</Label>
             <Input type="number" />
           </TextField>
           <FieldHint>
-            Serve a te, per collegarti dalla macchina con un client esterno. Se{" "}
-            <Code>{option.defaultPort}</Code> è già occupata — un altro {option.label} installato,
-            o un altro servizio qui dentro — cambiala pure: dentro la rete del progetto l&apos;app
-            continua a usare la porta standard del container, quindi per lei non cambia nulla.
+            Serve per collegarti con un client esterno. Proposta una libera
+            {freePort !== option.defaultPort ? ` (la ${option.defaultPort} è già usata qui)` : ""}; dentro la rete del
+            progetto l&apos;app usa comunque la porta standard del container.
           </FieldHint>
         </div>
 
@@ -249,7 +246,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
         <div>
           <SettingToggle
             label="Limita chi può collegarsi"
-            description="Apre la porta solo alle reti locali trovate. Modificabile dopo, dalla pagina del servizio."
+            description="Apre la porta solo alle reti locali trovate. Modificabile dopo, dalla pagina del database."
             isSelected={restrict}
             onChange={setRestrict}
           />
@@ -257,25 +254,15 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
             <FieldHint>
               {lanNetworks.length > 0 ? (
                 <>
-                  Consentite: <Code>{lanNetworks.join(", ")}</Code>, più questa macchina. Mentre è
-                  attiva, è il pannello a tenere aperta la porta.
+                  Consentite: <Code>{lanNetworks.join(", ")}</Code>, più questa macchina. Mentre è attiva, è
+                  il pannello a tenere aperta la porta.
                 </>
               ) : (
-                <>
-                  Nessuna rete locale rilevata: solo questa macchina potrà collegarsi. Aggiungi le
-                  altre dalla pagina del servizio.
-                </>
+                <>Nessuna rete locale trovata: solo questa macchina potrà collegarsi.</>
               )}
             </FieldHint>
           )}
         </div>
-      </Panel>
-
-      <Panel className="space-y-4">
-        <PanelHeader
-          title="Credenziali"
-          description="Lasciando vuoto, RunPanel genera una password casuale"
-        />
 
         {option.credentialled && (
           <div className="grid gap-4 sm:grid-cols-2">
@@ -284,7 +271,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
               <Input className="font-mono text-sm" />
             </TextField>
             <TextField value={database} onChange={setDatabase}>
-              <Label>Database</Label>
+              <Label>Nome del database</Label>
               <Input className="font-mono text-sm" />
             </TextField>
           </div>
@@ -296,17 +283,15 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
             <Input type="password" placeholder="generata automaticamente" className="font-mono text-sm" />
           </TextField>
           <FieldHint>
-            Lasciala vuota: viene generata casuale e non devi ricordartela, perché nell&apos;app
-            arriva da sola. Resta cifrata a riposo e la puoi rileggere quando vuoi dalla pagina del
-            servizio. Vale la pena metterla a mano solo se stai ricreando un servizio che deve
-            ritrovare un volume con dati già inizializzati da quelle credenziali.
+            Vuota: viene generata e cifrata, e all&apos;app arriva da sola. Scrivila solo se stai ricreando un
+            database che deve ritrovare dati già creati con quelle credenziali.
           </FieldHint>
         </div>
-      </Panel>
+      </Advanced>
 
       <div className="flex justify-end">
         <Button variant="primary" isPending={saving} onPress={create}>
-          Crea servizio
+          Crea database
         </Button>
       </div>
     </div>
