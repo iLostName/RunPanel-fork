@@ -263,6 +263,23 @@ export async function run({ repoRoot }) {
     );
   }
   {
+    const rows = [
+      { name: "beta", cpu: 5, memory: 100 },
+      { name: "Alfa", cpu: 50, memory: 10 },
+      { name: "gamma", cpu: undefined, memory: undefined },
+      { name: "delta", cpu: 5, memory: 300 },
+    ];
+    const names = (sort) => m.sortByUsage(rows, sort).map((row) => row.name).join(",");
+    r.check("by name, ignoring case", names("name") === "Alfa,beta,delta,gamma", names("name"));
+    r.check("by CPU, ties by name, no reading last", names("cpu") === "Alfa,beta,delta,gamma", names("cpu"));
+    r.check("by memory", names("memory") === "delta,beta,Alfa,gamma", names("memory"));
+    r.check("sorting leaves the list alone", rows[0].name === "beta");
+
+    const down = m.downsample([1, 3, null, null, 5, 7], 3);
+    r.check("a sparkline averages its buckets and keeps the gaps", JSON.stringify(down) === "[2,null,6]", JSON.stringify(down));
+    r.check("a short series is not stretched", m.downsample([1, 2], 30).length === 2);
+  }
+  {
     const s = m.summarize([null, 4, 10, undefined, 1]);
     r.check("min, max, average, last", s?.min === 1 && s?.max === 10 && s?.avg === 5 && s?.last === 1, JSON.stringify(s));
     r.check("nothing to summarise", m.summarize([null]) === null);

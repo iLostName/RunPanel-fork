@@ -679,6 +679,55 @@ export function timeTicks(from: number, to: number, target = 4, offsetMinutes = 
   return { step, ticks };
 }
 
+/**
+ * The same values in `count` averages, for a sparkline: a hundred and twenty
+ * points in a box a hundred pixels wide is a scribble. A bucket with nothing in
+ * it stays a gap.
+ */
+export function downsample(values: ReadonlyArray<number | null>, count: number): (number | null)[] {
+  if (values.length <= count) return [...values];
+  const out: (number | null)[] = [];
+  for (let i = 0; i < count; i++) {
+    const start = Math.floor((i * values.length) / count);
+    const end = Math.floor(((i + 1) * values.length) / count);
+    let sum = 0;
+    let n = 0;
+    for (let j = start; j < end; j++) {
+      const value = values[j];
+      if (value === null || !Number.isFinite(value)) continue;
+      sum += value;
+      n++;
+    }
+    out.push(n > 0 ? round(sum / n) : null);
+  }
+  return out;
+}
+
+export type UsageSort = "name" | "cpu" | "memory";
+
+/**
+ * The Monitor's order: by name, or by who uses the most. A row with no reading
+ * goes last whatever the order — a stopped project is not "the lightest" — and
+ * ties fall back to the name, so a poll never reshuffles equal rows.
+ */
+export function sortByUsage<T extends { name: string; cpu?: number | null; memory?: number | null }>(
+  rows: readonly T[],
+  sort: UsageSort
+): T[] {
+  const byName = (a: T, b: T) => a.name.localeCompare(b.name, "it", { sensitivity: "base" });
+  if (sort === "name") return [...rows].sort(byName);
+  const value = (row: T) => (sort === "cpu" ? row.cpu : row.memory);
+  return [...rows].sort((a, b) => {
+    const va = value(a);
+    const vb = value(b);
+    const ha = typeof va === "number" && Number.isFinite(va);
+    const hb = typeof vb === "number" && Number.isFinite(vb);
+    if (ha && hb && va !== vb) return (vb as number) - (va as number);
+    if (ha !== hb) return ha ? -1 : 1;
+    return byName(a, b);
+  });
+}
+
 export interface SeriesSummary {
   min: number;
   max: number;
