@@ -119,6 +119,9 @@ export const ROUTES: RouteEntry[] = [
   { method: "PUT", path: "/api/notifications", summary: "Update Telegram bot token / chat id / enabled events ('' clears token or chat).", query: "", body: "{ token?: string /* '' to clear, else 'digits:secret' */, chatId?: string /* '' to clear, '-?digits' or '@name' */, events?: ('project.crashed'|'service.crashed'|'restart.scheduled'|'docker.down'|'disk.low'|'deploy.finished'|'backup.finished'|'panel.update'|'panel.restarted')[] }", kind: "json" },
   { method: "POST", path: "/api/notifications", summary: "Send a test Telegram message, or discover chats that wrote to the bot.", query: "", body: "{ action: 'test'|'chats' }", kind: "json" },
 
+  // --- onboarding ---
+  { method: "GET", path: "/api/onboarding", summary: "Owner only: the first-run checklist (GitHub, first project online, domain, nightly backup with volumes, autostart, notifications); returns { items: { id, title, description, done, href, cta }[] }.", query: "", body: "", kind: "json" },
+
   // --- presets ---
   { method: "GET", path: "/api/presets", summary: "Deploy presets; returns { presets: [{ id, label, description, runtime, commands, ... }] }.", query: "", body: "", kind: "json" },
 

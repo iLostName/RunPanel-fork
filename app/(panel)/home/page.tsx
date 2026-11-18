@@ -40,6 +40,11 @@ import { PROJECT_ACTIONS, SERVICE_ACTIONS, rowAllows, type Access } from "@/lib/
 import { cn } from "@/lib/utils";
 import { useCan, useMe } from "@/lib/hooks/useMe";
 import { serviceDisplayName } from "@/lib/service-name";
+import { deployCountLabel, engineLabel, engineWithVersion, runtimeLabel } from "@/lib/labels";
+import { Technical } from "@/components/ui/Technical";
+import { OverviewStatus } from "@/components/overview/OverviewStatus";
+import { SetupChecklist } from "@/components/overview/SetupChecklist";
+import { ActivityFeed } from "@/components/overview/ActivityFeed";
 
 interface Service {
   id: string;
@@ -234,10 +239,13 @@ const ProjectCard = memo(function ProjectCard({
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-2">
               {showServer && <ServerBadge memberId={project.memberId} />}
-              <p className="text-muted truncate font-mono text-xs">
-                {project.runtime_type}
-                {project.port ? ` · :${project.port}` : ""}
-                {project.deploy_count > 0 ? ` · ${project.deploy_count} deploy` : ""}
+              <p className="text-muted truncate text-xs">
+                {runtimeLabel(project.runtime_type)} · {deployCountLabel(project.deploy_count)}
+                {project.port ? (
+                  <Technical>
+                    <span className="font-mono"> · :{project.port}</span>
+                  </Technical>
+                ) : null}
               </p>
             </div>
           </div>
@@ -268,7 +276,7 @@ const ProjectCard = memo(function ProjectCard({
                 >
                   <span className={cn("size-1.5 rounded-full", TONE_DOT[meta.tone])} aria-hidden />
                   <span className="text-foreground">{serviceDisplayName(service)}</span>
-                  <span className="text-muted font-mono">{service.type}</span>
+                  <span className="text-muted">{engineLabel(service.type)}</span>
                 </Link>
               </li>
             );
@@ -316,8 +324,11 @@ const ServiceCard = memo(function ServiceCard({
           </div>
           <div className="mt-1 flex min-w-0 items-center gap-2">
             {showServer && <ServerBadge memberId={service.memberId} />}
-            <p className="text-muted truncate font-mono text-xs">
-              {service.type} {service.version} · :{service.port}
+            <p className="text-muted truncate text-xs">
+              {engineWithVersion(service.type, service.version)}
+              <Technical>
+                <span className="font-mono"> · :{service.port}</span>
+              </Technical>
             </p>
           </div>
         </div>
@@ -630,15 +641,15 @@ export default function HomePage() {
             {canCreate && (
               <>
                 {canCreateFolder && (
-                  <Button variant="secondary" onPress={openCreate}>
+                  <Button variant="ghost" onPress={openCreate}>
                     <Icon icon="solar:folder-with-files-linear" width={16} aria-hidden />
                     Nuova cartella
                   </Button>
                 )}
-                {/* A Link, not window.location: the latter is a full page reload —
-                    re-downloading and re-hydrating the whole app — where client-side
+                {/* The page's one primary action. A Link, not window.location:
+                    the latter is a full page reload, where client-side
                     navigation is instant. */}
-                <LinkButton href={href("/projects/new")} variant="secondary">
+                <LinkButton href={href("/projects/new")} variant="primary">
                   <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
                   Nuovo progetto
                 </LinkButton>
@@ -649,7 +660,9 @@ export default function HomePage() {
       />
 
       {/* Above the metrics on purpose: a number that is merely interesting
-          should never sit above a problem that needs doing. */}
+          should never sit above a problem that needs doing. The apps first,
+          then the machine they run on. */}
+      <OverviewStatus projects={shownProjects} services={shownServices} link={href} />
       <HealthBanner />
 
       {/* Every server at a glance, in a cluster. */}
@@ -671,6 +684,7 @@ export default function HomePage() {
             hint={metrics ? `di ${formatBytes(metrics.memory.total)}` : undefined}
             percent={memoryPercent}
             icon="solar:server-linear"
+            note={memoryPercent !== undefined && memoryPercent >= 75 ? "Quasi piena: in Salute › Monitor vedi chi usa di più" : undefined}
           />
           <StatTile
             label="Disco"
@@ -678,10 +692,17 @@ export default function HomePage() {
             hint={metrics ? `di ${formatBytes(metrics.disk.total)}` : undefined}
             percent={diskPercent}
             icon="solar:ssd-square-linear"
+            note={diskPercent !== undefined && diskPercent >= 75 ? "Poco spazio libero: Spazio disco può liberarne" : undefined}
           />
-          <StatTile label="Uptime" value={formatUptime(metrics?.uptime)} icon="solar:clock-circle-linear" />
+          <StatTile label="Acceso da" value={formatUptime(metrics?.uptime)} icon="solar:clock-circle-linear" />
         </div>
       )}
+
+      {/* Getting set up and what happened lately, side by side when both apply. */}
+      <div className="mb-6 grid grid-cols-[repeat(auto-fit,minmax(min(100%,26rem),1fr))] gap-4 empty:hidden">
+        <SetupChecklist />
+        <ActivityFeed />
+      </div>
 
       {error && (
         <LoadError
