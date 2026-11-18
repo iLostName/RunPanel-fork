@@ -76,3 +76,20 @@ If the panel did not come back, the commands to restore the previous version are
 ## Notifications
 
 The bell in the top bar collects everything that happens on the server, for every account and only about what it may see. Sending the same events outside the panel — email, Telegram, Discord, Slack, ntfy or a signed webhook — is set up in **Impostazioni › Generale › Notifiche**: what is notified, the channels, the webhook signature and how bursts are kept from becoming noise are in [Notifications](notifications.md).
+
+## Public status page
+
+Every minute the panel asks each app with a port and its health check on whether it answers: two missed answers in a row open an outage, and the project's Overview shows uptime and incidents. The **public status page** shows the same to the people using the apps, without giving them access to the panel. It is optional and stays off until you turn it on.
+
+It is set up in **Impostazioni › Generale › Pagina di stato pubblica** (settings, general, public status page), by the owner only, like the panel's other preferences. Unlike the rest of this page, it belongs to the panel you have open, not to the server selected in the bar.
+
+- **Indirizzo** (address): `<panel address>/status/<path>`. The proposed path is random, twelve letters and digits, so only people given the link find the page. You can pick a memorable one, such as `stato`, but then anyone can reach it by guessing. **Nuovo indirizzo** (new address) generates another one: the old one stops working when you save. The page answers wherever the panel does, its HTTPS address included, and the link to copy uses the panel's public address when one is set.
+- **Titolo** and **messaggio** (title and message): the message is optional and shown at the top of the page as typed, for instance to announce maintenance.
+- **Progetti** (projects): which ones appear, in what order and under what name. The proposed name is the project's name in the panel: you confirm or change it, and from then on it stays what you wrote, even if the project is renamed. Next to a project the check does not ask (health check off, no port, app stopped) the panel says what the page will show.
+- **Motori di ricerca** (search engines): off by default; the page asks not to be indexed.
+
+The page says in one sentence how things are and, for each project, its state (**Operativo** — up, **Non risponde** — not answering, **In aggiornamento** — being updated, during a deploy or a restart, **Nessun dato** — no data, when there are no recent checks), uptime over the last 24 hours and 30 days, one bar per day, and the outages of the last 30 days with start, end and length. Times are in the panel's time zone, which the page names. It never shows the projects' internal names, ports, paths, addresses, servers or the technical reason for an outage: only the title, the message and the names you wrote. It works on a phone, light and dark, and without JavaScript.
+
+Off, or at a wrong path, it answers **Pagina non trovata** (page not found), exactly like an address that does not exist: guessing does not reveal that the page is there. If you are the owner and signed in, the link of a page that is off opens a preview, marked as such, that only you see. The figures are recomputed at most every 30 seconds however many people visit, and an open page refreshes itself every minute. Turning the page on or off and changing it is recorded in the activity log. The link can also be copied from the check's card in the Overview of each project of this server that is on the page.
+
+With [several servers](multi-server.md) the page can also show projects of linked servers: each one checks its own apps, and the panel asks each of them, with a signed request and at most every 30 seconds, for only the public state of the chosen projects. If a server does not answer, its projects show as **Nessun dato**; a deleted project disappears from the page. For projects of other servers the link does not appear on their card: copy it from the settings.
