@@ -44,6 +44,7 @@ export type OneTimeCommandStatus = "queued" | "claimed" | "done" | "failed";
 // Declared where the column semantics live, so the two cannot disagree.
 export type { AccessMode } from "../access-columns";
 import type { AccessMode } from "../access-columns";
+import type { TaskRunStatus, TaskRunsIn, TaskTrigger } from "../tasks-rules";
 import type { ColumnType } from "kysely";
 
 export type BackupDestinationType = "local" | "telegram" | "s3" | "webdav";
@@ -848,6 +849,61 @@ export interface MetricSamplesTable {
   latency: number | null;
 }
 
+/**
+ * A command a project runs on a schedule — see migration 041 and
+ * `services/tasks/`. Booleans are `0 | 1`, like everywhere else.
+ */
+export interface ProjectTasksTable {
+  id: string;
+  project_id: string;
+  name: string;
+  /** Newline-separated, joined with `&&` like every other command field. */
+  command: string;
+  /** As typed. '' = only when somebody presses "Esegui ora". */
+  cron: string;
+  /** NULL follows the panel's zone. */
+  timezone: string | null;
+  /** 0 | 1 */
+  enabled: number;
+  timeout_sec: number;
+  /** Compose only: the service of the stack it runs in. */
+  service: string | null;
+  /** Where the command was saved to run; see `runsInFor` in lib/tasks-rules.ts. */
+  runs_in: TaskRunsIn;
+  /** The next due instant in UTC, and the scheduler's claim token. */
+  next_run_at: string | null;
+  /** The newest run. No foreign key: runs are pruned. */
+  last_run_id: string | null;
+  consecutive_failures: number;
+  failure_notified_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One occurrence of a task, skipped ones included. */
+export interface ProjectTaskRunsTable {
+  id: string;
+  task_id: string;
+  project_id: string;
+  trigger: TaskTrigger;
+  triggered_by: string | null;
+  status: TaskRunStatus;
+  /** What ran: a copy, so the history survives an edit of the task. */
+  command: string;
+  scheduled_for: string | null;
+  started_at: string;
+  finished_at: string | null;
+  exit_code: number | null;
+  /** Capped: head and tail, see `OutputCapture`. */
+  output: string | null;
+  /** Characters printed and not kept. */
+  output_dropped: number;
+  error: string | null;
+  /** Identical skips folded into this row. */
+  repeats: number;
+}
+
 /** An app that stopped answering its uptime check — see migration 034. */
 export interface UptimeIncidentsTable {
   id: string;
@@ -901,4 +957,6 @@ export interface Database {
   project_hosts: ProjectHostsTable;
   metric_samples: MetricSamplesTable;
   uptime_incidents: UptimeIncidentsTable;
+  project_tasks: ProjectTasksTable;
+  project_task_runs: ProjectTaskRunsTable;
 }

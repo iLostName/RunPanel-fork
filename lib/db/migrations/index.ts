@@ -36,6 +36,7 @@ import * as uptime from "./034-uptime";
 import * as twoFactor from "./035-two-factor";
 import * as backupVerifications from "./036-backup-verifications";
 import * as hostRedirect from "./037-host-redirect";
+import * as projectTasks from "./041-project-tasks";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -82,6 +83,7 @@ export const migrations: Record<string, Migration> = {
   "035-two-factor": twoFactor,
   "036-backup-verifications": backupVerifications,
   "037-host-redirect": hostRedirect,
+  "041-project-tasks": projectTasks,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {
