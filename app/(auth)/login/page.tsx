@@ -51,6 +51,29 @@ interface Check {
   emailRequired: boolean;
   role: "panel" | "node" | null;
   managedBy?: { name: string; url: string }[];
+  /** Only on a first run: where the token is (lib/setup-hint.ts). */
+  setupHint?: { runner: "pinned" | "systemd" | "docker" | "pm2" | "console"; command: string | null };
+}
+
+/** Where the setup token is, said for how this panel was started. */
+function SetupTokenHelp({ hint }: { hint?: Check["setupHint"] }) {
+  if (hint?.runner === "pinned") {
+    return <>È il valore di <Code>RUNPANEL_SETUP_TOKEN</Code>, impostato da chi ha installato il pannello.</>;
+  }
+  if (hint?.command) {
+    return (
+      <>
+        Lo trovi nel log del pannello, dopo <Code>Not set up yet</Code>. Sul server esegui{" "}
+        <Code>{hint.command}</Code>. Ne viene generato uno nuovo a ogni riavvio.
+      </>
+    );
+  }
+  return (
+    <>
+      È scritto nel terminale dove hai avviato il pannello, dopo <Code>Not set up yet</Code>. Ne viene generato
+      uno nuovo a ogni riavvio, a meno di fissarlo con <Code>RUNPANEL_SETUP_TOKEN</Code>.
+    </>
+  );
 }
 
 const ROLE_OPTIONS = [
@@ -306,8 +329,7 @@ export default function LoginPage() {
                   <Input placeholder="3f9c1a…" className="font-mono text-sm" />
                 </TextField>
                 <FieldHint>
-                  Il pannello lo stampa nel proprio log all&apos;avvio, dopo{" "}
-                  <Code>Not set up yet</Code>. Ne genera uno nuovo a ogni riavvio.
+                  <SetupTokenHelp hint={check.setupHint} />
                 </FieldHint>
               </div>
             )}

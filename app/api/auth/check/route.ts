@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession, isFirstRun } from "@/lib/auth";
 import { clusterState, listMembers } from "@/services/cluster/state";
+import { setupTokenHint } from "@/lib/setup-hint";
 
 export async function GET() {
   const session = await getSession();
@@ -19,5 +20,7 @@ export async function GET() {
     emailRequired: session !== null && session.user.email === null,
     role: cluster?.role ?? null,
     ...(managedBy ? { managedBy } : {}),
+    // Where the setup token is, while there is one to find.
+    ...(firstRun ? { setupHint: setupTokenHint() } : {}),
   });
 }
