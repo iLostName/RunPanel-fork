@@ -42,12 +42,15 @@ const TONE_DOT: Record<PageTone, string> = {
   neutral: "bg-muted/50",
 };
 
+// "No data" is a muted grey rather than the `default` surface the project page
+// uses: on the white of the light theme that one all but disappears, and here
+// a day with no checks has to read as a day, not as a gap in the strip.
 const TONE_BAR: Record<PageTone, string> = {
   success: "bg-success",
   warning: "bg-warning",
   danger: "bg-danger",
   accent: "bg-accent",
-  neutral: "bg-default",
+  neutral: "bg-muted/30",
 };
 
 const TONE_SURFACE: Record<PageTone, string> = {
@@ -156,11 +159,14 @@ function IncidentRow({ incident, now, f }: { incident: PublicPageIncident; now: 
     <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-2.5 text-sm">
       <span className={cn("size-1.5 shrink-0 self-center rounded-full", end === null ? "bg-danger" : "bg-muted/60")} aria-hidden />
       <span className="text-foreground font-medium break-words">{incident.name}</span>
-      <span className="text-muted tabular-nums">
-        {f.when.format(incident.startedAt)} → {end === null ? "in corso" : sameDay ? f.time.format(end) : f.when.format(end)}
-      </span>
-      <span className="text-muted">
-        · {incident.endUnknown ? `almeno ${length}, poi il controllo è stato sospeso` : length}
+      {/* One run of text, the separator glued to what precedes it: on a phone
+          the line breaks inside the sentence, never before a lone "·". */}
+      <span className="text-muted min-w-0">
+        <span className="tabular-nums">
+          {f.when.format(incident.startedAt)} → {end === null ? "in corso" : sameDay ? f.time.format(end) : f.when.format(end)}
+        </span>
+        {"\u00a0\u00b7 "}
+        {incident.endUnknown ? `almeno ${length}, poi il controllo è stato sospeso` : length}
       </span>
     </li>
   );

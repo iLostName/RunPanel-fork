@@ -74,7 +74,7 @@ interface Candidate {
 const SKIP_TEXT: Record<Skip, string> = {
   disabled: "Il controllo di salute è spento: sulla pagina comparirà «Nessun dato».",
   "no-port": "Non ha una porta da controllare: sulla pagina comparirà «Nessun dato».",
-  "not-running": "Non è in esecuzione: sulla pagina comparirà «Non risponde».",
+  "not-running": "Non è in esecuzione: sulla pagina comparirà «Non risponde» finché non riparte.",
 };
 
 function sameEntries(a: readonly StatusPageEntry[], b: readonly StatusPageEntry[]): boolean {

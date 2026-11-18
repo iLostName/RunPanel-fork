@@ -37,10 +37,15 @@ async function describe(request: NextRequest, config: StatusPageConfig, saved: b
     .select(["id", "name", "status", "port", "builder_config", "access_mode", "access_allow", "access_port"])
     .execute();
 
+  // Why a project is not asked, in the order the page decides its state
+  // (`publicState`): stopped or in error first, since that is what the page
+  // shows whatever the check would do — "Non risponde" — then the check's own
+  // reasons, which leave it at "Nessun dato". A deploy is passing: no reason.
   const checks: Record<string, { active: boolean; skip: UptimeSkip | null }> = {};
   for (const row of rows) {
     const plan = planFor(row, row.status === "running" ? await runningContract(row.id) : null);
-    checks[row.id] = { active: plan.target !== null, skip: plan.skip };
+    const skip = row.status === "stopped" || row.status === "error" ? "not-running" : row.status === "deploying" ? null : plan.skip;
+    checks[row.id] = { active: plan.target !== null, skip };
   }
   const known = new Set(rows.map((row) => row.id));
   const base = await panelBaseUrl(request);
