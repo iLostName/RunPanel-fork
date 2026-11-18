@@ -73,6 +73,18 @@ The update is refused if the panel is not a git clone with an https or ssh `orig
 
 If the panel did not come back, the commands to restore the previous version are in `<dataDir>/panel-update.json` and in the supervisor's log (systemd's journal, or `logs/autostart.log` with the script).
 
+## Installing the panel as an app
+
+The panel installs on a phone and on a computer as an app: it opens from its own icon, full screen and without the browser's bar. On a phone the main sections are in the bar along the bottom, and the rest (server, notifications, account) is under **Altro** (more).
+
+- **Android, and Chrome or Edge on a computer**: **Installa l'app** (install the app) in the account menu (under **Altro** on a phone), or the install icon in the address bar. On a phone the overview also suggests it once, with a card at the bottom.
+- **iPhone and iPad**: in Safari tap **Share**, then **Add to Home Screen**. **Installa l'app** shows the steps.
+- **HTTPS is required.** No browser installs an app from an address without the padlock (`localhost` is the exception). Opened at `http://<ip>:3000`, **Installa l'app** explains why and leads to **Impostazioni › Generale › Metti il pannello su HTTPS** (put the panel on HTTPS).
+
+A long press on the icon (Android) or a right click (computer) offers the shortcuts **Progetti**, **Backup** and **Nuovo progetto**.
+
+The app always shows live data: pages and API calls come from the server every time, and only the panel's own files, which are renamed with every version, and the icons are kept, so that it opens quickly. With no network, or with the server not answering (for example while it restarts after an update), a page says so and reloads by itself as soon as the server is back. When the panel is updated, the open app shows **Nuova versione del pannello** (new version of the panel) with **Aggiorna**: it reloads only when you press it, so a half-filled form is never lost. Links to other sites open in the browser.
+
 ## Notifications
 
 The bell in the top bar collects everything that happens on the server, for every account and only about what it may see. Sending the same events outside the panel — email, Telegram, Discord, Slack, ntfy or a signed webhook — is set up in **Impostazioni › Generale › Notifiche**: what is notified, the channels, the webhook signature and how bursts are kept from becoming noise are in [Notifications](notifications.md).
