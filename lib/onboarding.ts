@@ -66,7 +66,8 @@ const STEPS: Omit<OnboardingItem, "done">[] = [
     id: "notifications",
     title: "Ricevi un avviso quando qualcosa si rompe",
     description: "Un messaggio quando un deploy fallisce, un'app si ferma o un backup non riesce.",
-    href: "/settings",
+    // Opens the channels section directly, as the bell's link does.
+    href: "/settings?open=notifications",
     cta: "Collega",
   },
 ];
