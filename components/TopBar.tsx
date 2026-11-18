@@ -1,10 +1,11 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { CRUMBS_WITHOUT_PAGE, SEGMENT_LABELS } from "@/lib/nav";
+import { CRUMBS_WITHOUT_PAGE, NAV_SECTIONS, SEGMENT_LABELS, isActiveNav } from "@/lib/nav";
+import { SearchButton } from "@/components/SearchButton";
+import { UserMenu } from "@/components/UserMenu";
 import { useCrumbLabels } from "@/lib/hooks/useCrumbLabel";
 import { ServerSelector } from "@/components/ServerSelector";
 import { useNode, useServerHref } from "@/lib/hooks/useNode";
@@ -35,22 +36,23 @@ function buildCrumbs(pathname: string, named: ReadonlyMap<string, string>): Crum
     });
   }
 
+  // A page that is a tab of a section says so first ("Salute / Monitor"), so
+  // the trail names where it sits in the sidebar, not only its own URL.
+  const section = Object.values(NAV_SECTIONS).find((s) => s.tabs.some((tab) => isActiveNav(pathname, tab)));
+  if (section && crumbs.length > 0) {
+    crumbs.unshift({ label: section.label, href: section.href, linked: true, truncate: false });
+  }
+
   return crumbs;
 }
 
 export function TopBar() {
   const pathname = usePathname();
-  const router = useRouter();
   const crumbs = buildCrumbs(pathname, useCrumbLabels());
   const href = useServerHref();
   // A page about another server says so first, so a deep link is never ambiguous.
   const { isSolo, serverParam, selfId, nameOf } = useNode();
   const serverCrumb = !isSolo && serverParam && serverParam !== selfId ? nameOf(serverParam) : null;
-
-  async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-  }
 
   // The padding is on the RIGHT below `md`: that is where the menu button moved,
   // so the breadcrumb would otherwise run underneath it. It used to be on the
@@ -108,11 +110,9 @@ export function TopBar() {
         text is not rendered.
       */}
       <div className="flex shrink-0 items-center gap-2">
-        <ServerSelector className="hidden sm:block" />
-        <Button variant="ghost" size="sm" onPress={handleLogout} aria-label="Esci">
-          <Icon icon="solar:logout-2-linear" width={16} aria-hidden />
-          <span className="hidden sm:inline">Esci</span>
-        </Button>
+        <SearchButton />
+        <ServerSelector className="hidden lg:block" />
+        <UserMenu />
       </div>
     </header>
   );

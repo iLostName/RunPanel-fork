@@ -6,7 +6,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
-import { NAV_ITEMS, isActiveNav } from "@/lib/nav";
+import { NAV_GROUPS, NAV_ITEMS, isActiveNav, type NavGroupId } from "@/lib/nav";
+import { openCommandPalette } from "@/components/CommandPalette";
 import { useAllowedNav } from "@/lib/hooks/useMe";
 import { useServerHref } from "@/lib/hooks/useNode";
 import { ServerSelector } from "./ServerSelector";
@@ -28,7 +29,10 @@ import logo from "./logo.svg";
  */
 
 /** The four kept in the bar, in the order they are used. */
-const PRIMARY = ["/home", "/projects", "/services", "/monitor"];
+const PRIMARY = ["/home", "/projects", "/services"];
+
+/** The drawer lists every group with its heading, like the desktop rail, settings last. */
+const DRAWER_GROUPS: { id: NavGroupId; label?: string }[] = [...NAV_GROUPS, { id: "footer" }];
 
 export function MobileNav() {
   const pathname = usePathname();
@@ -83,7 +87,6 @@ export function MobileNav() {
   const primary = PRIMARY.map((href) => items.find((item) => item.href === href)).filter(
     (item): item is (typeof items)[number] => Boolean(item)
   );
-  const rest = items.filter((item) => !PRIMARY.includes(item.href));
 
   return (
     <>
@@ -144,8 +147,18 @@ export function MobileNav() {
 
         {/* Same recipe as the desktop rail, so the two do not drift into
             separate visual languages. */}
-        <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
-          {rest.map((item) => {
+        <nav className="flex-1 overflow-y-auto p-2" aria-label="Tutte le sezioni">
+          {DRAWER_GROUPS.map((group) => {
+            const groupItems = items.filter((item) => item.group === group.id);
+            if (groupItems.length === 0) return null;
+            return (
+              <div key={group.id} className="space-y-0.5">
+                {group.label ? (
+                  <p className="text-muted/60 text-meta px-3 pt-4 pb-1.5 tracking-wider uppercase">{group.label}</p>
+                ) : (
+                  group.id === "footer" && <div className="border-separator mx-3 my-2 border-t" />
+                )}
+                {groupItems.map((item) => {
             const active = isActiveNav(pathname, item);
             return (
               <Link
@@ -177,6 +190,9 @@ export function MobileNav() {
                 />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </Link>
+            );
+                })}
+              </div>
             );
           })}
         </nav>
@@ -214,6 +230,15 @@ export function MobileNav() {
             </Link>
           );
         })}
+        {/* Search, which on a phone has no keyboard shortcut to fall back on. */}
+        <button
+          type="button"
+          onClick={openCommandPalette}
+          className="text-meta text-muted flex flex-1 flex-col items-center gap-0.5 py-2 transition-colors"
+        >
+          <Icon icon="solar:magnifier-linear" width={20} aria-hidden />
+          <span className="truncate px-1">Cerca</span>
+        </button>
       </nav>
     </>
   );

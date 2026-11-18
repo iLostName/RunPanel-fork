@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Modal } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
+import { useExpertMode, useThemeMode } from "@/components/Providers";
 import { cn } from "@/lib/utils";
 import { NAV_PAGES } from "@/lib/nav";
 import { useAllowedNav, useCan } from "@/lib/hooks/useMe";
@@ -32,6 +34,14 @@ interface Command {
 }
 
 
+/** What the search button in the top bar sends: the palette is mounted once, in the layout. */
+export const PALETTE_EVENT = "runpanel:palette";
+
+/** Opens the palette from anywhere: the top bar's search, the phone's bottom bar. */
+export function openCommandPalette(): void {
+  window.dispatchEvent(new Event(PALETTE_EVENT));
+}
+
 interface Indexed {
   projects: { id: string; name: string; slug: string; memberId?: string; memberName?: string }[];
   services: { id: string; name: string; type: string; memberId?: string; memberName?: string }[];
@@ -48,6 +58,8 @@ export function CommandPalette() {
   const canCreate = useCan("projects.create");
   const canBackup = useCan("backup");
   const canAutostart = useCan("autostart");
+  const { expert, setExpert } = useExpertMode();
+  const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -118,8 +130,18 @@ export function CommandPalette() {
       }
     };
 
+    // The visible way in: a button rather than a shortcut only some people know.
+    const onOpenRequest = () => {
+      void load();
+      setOpen(true);
+    };
+
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener(PALETTE_EVENT, onOpenRequest);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(PALETTE_EVENT, onOpenRequest);
+    };
   }, [open, router, load, PAGES, href]);
 
   useEffect(() => {
@@ -151,12 +173,32 @@ export function CommandPalette() {
       list.push({
         id: `service:${service.memberId ?? ""}:${service.id}`,
         label: serviceDisplayName(service),
-        hint: `servizio · ${service.type}${service.memberName ? ` · ${service.memberName}` : ""}`,
+        hint: `database · ${service.type}${service.memberName ? ` · ${service.memberName}` : ""}`,
         also: service.name,
         icon: "solar:database-linear",
         run: () => router.push(href(`/services/${service.id}`, service.memberId)),
       });
     }
+
+    list.push({
+      id: "action:expert",
+      label: expert ? "Disattiva la modalità esperto" : "Attiva la modalità esperto",
+      hint: "preferenza",
+      also: "dettagli tecnici avanzate",
+      icon: "solar:code-scan-linear",
+      run: () => {
+        setExpert(!expert);
+        toast.success(expert ? "Modalità esperto disattivata" : "Modalità esperto attivata");
+      },
+    });
+    list.push({
+      id: "action:theme",
+      label: themeMode === "light" ? "Passa al tema scuro" : "Passa al tema chiaro",
+      hint: "preferenza",
+      also: "tema aspetto colori",
+      icon: themeMode === "light" ? "solar:moon-linear" : "solar:sun-2-linear",
+      run: () => setThemeMode(themeMode === "light" ? "dark" : "light"),
+    });
 
     if (canCreate) {
       list.push({
@@ -201,7 +243,7 @@ export function CommandPalette() {
     }
 
     return list;
-  }, [index, router, PAGES, api, href, canCreate, canBackup, canAutostart]);
+  }, [index, router, PAGES, api, href, canCreate, canBackup, canAutostart, expert, setExpert, themeMode, setThemeMode]);
 
   // Keeps the highlighted row in view while the arrows walk past the fold.
   useEffect(() => {
@@ -219,29 +261,30 @@ export function CommandPalette() {
       .slice(0, 12);
   }, [commands, query]);
 
-  if (!open) return null;
-
   const choose = async (command: Command) => {
     setOpen(false);
     setQuery("");
     await command.run();
   };
 
+  /*
+    HeroUI's Modal, opened from state like ConfirmDialog: it brings the focus
+    trap, Escape, the scroll lock and focus going back to whatever opened it.
+    The hand-built overlay had none of them, so Tab walked out of the palette
+    into the page underneath it.
+  */
   return (
-    <div
-      className="bg-backdrop fixed inset-0 z-[60] flex items-start justify-center p-4 pt-[12vh]"
-      onClick={() => setOpen(false)}
-      role="presentation"
+    <Modal.Backdrop
+      isOpen={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setQuery("");
+      }}
     >
-      <div
-        className="border-border bg-overlay shadow-overlay w-full max-w-lg overflow-hidden rounded-[var(--radius)] border"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-label="Cerca ed esegui"
-        aria-modal
-      >
+      <Modal.Container placement="top">
+      <Modal.Dialog aria-label="Cerca ed esegui" className="max-w-lg overflow-hidden p-0">
         <div className="border-border flex items-center gap-2 border-b px-3">
-          <Icon icon="solar:magnifer-linear" width={16} className="text-muted" aria-hidden />
+          <Icon icon="solar:magnifier-linear" width={16} className="text-muted" aria-hidden />
           {/* A combobox over a listbox: the focus stays in the field, and
               aria-activedescendant tells a screen reader which row the arrows
               are on. The rows used to be plain buttons the reader never heard
@@ -272,7 +315,7 @@ export function CommandPalette() {
                 void choose(filtered[active]);
               }
             }}
-            placeholder="Cerca progetti, servizi, pagine…"
+            placeholder="Cerca progetti, database, pagine, azioni…"
             className="text-foreground placeholder:text-muted h-11 flex-1 bg-transparent text-sm outline-none"
             aria-label="Cerca"
           />
@@ -325,7 +368,13 @@ export function CommandPalette() {
             </li>
           ))}
         </ul>
-      </div>
-    </div>
+        <p className="border-border text-muted hidden gap-3 border-t px-3 py-2 text-meta sm:flex">
+          <span>↑↓ per scegliere</span>
+          <span>Invio per aprire</span>
+          <span className="ml-auto">Ctrl K ovunque</span>
+        </p>
+      </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
 }
