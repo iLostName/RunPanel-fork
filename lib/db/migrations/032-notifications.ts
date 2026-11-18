@@ -14,7 +14,8 @@ import { Kysely } from "kysely";
  * The old bot is not moved here. Moving it means decrypting the token, and a
  * migration that needs the panel's key is a migration that cannot run on the
  * day the key is the thing that is wrong. `services/notify/channels.ts` imports
- * it the first time the channels are read, once.
+ * it the first time the channels are read, once; all this does is record that
+ * a store without one has nothing to import (see the end of `up`).
  *
  * `notifications` is what the bell shows. Each row says who may see it: a
  * project or a service (`scope`, `scope_id`) — whoever can see that — or, for
@@ -88,6 +89,30 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("user_id", "text", (col) => col.primaryKey().references("users.id").onDelete("cascade"))
     .addColumn("read_before", "text", (col) => col.notNull())
     .execute();
+
+  /*
+    A store with no old bot has nothing to import, now or ever: say so here,
+    where no key is needed to know it.
+
+    Without this, a fresh server joining a cluster would receive the old bot's
+    settings with the replicated directory — they are still shared, for the
+    members not upgraded yet — and import a bot its owner may have removed from
+    every other server long ago.
+  */
+  const store = db as unknown as Kysely<{ settings: { key: string; value: string } }>;
+  const legacy = await store
+    .selectFrom("settings")
+    .select("key")
+    .where("key", "in", ["telegram_bot_token", "telegram_chat_id"])
+    .where("value", "!=", "")
+    .execute();
+  if (legacy.length === 0) {
+    await store
+      .insertInto("settings")
+      .values({ key: "notify_channels_imported", value: new Date().toISOString() })
+      .onConflict((oc) => oc.column("key").doNothing())
+      .execute();
+  }
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {

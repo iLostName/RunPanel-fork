@@ -147,4 +147,4 @@ Non si blocca niente: un deploy non fallisce perché un canale non risponde. Il 
 
 ## Dalla versione con il solo Telegram
 
-Il bot configurato prima che esistessero i canali diventa il primo canale, *Telegram*, con gli stessi eventi, la prima volta che il pannello legge i suoi canali. In un cluster il bot era condiviso: ogni server ne fa una copia sua, e da lì in poi i canali di ogni server sono suoi.
+Il bot configurato prima che esistessero i canali diventa il primo canale, *Telegram*, con gli stessi eventi, la prima volta che il pannello legge i suoi canali. In un cluster il bot era condiviso: ogni server che lo aveva ne fa una copia sua, e da lì in poi i canali di ogni server sono suoi. Un server aggiunto al cluster dopo l'aggiornamento parte senza canali.

@@ -147,4 +147,4 @@ Nothing is blocked: a deploy does not fail because a channel does not answer. Th
 
 ## Upgrading from Telegram-only
 
-The bot configured before channels existed becomes the first channel, *Telegram*, with the same events, the first time the panel reads its channels. In a cluster the bot was shared: each server makes its own copy, and from then on each server's channels are its own.
+The bot configured before channels existed becomes the first channel, *Telegram*, with the same events, the first time the panel reads its channels. In a cluster the bot was shared: each server that had it makes its own copy, and from then on each server's channels are its own. A server added to the cluster after the upgrade starts with no channels.

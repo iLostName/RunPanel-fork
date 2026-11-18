@@ -350,7 +350,9 @@ const legacyRef = globalThis as typeof globalThis & { __runpanelNotifyLegacyChec
  *
  * Claimed with a write-once setting, so two requests arriving together import
  * it once. A failure after the claim gives the claim back, so the next read
- * tries again instead of losing the bot.
+ * tries again instead of losing the bot. Migration 032 writes the same setting
+ * on a store that had no bot, which is what keeps a server joining a cluster
+ * later from importing the one its directory still replicates.
  */
 export async function importLegacyTelegram(): Promise<void> {
   if (legacyRef.__runpanelNotifyLegacyChecked) return;
