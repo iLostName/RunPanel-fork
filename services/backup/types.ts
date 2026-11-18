@@ -157,6 +157,13 @@ export interface PutOptions {
   /** A line in the run's log: progress, a wait the service asked for. */
   log?: (line: string) => void;
   signal?: AbortSignal;
+  /**
+   * The archive's sha256, when the caller already knows it. A destination
+   * that declares it before sending — a linked RunPanel server, which checks
+   * what arrived against it — is spared reading the whole file once more.
+   * Absent, such a destination computes it itself.
+   */
+  sha256?: string;
 }
 
 export interface DestinationStat {

@@ -171,6 +171,8 @@ export interface SendArgs {
   file: string;
   fileName: string;
   bytes: number;
+  /** The archive's sha256, for the destinations that declare it before sending. */
+  sha256?: string;
   emit: (line: string) => void;
   signal?: AbortSignal;
 }
@@ -180,7 +182,7 @@ export interface SendArgs {
  * time. Each copy's outcome is written as it happens, so a panel that stops
  * halfway knows at the next boot which copies arrived.
  */
-export async function sendCopies({ runId, file, fileName, bytes, emit, signal }: SendArgs): Promise<CopyRecord[]> {
+export async function sendCopies({ runId, file, fileName, bytes, sha256, emit, signal }: SendArgs): Promise<CopyRecord[]> {
   const copies = await runCopies(runId);
   const single = copies.length === 1;
 
@@ -216,7 +218,7 @@ export async function sendCopies({ runId, file, fileName, bytes, emit, signal }:
     try {
       // The run's log and its cancellation go along: an upload that takes an
       // hour, split into parts on Telegram, reports its progress there.
-      const stored = await destination.put(file, fileName, { log: emit, signal });
+      const stored = await destination.put(file, fileName, { log: emit, signal, sha256 });
       await settle(runId, copy, { status: "done", ref: stored.ref, bytes: stored.bytes, error_message: null, finished_at: nowIso() });
       emit(single ? `Archivio pronto: ${formatBytes(stored.bytes)} — ${stored.ref}` : `  ✓ salvata: ${formatBytes(stored.bytes)} — ${stored.ref}`);
     } catch (err) {
@@ -499,7 +501,8 @@ async function retry(run: BackupRunsTable, copy: CopyRecord): Promise<void> {
 
     if (!copy.row) throw new Error("La destinazione non esiste più");
     const destination = buildDestination(copy.row);
-    const stored = await destination.put(sourceFile, fileName, { log: emit });
+    // The source copy was just compared with the run's sha256, so that is its digest.
+    const stored = await destination.put(sourceFile, fileName, { log: emit, sha256: run.checksum ?? undefined });
     await settle(run.id, copy, { status: "done", ref: stored.ref, bytes: stored.bytes, error_message: null, finished_at: nowIso() });
     await syncRunArchive(run.id);
     emit(`  ✓ copia su «${copy.name}» salvata: ${formatBytes(stored.bytes)} — ${stored.ref}`);

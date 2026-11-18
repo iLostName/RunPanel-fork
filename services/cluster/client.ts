@@ -1,4 +1,15 @@
-import { EMPTY_BODY_SHA256, sha256Hex, signedHeaders } from "@/lib/cluster-sign";
+import {
+  EMPTY_BODY_SHA256,
+  HDR_BODY,
+  HDR_MEMBER,
+  HDR_METHOD,
+  HDR_PATH,
+  HDR_SIGNATURE,
+  HDR_TIMESTAMP,
+  HDR_USER,
+  sha256Hex,
+  signedHeaders,
+} from "@/lib/cluster-sign";
 import { pingResponseSchema, type PingResponse } from "@/lib/cluster-schema";
 import { clusterState } from "./state";
 import { recordMemberSeen } from "./state";
@@ -34,7 +45,15 @@ export interface SignedFetchInit {
   signal?: AbortSignal;
   /** Sign with this secret instead of the current one: re-sending a rotated secret to a member that missed it. */
   secret?: string;
+  /**
+   * More headers, outside the signature: a backup upload's token. They can
+   * never replace a signed one, which are set after them.
+   */
+  headers?: Record<string, string>;
 }
+
+/** What only the signature may say: never taken from `init.headers`. */
+const SIGNED_HEADERS = new Set([HDR_MEMBER, HDR_TIMESTAMP, HDR_SIGNATURE, HDR_USER, HDR_BODY, HDR_METHOD, HDR_PATH]);
 
 export async function signedFetch(member: { id: string; url: string }, path: string, init: SignedFetchInit = {}): Promise<Response> {
   const state = await clusterState();
@@ -47,14 +66,18 @@ export async function signedFetch(member: { id: string; url: string }, path: str
   const pathname = q === -1 ? path : path.slice(0, q);
   const query = q === -1 ? "" : path.slice(q);
 
-  const headers: Record<string, string> = signedHeaders(init.secret ?? state.secret, {
-    method,
-    path: pathname,
-    query,
-    memberId: state.selfId,
-    userId: init.userId ?? null,
-    bodySha256: bodyBytes ? sha256Hex(bodyBytes) : EMPTY_BODY_SHA256,
-  });
+  const extra = Object.fromEntries(Object.entries(init.headers ?? {}).filter(([name]) => !SIGNED_HEADERS.has(name.toLowerCase())));
+  const headers: Record<string, string> = {
+    ...extra,
+    ...signedHeaders(init.secret ?? state.secret, {
+      method,
+      path: pathname,
+      query,
+      memberId: state.selfId,
+      userId: init.userId ?? null,
+      bodySha256: bodyBytes ? sha256Hex(bodyBytes) : EMPTY_BODY_SHA256,
+    }),
+  };
   if (init.contentType) headers["content-type"] = init.contentType;
   if (init.accept) headers.accept = init.accept;
 
