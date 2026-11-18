@@ -19,9 +19,56 @@ import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { CommandField } from "@/components/ui/CommandField";
 import { PortHint, ServiceLinkHint } from "@/components/DeployHints";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
+import { normalizeContractInput } from "@/lib/deploy-contract";
+import { commandsOf, contractWithCommands, isPlainObject, type RawContract } from "@/lib/contract-commands";
 
 type SourceType = "github" | "upload";
-type RuntimeType = "node" | "docker" | "compose" | "custom";
+type RuntimeType = "node" | "static" | "docker" | "compose" | "custom";
+
+const RUNTIME_IDS: readonly RuntimeType[] = ["node", "static", "docker", "compose", "custom"];
+
+function isRuntime(value: string): value is RuntimeType {
+  return (RUNTIME_IDS as readonly string[]).includes(value);
+}
+
+/** The project as this form needs it, from `GET /api/projects/:id`. */
+interface LoadedProject {
+  slug: string;
+  source_type: SourceType;
+  source_url: string | null;
+  source_branch: string;
+  runtime_type: string;
+  port: number | null;
+  builder_config: string;
+  deploy_count: number;
+  /** Where the checkout is; `real` is null until code has landed there. */
+  repo_location?: { real: string | null };
+}
+
+/**
+ * Whether the project already has an app: an address, code on disk, a deploy
+ * or a saved contract. A project made a moment ago by the wizard has none of
+ * them, and its `source_type` is only the column's default ("upload"), not a
+ * choice anybody made, so the form keeps its own defaults for it.
+ */
+function isConfigured(project: LoadedProject, contract: RawContract): boolean {
+  return (
+    Boolean(project.source_url) ||
+    project.deploy_count > 0 ||
+    Boolean(project.repo_location?.real) ||
+    Object.keys(contract).length > 0
+  );
+}
+
+/** The stored contract, sparse as it was saved, in the current shape. */
+function storedContract(json: string): RawContract {
+  try {
+    const parsed: unknown = json ? JSON.parse(json) : {};
+    return isPlainObject(parsed) ? normalizeContractInput(parsed) : {};
+  } catch {
+    return {};
+  }
+}
 
 interface GhRepo {
   id: number;
@@ -37,6 +84,7 @@ interface GhRepo {
 
 const RUNTIMES: { id: RuntimeType; label: string; hint: string; icon: string }[] = [
   { id: "node", label: "Node.js", hint: "Rileva il package manager e lo script di build", icon: "solar:code-linear" },
+  { id: "static", label: "Sito statico", hint: "Pubblica i file HTML, con una build se serve", icon: "solar:document-text-linear" },
   { id: "docker", label: "Docker", hint: "Costruisce il Dockerfile del repository", icon: "solar:box-linear" },
   { id: "compose", label: "Compose", hint: "Avvia lo stack descritto dal compose file", icon: "solar:layers-linear" },
   { id: "custom", label: "Custom", hint: "Comandi espliciti, qualsiasi linguaggio", icon: "solar:command-linear" },
@@ -52,6 +100,13 @@ const RUNTIME_REQUIREMENTS: Record<RuntimeType, React.ReactNode> = {
       Serve un <Code>package.json</Code> nella root. Il lockfile decide il package manager
       (<Code>bun.lock</Code>, <Code>pnpm-lock.yaml</Code>, <Code>yarn.lock</Code>, altrimenti npm) e
       lo script <Code>build</Code> viene eseguito se esiste.
+    </>
+  ),
+  static: (
+    <>
+      Serve un <Code>index.html</Code>: nella root, oppure in <Code>dist</Code>, <Code>build</Code>,{" "}
+      <Code>public</Code> o <Code>out</Code> dopo il comando di build, che è facoltativo. Non c&apos;è
+      un passo di install: i file vengono pubblicati così come sono.
     </>
   ),
   docker: (
@@ -109,6 +164,41 @@ export function AppForm({
   const [manualUrl, setManualUrl] = useState(false);
   const zipInputRef = useRef<HTMLInputElement>(null);
 
+  /*
+    The project as it is now, so the form starts from it and sends back only
+    what changed. It used to start from blank defaults and send all of them: on
+    a project that was already configured, saving reset its runtime to Node,
+    cleared its port and replaced its whole deploy contract.
+
+    Seeded once, during render rather than in an effect (as `SettingsTab` does),
+    and never again: a later refresh must not overwrite what is being typed.
+  */
+  const {
+    data: loaded,
+    error: loadError,
+    refresh: reload,
+  } = useResource<LoadedProject>(api(`/api/projects/${projectId}`));
+  const [seeded, setSeeded] = useState(false);
+  const configured = loaded ? isConfigured(loaded, storedContract(loaded.builder_config)) : false;
+  if (loaded && !seeded) {
+    setSeeded(true);
+    // A new project keeps the form's own defaults (see `isConfigured`).
+    if (configured) {
+      setSourceType(loaded.source_type === "upload" ? "upload" : "github");
+      setSourceUrl(loaded.source_url ?? "");
+      // A repository already set is shown as its address, editable, rather
+      // than hidden behind the picker with nothing selected.
+      if (loaded.source_url) setManualUrl(true);
+      setBranch(loaded.source_branch || "main");
+      if (isRuntime(loaded.runtime_type)) setRuntime(loaded.runtime_type);
+      setPort(loaded.port?.toString() ?? "");
+      const commands = commandsOf(storedContract(loaded.builder_config));
+      setInstallCmd(commands.install ?? "");
+      setBuildCmd(commands.build ?? "");
+      setStartCmd(commands.start ?? "");
+    }
+  }
+
   const { data: presetData } = useResource<{
     presets: {
       id: string;
@@ -149,11 +239,17 @@ export function AppForm({
   }
 
   async function create() {
+    // The button waits for the project; this is only the type narrowing.
+    if (!loaded) return;
+
     if (sourceType === "github" && !sourceUrl.trim()) {
       toast.error("Serve l'URL del repository");
       return;
     }
-    if (sourceType === "upload" && !zipFile) {
+    // A project already running from a ZIP can change its commands without
+    // sending the same archive again; a new one, or a switch to a ZIP, needs one.
+    const hasArchive = configured && loaded.source_type === "upload";
+    if (sourceType === "upload" && !zipFile && !hasArchive) {
       toast.error("Serve un file ZIP");
       return;
     }
@@ -162,42 +258,58 @@ export function AppForm({
       return;
     }
 
+    // Only what differs from the project as loaded. An unchanged repository
+    // address is not sent, so saving the commands does not need the GitHub
+    // permission, and an unchanged branch keeps its pin and its poll baseline.
+    const body: Record<string, unknown> = {};
+    const nextUrl = sourceType === "github" ? sourceUrl.trim() : null;
+    const nextBranch = branch.trim() || "main";
+    const nextPort = port.trim() ? Number.parseInt(port, 10) : null;
+    if (sourceType !== loaded.source_type) body.sourceType = sourceType;
+    if (nextUrl !== loaded.source_url) body.sourceUrl = nextUrl;
+    if (nextBranch !== loaded.source_branch) body.sourceBranch = nextBranch;
+    if (runtime !== loaded.runtime_type) body.runtimeType = runtime;
+    if (nextPort !== loaded.port) body.port = nextPort;
+    // Applied server-side: the preset's contract lives with its `detect`
+    // function, which reads the filesystem and cannot cross to a browser. It
+    // is laid under the contract sent, so one is sent whenever a preset is.
+    if (presetId) body.presetId = presetId;
+    const contract = contractWithCommands(
+      storedContract(loaded.builder_config),
+      { install: installCmd, build: buildCmd, start: startCmd },
+      Boolean(presetId)
+    );
+    if (contract) body.builderConfig = contract;
+
+    if (Object.keys(body).length === 0 && !zipFile) {
+      toast("Nessuna modifica da salvare");
+      router.push(href(`/projects/${projectId}`));
+      return;
+    }
+
     setSaving(true);
     try {
-      const res = await fetch(api(`/api/projects/${projectId}`), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceType,
-          sourceUrl: sourceType === "github" ? sourceUrl.trim() : null,
-          sourceBranch: branch || "main",
-          runtimeType: runtime,
-          port: port ? Number.parseInt(port, 10) : null,
-          // Applied server-side: the preset's contract lives with its `detect`
-          // function, which reads the filesystem and cannot cross to a browser.
-          presetId,
-          builderConfig: {
-            version: 1,
-            commands: {
-              install: installCmd.trim() || undefined,
-              build: buildCmd.trim() || undefined,
-              start: startCmd.trim() || undefined,
-            },
-          },
-        }),
-      });
+      let slug = loaded.slug;
+      if (Object.keys(body).length > 0) {
+        const res = await fetch(api(`/api/projects/${projectId}`), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
 
-      if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error ?? "Configurazione non riuscita");
-        return;
+        if (!res.ok) {
+          const data = await res.json();
+          toast.error(data.error ?? "Configurazione non riuscita");
+          return;
+        }
+        const updated = (await res.json()) as { slug?: string };
+        slug = updated.slug ?? slug;
       }
 
       if (sourceType === "upload" && zipFile) {
-        const project = await res.json();
         const form = new FormData();
         form.append("file", zipFile);
-        form.append("projectSlug", project.slug);
+        form.append("projectSlug", slug);
         const upload = await fetch(api("/api/upload"), { method: "POST", body: form });
         if (!upload.ok) {
           const data = await upload.json();
@@ -213,6 +325,15 @@ export function AppForm({
     } finally {
       setSaving(false);
     }
+  }
+
+  // Without the project as it is now, a save could only send blanks over it.
+  if (!loaded && loadError) {
+    return (
+      <div className="max-w-2xl">
+        <LoadError what="il progetto" error={loadError} onRetry={() => void reload()} />
+      </div>
+    );
   }
 
   return (
@@ -387,7 +508,11 @@ export function AppForm({
             />
             <Button variant="outline" size="sm" onPress={() => zipInputRef.current?.click()}>
               <Icon icon="solar:upload-linear" width={16} aria-hidden />
-              {zipFile ? zipFile.name : "Scegli un file"}
+              {zipFile
+                ? zipFile.name
+                : configured && loaded?.source_type === "upload"
+                  ? "Carica una nuova versione (facoltativo)"
+                  : "Scegli un file"}
             </Button>
           </Field>
         )}
@@ -505,7 +630,7 @@ export function AppForm({
 
       <div className="flex items-center justify-end gap-3">
         {secondaryAction}
-        <Button variant="primary" isPending={saving} onPress={create}>
+        <Button variant="primary" isPending={saving} isDisabled={!loaded} onPress={create}>
           {submitLabel}
         </Button>
       </div>
