@@ -25,6 +25,7 @@ function useInsecureConnection(): boolean {
 }
 import { Segmented } from "@/components/ui/Segmented";
 import { SelectField } from "@/components/ui/SelectField";
+import { SecondStep } from "./SecondStep";
 
 /**
  * The first screen the operator ever sees, and the one that was entirely in
@@ -102,6 +103,8 @@ export default function LoginPage() {
   // you have looked back at what you typed.
   const [error, setError] = useState<string | null>(null);
   const [linkedAs, setLinkedAs] = useState<LinkRole | null>(null);
+  // Set once the password was right and the account asks for a code.
+  const [challenge, setChallenge] = useState<string | null>(null);
 
   const isFirstRun = check?.firstRun ?? null;
 
@@ -131,7 +134,11 @@ export default function LoginPage() {
         body: JSON.stringify({ email: email.trim(), password }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) {
+      if (res.ok && data.twoFactorRequired) {
+        // The password was right: it is not needed again, so it does not stay in memory.
+        setPassword("");
+        setChallenge(String(data.challenge));
+      } else if (res.ok) {
         router.push(data.emailRequired ? "/setup-email" : "/home");
       } else {
         setError(data.error || "Credenziali non valide");
@@ -261,6 +268,27 @@ export default function LoginPage() {
           ) : (
             <p className="text-muted text-center text-sm">Accedi da uno dei pannelli del cluster.</p>
           )}
+        </Panel>
+      </div>
+    );
+  }
+
+  if (challenge) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center p-4">
+        <Panel className="w-full max-w-md p-6 sm:p-8">
+          <SecondStep
+            challenge={challenge}
+            onExpired={(message) => {
+              setChallenge(null);
+              setError(message);
+            }}
+            onSignedIn={(emailRequired) => router.push(emailRequired ? "/setup-email" : "/home")}
+            onBack={() => {
+              setChallenge(null);
+              setError(null);
+            }}
+          />
         </Panel>
       </div>
     );

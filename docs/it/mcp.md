@@ -45,6 +45,19 @@ Un token smette di funzionare subito se viene revocato, se scade, se l'account v
 
 Con `list_endpoints` + `api_get` / `api_request` Claude raggiunge tutto il pannello: backup, domini, utenti, aggiornamenti, Docker, notifiche. Ogni strumento accetta `server` per agire su un altro server del [cluster](multi-server.md).
 
+## Riferimento API
+
+**Impostazioni › AI e API › Riferimento API** elenca ogni endpoint che un token può chiamare, diviso per area: metodo, percorso, parametri, corpo e tipo di risposta. Viene dallo stesso catalogo che restituisce `list_endpoints` (`services/mcp/catalog.ts`), quindi non può restare indietro rispetto alle rotte: un test fallisce quando i due non coincidono. Le descrizioni sono in inglese, lo stesso testo che legge l'assistente.
+
+Si cerca per qualunque parola di percorso, descrizione o parametri e si filtra per metodo. Ogni endpoint ha una riga curl da copiare, con il token in una variabile:
+
+```bash
+export RUNPANEL_TOKEN="rpk_…"
+curl "https://pannello.example.com/api/projects" -H "Authorization: Bearer $RUNPANEL_TOKEN"
+```
+
+Accesso, verifica in due passaggi e gestione dei token non ci sono: funzionano solo dal browser.
+
 ## Limiti
 
 - Gli stream in tempo reale (SSE) e i download binari non si leggono via MCP: per seguire un deploy si interroga `get_deployment`.

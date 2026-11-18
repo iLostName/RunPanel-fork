@@ -172,7 +172,7 @@ export async function queryAudit(principal: Principal, q: AuditQuery) {
   };
 }
 
-async function targetNames(entries: ReadonlyArray<{ scope: string | null; scopeId: string | null }>) {
+export async function targetNames(entries: ReadonlyArray<{ scope: string | null; scopeId: string | null }>) {
   const ids = (scope: string) => [...new Set(entries.filter((e) => e.scope === scope && e.scopeId).map((e) => e.scopeId!))];
   const db = await getDb();
   const names = new Map<string, string>();

@@ -506,6 +506,51 @@ export interface ApiTokensTable {
   expires_at: string | null;
 }
 
+/** Two-step sign-in of one account, on this panel only — see migration 035. */
+export interface UserTwoFactorTable {
+  user_id: string;
+  /** The base32 TOTP seed, encrypted with the panel key (purpose `totp`). */
+  secret_enc: string;
+  /** Null while the setup waits for its first code: not enabled yet. */
+  enabled_at: string | null;
+  /** The last time step a code was accepted for; no code of it or before is accepted again. */
+  last_used_step: number | null;
+  created_at: string;
+}
+
+export interface UserRecoveryCodesTable {
+  id: string;
+  user_id: string;
+  /** `s1$<salt>$<scrypt>` (lib/totp.ts). The code itself is shown once and never stored. */
+  code_hash: string;
+  used_at: string | null;
+  created_at: string;
+}
+
+/** A browser that may skip the code until `expires_at`: "ricorda questo dispositivo". */
+export interface TrustedDevicesTable {
+  id: string;
+  user_id: string;
+  /** SHA-256 of the cookie value. */
+  token_hash: string;
+  user_agent: string | null;
+  ip: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string;
+}
+
+/** A sign-in whose password was right, waiting for the code. */
+export interface LoginChallengesTable {
+  id: string;
+  user_id: string;
+  /** SHA-256 of the token the sign-in page holds for the second step. */
+  token_hash: string;
+  attempts: number;
+  created_at: string;
+  expires_at: string;
+}
+
 /** An account — see migration 023 and lib/authz.ts. */
 export interface UsersTable {
   id: string;
@@ -753,6 +798,10 @@ export interface Database {
   user_permissions: UserPermissionsTable;
   user_grants: UserGrantsTable;
   user_invites: UserInvitesTable;
+  user_two_factor: UserTwoFactorTable;
+  user_recovery_codes: UserRecoveryCodesTable;
+  trusted_devices: TrustedDevicesTable;
+  login_challenges: LoginChallengesTable;
   audit_log: AuditLogTable;
   rate_limits: RateLimitsTable;
   cluster_members: ClusterMembersTable;

@@ -5,6 +5,7 @@ import { createSession, destroyUserSessions, verifyPassword } from "@/lib/auth";
 import { trustedClientIp } from "@/lib/client-ip";
 import { clearRateLimit, consumeRateLimit } from "@/lib/rate-limit";
 import { getUser, normalizeEmail, setOwnEmail, setOwnPassword } from "@/lib/users";
+import { forgetTrustedDevices } from "@/lib/two-factor";
 
 /**
  * One's own account: email and password.
@@ -78,8 +79,10 @@ export async function PATCH(request: NextRequest) {
     await audit({ userId: user.id, category: "security", action: "account.password", scope: "user", scopeId: user.id, request });
     // Changing the password ends every other device's session — that is the
     // usual reason for changing it. The current one is then re-issued so the
-    // person doing it is not thrown out of the page they are on.
+    // person doing it is not thrown out of the page they are on. The browsers
+    // remembered for two-step sign-in ask for the code again, for the same reason.
     await destroyUserSessions(user.id);
+    await forgetTrustedDevices(user.id);
     await createSession(user.id, {
       userAgent: request.headers.get("user-agent") ?? undefined,
       ip: trustedClientIp(request) ?? undefined,

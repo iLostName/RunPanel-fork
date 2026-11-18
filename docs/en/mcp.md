@@ -45,6 +45,19 @@ A token stops working at once when it is revoked or expires, when its account is
 
 With `list_endpoints` + `api_get` / `api_request` Claude reaches the whole panel: backups, domains, users, updates, Docker, notifications. Every tool takes `server` to act on another server of the [cluster](multi-server.md).
 
+## API reference
+
+**Settings › AI e API › Riferimento API** lists every endpoint a token can call, grouped by area: method, path, query parameters, body and the kind of answer. It is read from the same catalog `list_endpoints` returns (`services/mcp/catalog.ts`), so it cannot drift from the routes: a test fails when the two disagree. The descriptions are in English, the same text the assistant reads.
+
+It searches by any word of path, description or parameters and filters by method. Each endpoint has a curl line to copy, with the token in a variable:
+
+```bash
+export RUNPANEL_TOKEN="rpk_…"
+curl "https://panel.example.com/api/projects" -H "Authorization: Bearer $RUNPANEL_TOKEN"
+```
+
+Signing in, two-step verification and the token management are not in it: they only work from a browser.
+
 ## Limits
 
 - Live streams (SSE) and binary downloads cannot be read over MCP: to follow a deploy, poll `get_deployment`.
