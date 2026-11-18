@@ -81,4 +81,4 @@ export interface Credentials {
 export type From = "network" | "container" | "host";
 
 /** The sections, on the layout narrow enough to need them one at a time. */
-export type ServiceTabId = "connection" | "console" | "data";
+export type ServiceTabId = "overview" | "connection" | "console" | "databases" | "backup" | "settings";
