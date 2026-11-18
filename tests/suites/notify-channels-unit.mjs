@@ -39,6 +39,7 @@ export async function run({ repoRoot }) {
   const channels = await load("lib", "notify-channels.ts");
   const schema = await load("lib", "notify-schema.ts");
   const messages = await load("services", "notify", "messages.ts");
+  const mailErrors = await load("lib", "mail-errors.ts");
 
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -393,6 +394,41 @@ export async function run({ repoRoot }) {
 
     r.check("marking read takes ids or all", readNotificationsSchema.safeParse({ ids: ["a"] }).success && readNotificationsSchema.safeParse({ all: true }).success);
     r.check("but not nothing", !readNotificationsSchema.safeParse({}).success && !readNotificationsSchema.safeParse({ ids: [] }).success);
+  }
+
+  // --- SMTP failures, in words -------------------------------------------------------
+  //
+  // Shaped like what nodemailer throws, read off a real run against a local
+  // server: a refused connection arrives as ESOCKET, not ECONNECTION.
+  {
+    const { explainMailError, isTransientMailError } = mailErrors;
+    const smtp = { host: "smtp.esempio.it", port: 587, security: "starttls" };
+    const say = (err) => explainMailError(err, smtp);
+
+    const refused = { code: "ESOCKET", message: "connect ECONNREFUSED 10.0.0.5:587" };
+    r.check("a closed port says the connection was refused", /rifiutato la connessione/.test(say(refused)), say(refused));
+    r.check("and is worth another try", isTransientMailError(refused));
+
+    const auth = { code: "EAUTH", responseCode: 535, response: "535 5.7.8 Authentication credentials invalid", message: "Invalid login: 535 5.7.8" };
+    r.check("a refused password points at app passwords", /password per le app/.test(say(auth)), say(auth));
+    r.check("and is not retried", !isTransientMailError(auth));
+
+    const tls = { code: "ESOCKET", message: "C0:error:0A00010B:SSL routines:ssl3_get_record:wrong version number" };
+    r.check("a TLS mode that does not match the port says so", /465 vuole «TLS» e la 587 «STARTTLS»/.test(say(tls)), say(tls));
+    r.check("and is not retried", !isTransientMailError(tls));
+
+    const cert = { code: "ESOCKET", message: "self-signed certificate in certificate chain" };
+    r.check("a bad certificate is named, with the way out", /certificato/.test(say(cert)) && /opzioni avanzate/.test(say(cert)), say(cert));
+
+    const timeout = { code: "ETIMEDOUT", message: "Connection timeout" };
+    r.check("a timeout suggests a blocked port", /firewall/.test(say(timeout)) && /587/.test(say(timeout)), say(timeout));
+    r.check("and is retried", isTransientMailError(timeout));
+
+    r.check("an unknown host is a DNS problem", /non trovato/.test(say({ code: "EDNS", message: "getaddrinfo ENOTFOUND smtp.esempio.it" })));
+    r.check("a refused recipient quotes the server", /User unknown/.test(say({ code: "EENVELOPE", response: "550 5.1.1 User unknown" })));
+    r.check("a 4xx is temporary", isTransientMailError({ responseCode: 421, response: "421 try later" }));
+    r.check("a 5xx is not", !isTransientMailError({ responseCode: 554, response: "554 rejected" }));
+    r.check("something else still says something", say("boom").length > 0 && say({}).length > 0);
   }
 
   return r.result();
