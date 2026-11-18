@@ -41,8 +41,9 @@ function isPlainClick(event: React.MouseEvent): boolean {
  * with — no request, no jump to the top, and Back walks through the folders.
  *
  * While a project is dragged the strip sticks under the top bar, so the
- * folders are in reach from the bottom of a long list, and the tile that would
- * change nothing (where the project already is) steps back.
+ * folders are in reach from the bottom of a long list; the places it can go
+ * get a dashed edge, and the rest — "Tutti", and the folder it is already in —
+ * step back.
  */
 export function FolderTiles({
   tiles,
@@ -199,7 +200,9 @@ function Tile({
             : drag && accepts
               ? "bg-surface border-accent/60 border-dashed"
               : "border-border bg-surface hover:bg-surface-hover shadow-[var(--surface-shadow)]",
-        drag && !accepts && !selected && "opacity-50"
+        // Every tile a drop would not change steps back, the open one too: lit
+        // by its selection, it read as one more place to drop.
+        drag && !accepts && "opacity-50"
       )}
     >
       {/* Icon above the words on a phone, where a tile is too narrow for both
