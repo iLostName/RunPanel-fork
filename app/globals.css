@@ -460,3 +460,65 @@
     scroll-behavior: auto !important;
   }
 }
+
+@layer components {
+  /*
+   * Placeholders (components/ui/Skeletons.tsx) show only once loading has
+   * taken a moment. Most answers come back sooner, and a grey block that
+   * blinks for a few frames before the content reads as a flash, not as
+   * loading. Hidden rather than transparent, because `pulse` owns opacity;
+   * both animations sit in one declaration so neither replaces the other.
+   */
+  .skeleton {
+    animation:
+      skeleton-appear 0s linear 150ms both,
+      var(--animate-pulse);
+  }
+
+  /*
+   * The navigation bar (components/NavigationProgress.tsx). A transition
+   * rather than keyframes, so that completing starts from wherever the bar has
+   * got to instead of jumping: it eases towards 85% — a guess, since nobody
+   * knows how long a page will take — and on arrival runs to the end and fades.
+   */
+  .nav-progress {
+    position: fixed;
+    inset-inline: 0;
+    top: 0;
+    z-index: 70;
+    height: 2px;
+    pointer-events: none;
+  }
+
+  .nav-progress-bar {
+    height: 100%;
+    transform-origin: left;
+    transform: scaleX(0.85);
+    transition:
+      transform 8s cubic-bezier(0.1, 0.7, 0.2, 1),
+      opacity 200ms ease-out;
+  }
+
+  @starting-style {
+    .nav-progress-bar {
+      transform: scaleX(0.04);
+    }
+  }
+
+  .nav-progress[data-phase="finishing"] .nav-progress-bar {
+    transform: scaleX(1);
+    opacity: 0;
+    transition:
+      transform 200ms ease-out,
+      opacity 200ms ease-out 100ms;
+  }
+}
+
+@keyframes skeleton-appear {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}

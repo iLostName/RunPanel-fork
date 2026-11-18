@@ -12,7 +12,7 @@ import { Technical } from "@/components/ui/Technical";
 import { HostCharts } from "@/components/metrics/HostCharts";
 import { RangePicker, useMetricRange } from "@/components/metrics/RangePicker";
 import { formatMetric } from "@/components/charts/MetricChart";
-import MonitorLoading from "./loading";
+import { MonitorSkeleton } from "./_components/MonitorSkeleton";
 import { monitorDescription } from "./_components/copy";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { percentOf, type UsageSort } from "@/lib/metrics-math";
@@ -144,7 +144,7 @@ export default function MonitorPage() {
 
   const description = monitorDescription(isSolo);
   const loading = isSolo ? solo.loading && !solo.data : cluster.loading && !cluster.data;
-  if (loading) return <MonitorLoading />;
+  if (loading) return <MonitorSkeleton />;
 
   // One row of controls above everything they scope: the period of every
   // chart, the order of every list, on every server of the page.
