@@ -2,6 +2,7 @@
 
 import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
+import { useTabStrip } from "@/lib/hooks/useTabStrip";
 
 /**
  * The row of section tabs.
@@ -16,6 +17,9 @@ import { cn } from "@/lib/utils";
  * `Segmented` is the sibling for "pick one of a few values". This is for "which
  * part of this page am I looking at" — a different question, and the underline
  * is what says so.
+ *
+ * On a phone the row scrolls sideways, settles on a tab, and keeps the active
+ * one in view (`useTabStrip`); each tab is 44px tall for a thumb.
  */
 
 export interface TabItem<T extends string> {
@@ -39,11 +43,13 @@ export function Tabs<T extends string>({
   label: string;
   className?: string;
 }) {
+  const strip = useTabStrip<HTMLDivElement>(value);
   return (
     <div
+      ref={strip}
       role="tablist"
       aria-label={label}
-      className={cn("border-border mb-5 flex gap-1 overflow-x-auto border-b", className)}
+      className={cn("tab-strip border-border mb-5 flex gap-1 overflow-x-auto border-b", className)}
     >
       {tabs.map((tab) => {
         const active = value === tab.id;
@@ -54,7 +60,7 @@ export function Tabs<T extends string>({
             aria-selected={active}
             onClick={() => onChange(tab.id)}
             className={cn(
-              "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors",
+              "touch-chrome flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors max-md:min-h-11",
               active
                 ? "border-accent text-foreground font-medium"
                 : "text-muted hover:text-foreground border-transparent"
