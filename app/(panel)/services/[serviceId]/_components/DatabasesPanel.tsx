@@ -43,9 +43,12 @@ export function DatabasesPanel({
   port,
   envKey,
   credentials,
+  onBrowse,
 }: {
   serviceId: string;
   type: string;
+  /** Opens one in the "Dati" tab. Absent without the permission to read rows. */
+  onBrowse?: (name: string) => void;
   /** The host the paste-ready URL should use — chosen by the page. */
   host: string;
   port: number;
@@ -171,9 +174,15 @@ export function DatabasesPanel({
                     {!database.present && (
                       <span className="text-warning text-meta">non trovato nel motore</span>
                     )}
+                    {onBrowse && database.present && data?.running && (
+                      <Button size="sm" variant="ghost" className="ml-auto" onPress={() => onBrowse(database.name)}>
+                        <Icon icon="solar:documents-minimalistic-linear" width={15} aria-hidden />
+                        Sfoglia
+                      </Button>
+                    )}
                     {!database.primary && (
                       <DeleteButton
-                        className="ml-auto"
+                        className={onBrowse && database.present && data?.running ? undefined : "ml-auto"}
                         label={`Elimina il database ${database.name}`}
                         confirm={{
                           title: `Eliminare il database "${database.name}"?`,
