@@ -23,7 +23,7 @@ export async function run({ repoRoot }) {
     },
   });
 
-  const { isBlockedRepoHost, repoUrlSchema, updateProjectSchema, createServiceSchema } = await import(
+  const { isBlockedRepoHost, repoUrlSchema, updateProjectSchema, createServiceSchema, envVarsSchema, envVarsIssueText } = await import(
     pathToFileURL(join(repoRoot, "lib", "validation.ts")).href
   );
   const { SERVICE_VERSIONS } = await import(pathToFileURL(join(repoRoot, "lib", "service-versions.ts")).href);
@@ -127,6 +127,21 @@ export async function run({ repoRoot }) {
   r.check("a database with a slash is refused", !credentialsAccepted({ database: "a/b" }));
   r.check("empty credentials still mean generated ones", credentialsAccepted({ user: "", password: "", database: "" }));
   r.check("the wizard's redis credentials are accepted", serviceAccepted({ type: "redis", version: "8", credentials: { database: "0" } }));
+
+  // --- variables: the error names the variable, in Italian ---------------------
+  const envIssue = (vars) => {
+    const body = { vars };
+    const parsed = envVarsSchema.safeParse(body);
+    return parsed.success ? null : envVarsIssueText(body, parsed.error.issues);
+  };
+  r.check("valid variables pass", envIssue([{ key: "API_URL", value: "x" }]) === null);
+  const badName = envIssue([{ key: "OK", value: "1" }, { key: "1API", value: "2" }]);
+  r.check("a bad name is named, with the rule in Italian", badName?.startsWith("«1API»: Nome non valido") === true, String(badName));
+  r.check("an empty name says which row", envIssue([{ key: "", value: "1" }]) === "La variabile 1 non ha un nome");
+  r.check("a long value says so", envIssue([{ key: "BIG", value: "x".repeat(70000) }])?.includes("troppo lungo") === true);
+  r.check("too many variables says the limit", envIssue(Array.from({ length: 501 }, (_, i) => ({ key: `K${i}`, value: "" }))) === "Troppe variabili: il massimo è 500");
+  const repoMessage = repoUrlSchema.safeParse("http://github.com/a/b").error?.issues[0]?.message ?? "";
+  r.check("a repository address that is not https is refused in Italian", repoMessage.startsWith("L'indirizzo del repository"), repoMessage);
 
   return r.result();
 }

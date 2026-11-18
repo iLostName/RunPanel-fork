@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
 
     if (existing) {
       return NextResponse.json(
-        { error: `A project with slug "${slug}" already exists` },
+        { error: `Esiste già un progetto con il nome interno "${slug}": scegline un altro` },
         { status: 409 }
       );
     }

@@ -120,7 +120,7 @@ export const repoUrlSchema = z
       }
       return url.protocol === "https:" && !isBlockedRepoHost(url.hostname);
     },
-    { message: "Repository URL must be a public https:// address" }
+    { message: "L'indirizzo del repository deve essere pubblico e iniziare con https://" }
   )
   .transform((raw) => {
     const url = new URL(raw);
@@ -270,7 +270,7 @@ export const updateProjectSchema = z.object({
  */
 export const envVarsSchema = z.object({
   vars: z.array(z.object({
-    key: z.string().min(1).max(64).regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Invalid env var name"),
+    key: z.string().min(1).max(64).regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Nome non valido: usa lettere, numeri e _ e non iniziare con un numero"),
     value: z.string().max(65536),
   })).max(500),
 });
@@ -1110,3 +1110,26 @@ export const acmeEmailSchema = z.object({
       message: "Un indirizzo email valido, o vuoto",
     }),
 });
+
+/**
+ * The first problem with a variables body, as a sentence that names the variable.
+ *
+ * "Dati non validi" left the operator to find which of forty rows was wrong;
+ * this says `«1API»: Nome non valido…`, or which value is too long.
+ */
+export function envVarsIssueText(body: unknown, issues: readonly { path: PropertyKey[]; message: string; code?: string }[]): string {
+  const issue = issues[0];
+  if (!issue) return "Dati non validi";
+  const [root, index, field] = issue.path;
+  if (root === "vars" && typeof index === "number") {
+    const rows = (body as { vars?: { key?: unknown }[] } | null)?.vars;
+    const key = Array.isArray(rows) && typeof rows[index]?.key === "string" ? rows[index].key : null;
+    const name = key ? `«${key}»` : `La variabile ${index + 1}`;
+    if (field === "value") return `${name}: il valore è troppo lungo (massimo 64 KB)`;
+    if (field === "key" && issue.code === "too_small") return `La variabile ${index + 1} non ha un nome`;
+    if (field === "key" && issue.code === "too_big") return `${name}: il nome è troppo lungo (massimo 64 caratteri)`;
+    return `${name}: ${issue.message}`;
+  }
+  if (root === "vars" && issue.code === "too_big") return "Troppe variabili: il massimo è 500";
+  return issue.message || "Dati non validi";
+}

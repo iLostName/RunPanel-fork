@@ -6,7 +6,7 @@ import { PROJECT_ACTIONS, satisfies } from "@/lib/authz";
 import { getDb, nowIso } from "@/lib/db";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { generateId } from "@/lib/utils";
-import { envVarsSchema } from "@/lib/validation";
+import { envVarsSchema, envVarsIssueText } from "@/lib/validation";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -65,7 +65,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const parsed = envVarsSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Dati non validi", details: parsed.error.issues },
+        { error: envVarsIssueText(body, parsed.error.issues), details: parsed.error.issues },
         { status: 400 }
       );
     }
