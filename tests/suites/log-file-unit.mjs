@@ -1,5 +1,5 @@
 import { createReporter } from "../harness.mjs";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -21,9 +21,8 @@ function reference(content, tailLines) {
 
 export async function run({ repoRoot }) {
   const r = createReporter("log-file-unit");
-  const { readLogFile, tailLogFile, tailLogLines, mergeLogTails, MAX_TAIL_BYTES } = await import(
-    pathToFileURL(join(repoRoot, "services", "log-file.ts")).href
-  );
+  const { readLogFile, tailLogFile, tailLogLines, mergeLogTails, MAX_TAIL_BYTES, planRotation, RotatingLogFile, readNewLines } =
+    await import(pathToFileURL(join(repoRoot, "services", "log-file.ts")).href);
 
   const dir = mkdtempSync(join(tmpdir(), "rp-log-file-"));
   const file = join(dir, "x.log");
@@ -97,6 +96,84 @@ export async function run({ repoRoot }) {
     r.check("a short log comes back whole", mergeLogTails(["o"], ["e"], 100).join() === "o,e");
     r.check("no output is no lines", mergeLogTails([], [], 100).length === 0);
     r.check("an odd budget is not exceeded", mergeLogTails(lines("o", 50), lines("e", 50), 41).length === 41);
+
+    // --- rotation: the plan ---------------------------------------------------
+    const policy = { fileBytes: 100, files: 3 };
+    const plan = (size, bytes) => planRotation(size, bytes, policy);
+    r.check("lines that fit go in the live file", JSON.stringify(plan(10, [20, 20])) === JSON.stringify({ skip: 0, groups: [{ rotate: false, count: 2 }] }));
+    r.check("a line that does not fit starts a new file", JSON.stringify(plan(90, [20, 20]).groups) === JSON.stringify([{ rotate: true, count: 2 }]));
+    r.check("a long batch rotates as often as it needs", plan(0, Array(10).fill(30)).groups.map((g) => `${g.rotate}:${g.count}`).join() === "false:3,true:3,true:3,true:1");
+    r.check("a batch larger than everything kept drops its oldest lines", plan(0, Array(20).fill(30)).skip === 10);
+    r.check("a line larger than a file gets one of its own", JSON.stringify(plan(50, [150]).groups) === JSON.stringify([{ rotate: true, count: 1 }]));
+    r.check("an empty live file never rotates first", plan(0, [150]).groups[0].rotate === false);
+    r.check("a line larger than everything kept is still kept", plan(0, [500]).skip === 0 && plan(0, [10, 500]).skip === 1);
+    r.check("no lines, no plan", plan(10, []).groups.length === 0);
+
+    // --- rotation: the files --------------------------------------------------
+    const rotDir = join(dir, "rotated");
+    const rotating = new RotatingLogFile(rotDir, "app", policy);
+    for (let i = 0; i < 40; i++) rotating.append([`line ${String(i).padStart(3, "0")} ${"x".repeat(14)}`]);
+    const files = rotating.files();
+    r.check("never more files than the policy keeps", files.length === 3, files.join());
+    r.check("files are listed oldest first", files[files.length - 1].endsWith("app.log") && files[0].endsWith("app.2.log"));
+    r.check("no file passes its size", files.every((f) => statSync(f).size <= 100));
+    const kept = files.flatMap((f) => readFileSync(f, "utf8").split("\n").filter(Boolean));
+    r.check("the newest lines are kept, in order", kept.at(-1)?.startsWith("line 039") === true && kept.every((l, i) => i === 0 || l > kept[i - 1]));
+    r.check("the total is bounded", rotating.totalBytes() <= 300);
+    rotating.append(["a", "b", "c"]);
+    const joined = rotating.files().map((f) => readFileSync(f, "utf8")).join("");
+    r.check("a batch split across files reads back in order", joined.endsWith("a\nb\nc\n"));
+    r.check("and the live file starts at a line", /^[a-z]/.test(readFileSync(rotating.fileAt(0), "utf8")));
+    rotating.remove();
+    r.check("remove takes the files and the folder", !existsSync(rotDir));
+
+    // --- reading a file someone else writes -------------------------------------
+    const pm2 = join(dir, "app-out.log");
+    writeFileSync(pm2, "one\ntwo\npart");
+    let read = readNewLines(pm2, null, 1024);
+    r.check("the first read takes the complete lines", read.lines.join() === "one,two" && !read.restarted);
+    r.check("and stops before the unfinished one", read.cursor.offset === 8);
+    appendFileSync(pm2, "ial\nthree\n");
+    read = readNewLines(pm2, read.cursor, 1024);
+    r.check("the next read starts where it stopped", read.lines.join() === "partial,three", read.lines.join());
+    const settled = readNewLines(pm2, read.cursor, 1024);
+    r.check("nothing new is nothing", settled.lines.length === 0 && settled.cursor.offset === read.cursor.offset);
+
+    truncateSync(pm2, 0);
+    appendFileSync(pm2, "new run\n");
+    read = readNewLines(pm2, read.cursor, 1024);
+    r.check("an emptied file is read again from its start", read.restarted && read.lines.join() === "new run");
+
+    // Emptied and filled past the old offset between two reads: only the mark can tell.
+    const cursorBefore = read.cursor;
+    truncateSync(pm2, 0);
+    appendFileSync(pm2, "a much longer second run line\nand another\n");
+    read = readNewLines(pm2, cursorBefore, 1024);
+    r.check("a refilled file is noticed by its bytes", read.restarted && read.lines[0] === "a much longer second run line", JSON.stringify(read));
+
+    const big = join(dir, "big-out.log");
+    writeFileSync(big, Array.from({ length: 5000 }, (_, i) => `row ${i}`).join("\n") + "\n");
+    read = readNewLines(big, null, 1000);
+    r.check("a long file is first read from its end", read.lines.at(-1) === "row 4999" && read.lines.length < 200);
+    r.check("from a whole line", /^row \d+$/.test(read.lines[0]));
+    r.check("and the cursor says the start was skipped", read.cursor.from > 0);
+    r.check("which later reads remember", readNewLines(big, read.cursor, 1000).cursor.from === read.cursor.from);
+    r.check("a file read from its start says so", readNewLines(pm2, null, 1024).cursor.from === 0);
+    let backlog = readNewLines(big, { offset: 0, mark: "" }, 1000);
+    let rounds = 1;
+    while (backlog.lines.length > 0 && rounds < 200) {
+      backlog = readNewLines(big, backlog.cursor, 1000);
+      rounds++;
+    }
+    r.check("a backlog is read over several calls", rounds > 10 && backlog.cursor.offset === statSync(big).size);
+
+    writeFileSync(pm2, "x".repeat(70 * 1024));
+    read = readNewLines(pm2, null, 128 * 1024);
+    r.check("a line that never ends is taken past its limit", read.lines.length === 1 && read.cursor.offset === 70 * 1024);
+    r.check("a missing file is null", readNewLines(join(dir, "nope.log"), null, 10) === null);
+
+    writeFileSync(pm2, "città\n€uro\n");
+    r.check("characters come back whole", readNewLines(pm2, null, 1024).lines.join() === "città,€uro");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

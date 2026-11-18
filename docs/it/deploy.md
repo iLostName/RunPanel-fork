@@ -86,11 +86,28 @@ Alcuni campi sono **solo del pannello** e vengono scartati se arrivano dal repos
 
 ## Variabili d'ambiente
 
-Si gestiscono nella scheda **Variabili** (con **Importa .env** per incollarne un file) e sono cifrate a riposo. Valgono dal deploy o riavvio successivo, non al salvataggio. Vengono passate al processo o al container e, se `envFile` è attivo, scritte anche in un file che l'app legge da sola. Limiti: 500 variabili, 64 KB per valore.
+Si gestiscono nella scheda **Variabili** e sono cifrate a riposo. Valgono dal deploy o riavvio successivo, non al salvataggio: **Salva e ridistribuisci** salva e avvia subito un deploy. Vengono passate al processo o al container e, se `envFile` è attivo, scritte anche in un file che l'app legge da sola. Limiti: 500 variabili, 64 KB per valore, ogni nome una volta sola.
 
-RunPanel aggiunge `NODE_ENV=production` e, per i runtime nativi, `PORT` (3000 se non indicata). Le variabili di un [servizio collegato](databases.md) prevalgono su quelle con lo stesso nome.
+- **Tabella** e **Testo .env** modificano la stessa lista. Il testo si scrive come un normale `.env`: virgolette doppie per un valore con spazi all'inizio o alla fine, con `#` o su più righe. I commenti non vengono salvati; una riga che non si legge viene indicata con il suo numero, e il salvataggio aspetta che sia corretta.
+- **Incolla .env** e **Importa file** aggiungono le variabili di un file a quelle che ci sono. Per un nome già presente con un altro valore si sceglie **Sovrascrivi** o **Salta**, e prima di applicare il pannello dice cosa farà ("2 aggiunte, 1 sostituita, 1 uguale"). Non toglie niente e non salva niente finché non premi Salva.
+- I valori restano nascosti finché non li mostri, una riga alla volta. Il pannello li manda solo a chi può gestire il progetto: gli altri vedono i nomi e basta.
+- Gli errori compaiono sulla riga sbagliata, sia quelli trovati prima di salvare sia quelli che il server rifiuta.
 
-Le variabili con prefisso `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` o `REACT_APP_` arrivano anche al **build**, perché i frontend le incorporano nel bundle. L'elenco dei prefissi (`buildEnvPrefixes`) e le chiavi aggiuntive (`buildEnv`) si cambiano nel contratto.
+RunPanel aggiunge `NODE_ENV=production` e, per i runtime nativi, `PORT` (3000 se non indicata). Le variabili di un [servizio collegato](databases.md) prevalgono su quelle con lo stesso nome: la scheda le elenca in sola lettura sotto **Dai database collegati**, con il database da cui arrivano, e segna la tua variabile che verrebbe sostituita.
+
+Le variabili con prefisso `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` o `REACT_APP_` arrivano anche al **build** (badge **usata nella build**), perché i frontend le incorporano nel bundle: chiunque apra il sito può leggerle, quindi niente segreti lì. Nei runtime nativi il build vede comunque tutte le variabili; per Docker arrivano come `--build-arg`. L'elenco dei prefissi (`buildEnvPrefixes`) e le chiavi aggiuntive (`buildEnv`) si cambiano nel contratto.
+
+## Log
+
+La scheda **Log** mostra il build del deploy in corso o dell'ultimo, con il suo esito, e l'output dell'app.
+
+- **In diretta**: le ultime 2000 righe dell'esecuzione attuale. Si possono cercare (le corrispondenze sono evidenziate), filtrare fra output ed errori, mettere in pausa e pulire. Sono operazioni sulla vista: non cancellano niente.
+- **Storico**: l'output che RunPanel ha salvato, anche da prima dei riavvii e dei nuovi deploy, che i runtime da soli non conservano (PM2 svuota i suoi file a ogni avvio, Docker cancella il log insieme al container). Qui la ricerca gira sul server, su tutto quello che è stato salvato.
+- **Scarica** dà tutto lo storico in un file di testo, con ora e stream (`stdout`/`stderr`) su ogni riga.
+
+Lo storico sta nella cartella dati, in `logs/apps/<id progetto>/`: al massimo 5 file da 4 MB per progetto, e il più vecchio viene cancellato quando ne inizia uno nuovo. I file di PM2 vengono letti ogni 10 secondi (l'ora salvata è quella della lettura), i container ogni 30 secondi con l'ora scritta da Docker; prima di un riavvio o di un deploy dal pannello l'output viene letto un'ultima volta. Nella diretta dei container output ed errori arrivano insieme; nello storico sono separati. Per gli stack Compose lo storico è approssimato: niente separazione e le righe perdono il rientro. Un file di PM2 che supera 16 MB viene svuotato dopo essere stato salvato. Lo storico di un progetto eliminato se ne va entro qualche minuto.
+
+Via API: `GET /api/projects/<id>/logs/app` (le ultime righe, con `lines`, `q` e `stream`) e `GET /api/projects/<id>/logs/app/download`, con lo stesso permesso dei log.
 
 ## Com'è fatto un deploy
 

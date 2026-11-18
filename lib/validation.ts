@@ -272,7 +272,34 @@ export const envVarsSchema = z.object({
   vars: z.array(z.object({
     key: z.string().min(1).max(64).regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Nome non valido: usa lettere, numeri e _ e non iniziare con un numero"),
     value: z.string().max(65536),
-  })).max(500),
+  })).max(500)
+    // A name sent twice used to reach the insert and break the unique index:
+    // a 500, after the delete that precedes it had already been rolled back.
+    // Refused here instead, on the row that repeats it.
+    .superRefine((vars, ctx) => {
+      const seen = new Set<string>();
+      vars.forEach((v, index) => {
+        if (seen.has(v.key)) {
+          ctx.addIssue({ code: "custom", path: [index, "key"], message: "Nome ripetuto: ogni variabile può comparire una volta sola" });
+        }
+        seen.add(v.key);
+      });
+    }),
+});
+
+/**
+ * What the reader of an app's saved log may be asked for: how many of the last
+ * lines, containing which text, from which stream. See `services/app-logs.ts`.
+ */
+export const appLogQuerySchema = z.object({
+  lines: z.coerce
+    .number({ error: "Numero di righe non valido" })
+    .int("Numero di righe non valido")
+    .min(1, "Almeno una riga")
+    .max(5000, "Al massimo 5000 righe")
+    .default(500),
+  q: z.string().max(200, "La ricerca può avere al massimo 200 caratteri").optional(),
+  stream: z.enum(["stdout", "stderr"], { error: "stream può essere solo stdout o stderr" }).optional(),
 });
 
 export const controlActionSchema = z.object({

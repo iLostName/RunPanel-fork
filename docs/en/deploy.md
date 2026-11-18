@@ -88,11 +88,28 @@ Some fields are **panel-only** and are dropped when they come from the repositor
 
 ## Environment variables
 
-Managed in the **Variabili** (variables) tab, with **Importa .env** to paste a file, and encrypted at rest. They apply from the next deploy or restart, not on save. They are passed to the process or container and, if `envFile` is on, also written to a file the app reads itself. Limits: 500 variables, 64 KB per value.
+Managed in the **Variabili** (variables) tab and encrypted at rest. They apply from the next deploy or restart, not on save: **Salva e ridistribuisci** (save and redeploy) saves and starts a deploy at once. They are passed to the process or container and, if `envFile` is on, also written to a file the app reads itself. Limits: 500 variables, 64 KB per value, each name once.
 
-RunPanel adds `NODE_ENV=production` and, for native runtimes, `PORT` (3000 if not set). Variables from a [linked service](databases.md) take precedence over those with the same name.
+- **Tabella** (table) and **Testo .env** (`.env` text) edit the same list. The text is an ordinary `.env`: double quotes for a value with leading or trailing spaces, a `#` or several lines. Comments are not stored; a line that cannot be read is reported with its number, and saving waits until it is fixed.
+- **Incolla .env** (paste) and **Importa file** (import) add a file's variables to the ones there are. For a name already there with another value you choose **Sovrascrivi** (overwrite) or **Salta** (skip), and before applying the panel says what it will do ("2 aggiunte, 1 sostituita, 1 uguale"). It removes nothing and saves nothing until you press Save.
+- Values stay hidden until you show them, one row at a time. The panel sends them only to whoever may manage the project: everyone else sees the names only.
+- Errors show on the row that is wrong, both those found before saving and those the server refuses.
 
-Variables prefixed `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` or `REACT_APP_` also reach the **build**, because frontends inline them into the bundle. The prefix list (`buildEnvPrefixes`) and extra keys (`buildEnv`) are set in the contract.
+RunPanel adds `NODE_ENV=production` and, for native runtimes, `PORT` (3000 if not set). Variables from a [linked service](databases.md) take precedence over those with the same name: the tab lists them read-only under **Dai database collegati** (from the linked databases), with the database each comes from, and flags your variable that would be replaced.
+
+Variables prefixed `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` or `REACT_APP_` also reach the **build** (badge **usata nella build**), because frontends inline them into the bundle: anyone opening the site can read them, so no secrets there. Native runtimes' builds see every variable anyway; Docker gets these as `--build-arg`. The prefix list (`buildEnvPrefixes`) and extra keys (`buildEnv`) are set in the contract.
+
+## Logs
+
+The **Log** tab shows the build of the running or latest deploy, with its outcome, and the app's output.
+
+- **In diretta** (live): the last 2000 lines of the current run. You can search them (matches are highlighted), filter output from errors, pause and clear. These act on the view only: nothing is deleted.
+- **Storico** (history): the output RunPanel saved, including from before restarts and new deploys, which the runtimes do not keep on their own (PM2 empties its files at every start, Docker deletes the log with the container). Searching here runs on the server, over everything saved.
+- **Scarica** (download) gives the whole history as a text file, with time and stream (`stdout`/`stderr`) on every line.
+
+The history lives in the data directory, under `logs/apps/<project id>/`: at most 5 files of 4 MB per project, the oldest deleted when a new one starts. PM2's files are read every 10 seconds (the time stored is when the line was read), containers every 30 seconds with Docker's own time; before a restart or a deploy from the panel the output is read one last time. In a container's live view output and errors arrive together; the history keeps them apart. For Compose stacks the history is approximate: no separation, and lines lose their indentation. A PM2 file past 16 MB is emptied once it has been saved. A deleted project's history goes within a few minutes.
+
+Over the API: `GET /api/projects/<id>/logs/app` (the last lines, with `lines`, `q` and `stream`) and `GET /api/projects/<id>/logs/app/download`, under the same right as the logs.
 
 ## What a deploy does
 

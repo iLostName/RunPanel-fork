@@ -210,6 +210,253 @@ export function removeLogFile(file: string): void {
   }
 }
 
+// --- Rotated logs -------------------------------------------------------------
+
+export interface RotationPolicy {
+  /** A file is closed and a new one started past this size. */
+  fileBytes: number;
+  /** Files kept, the live one included; the oldest is dropped when one more starts. */
+  files: number;
+}
+
+/**
+ * Where a batch of lines goes, given how big the live file already is.
+ *
+ * Lines are never split across files, so a file ends on a line. A batch larger
+ * than everything the policy keeps loses its oldest lines up front (`skip`):
+ * written anyway, they would only be rotated out by the end of the same call.
+ * A single line larger than a file gets a file of its own rather than being cut
+ * here — the caller caps line length.
+ */
+export function planRotation(
+  currentBytes: number,
+  lineBytes: readonly number[],
+  policy: RotationPolicy
+): { skip: number; groups: { rotate: boolean; count: number }[] } {
+  const budget = policy.fileBytes * policy.files;
+  let total = lineBytes.reduce((sum, bytes) => sum + bytes, 0);
+  let skip = 0;
+  // The last line always stays, however large: dropping it would lose the one
+  // line nothing else would replace.
+  while (skip < lineBytes.length - 1 && total > budget) total -= lineBytes[skip++];
+
+  const groups: { rotate: boolean; count: number }[] = [];
+  let size = currentBytes;
+  for (let i = skip; i < lineBytes.length; i++) {
+    const bytes = lineBytes[i];
+    if (size > 0 && size + bytes > policy.fileBytes) {
+      groups.push({ rotate: true, count: 0 });
+      size = 0;
+    } else if (groups.length === 0) {
+      groups.push({ rotate: false, count: 0 });
+    }
+    groups[groups.length - 1].count++;
+    size += bytes;
+  }
+  return { skip, groups };
+}
+
+/**
+ * A log kept as a few files of bounded size: `<base>.log` is written, and
+ * `<base>.1.log` … `<base>.<files-1>.log` are the older ones, newest first.
+ *
+ * Synchronous, like `AppendLogFile.flush`: the writer is a collector that has
+ * already batched its lines, and a rename sequence that interleaved with
+ * another write would be the one way to lose a file.
+ */
+export class RotatingLogFile {
+  readonly dir: string;
+  readonly base: string;
+  readonly policy: RotationPolicy;
+
+  constructor(dir: string, base: string, policy: RotationPolicy) {
+    this.dir = dir;
+    this.base = base;
+    this.policy = policy;
+  }
+
+  /** The file of generation `index`: 0 is the live one. */
+  fileAt(index: number): string {
+    return path.join(this.dir, index === 0 ? `${this.base}.log` : `${this.base}.${index}.log`);
+  }
+
+  /** Every file there is, oldest first, so reading them in order reads the log in order. */
+  files(): string[] {
+    const out: string[] = [];
+    for (let i = this.policy.files - 1; i >= 0; i--) {
+      const file = this.fileAt(i);
+      if (fs.existsSync(file)) out.push(file);
+    }
+    return out;
+  }
+
+  /** Bytes on disk across every file. */
+  totalBytes(): number {
+    return this.files().reduce((sum, file) => {
+      try {
+        return sum + fs.statSync(file).size;
+      } catch {
+        return sum;
+      }
+    }, 0);
+  }
+
+  append(lines: readonly string[]): void {
+    if (lines.length === 0) return;
+    fs.mkdirSync(this.dir, { recursive: true });
+
+    let size = 0;
+    try {
+      size = fs.statSync(this.fileAt(0)).size;
+    } catch {
+      /* not there yet: it starts empty */
+    }
+
+    const plan = planRotation(size, lines.map((line) => Buffer.byteLength(line) + 1), this.policy);
+    let next = plan.skip;
+    for (const group of plan.groups) {
+      if (group.rotate) this.rotate();
+      const chunk = lines.slice(next, next + group.count);
+      next += group.count;
+      // 0600 on creation, for the reason `AppendLogFile` gives: an app's output
+      // carries whatever the app chose to print, secrets included.
+      fs.appendFileSync(this.fileAt(0), `${chunk.join("\n")}\n`, { mode: 0o600 });
+    }
+  }
+
+  private rotate(): void {
+    fs.rmSync(this.fileAt(this.policy.files - 1), { force: true });
+    for (let i = this.policy.files - 2; i >= 0; i--) {
+      const from = this.fileAt(i);
+      if (fs.existsSync(from)) fs.renameSync(from, this.fileAt(i + 1));
+    }
+  }
+
+  /** Every file, and the directory if nothing else is in it. */
+  remove(): void {
+    for (let i = 0; i < this.policy.files; i++) fs.rmSync(this.fileAt(i), { force: true });
+    try {
+      fs.rmdirSync(this.dir);
+    } catch {
+      /* something else lives there, or it was never created */
+    }
+  }
+}
+
+// --- Reading a file somebody else writes --------------------------------------
+
+/**
+ * How far a file written by another process has been read.
+ *
+ * `mark` is the base64 of the bytes just before `offset`. The writer can empty
+ * the file and fill it again between two reads — PM2's files are truncated at
+ * every start — and a size that is larger than the offset again says nothing
+ * about it. Bytes that no longer match the ones read last time do.
+ */
+export interface FileCursor {
+  offset: number;
+  mark: string;
+  /**
+   * Where reading this file began: 0 when it was read from its start, more
+   * when a long file was first met and only its end was read. Whoever empties
+   * a file after reading it needs to know nothing older was skipped.
+   */
+  from?: number;
+}
+
+const MARK_BYTES = 64;
+/** A line that never ends is taken as it is past this, or it would hold the reader forever. */
+const MAX_PENDING_LINE = 64 * 1024;
+
+function readRange(fd: number, start: number, length: number): Buffer {
+  const buffer = Buffer.allocUnsafe(length);
+  const read = fs.readSync(fd, buffer, 0, length, start);
+  return buffer.subarray(0, read);
+}
+
+/**
+ * The complete lines added to `file` since `cursor`, and the cursor after them.
+ *
+ * At most `maxBytes` per call: a backlog is read over several calls, never all
+ * at once. With no cursor the read starts `maxBytes` from the end, at a line
+ * boundary, so a file that grew for months before anybody read it costs one
+ * bounded read. `restarted` says the file was emptied or replaced since the
+ * cursor, and the read went back to its start. Null when there is no file.
+ */
+export function readNewLines(
+  file: string,
+  cursor: FileCursor | null,
+  maxBytes: number
+): { lines: string[]; cursor: FileCursor; restarted: boolean } | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch {
+    return null;
+  }
+
+  try {
+    const size = fs.fstatSync(fd).size;
+    let start = 0;
+    let restarted = false;
+
+    if (cursor) {
+      start = cursor.offset;
+      if (size < cursor.offset) {
+        restarted = true;
+        start = 0;
+      } else if (cursor.offset > 0 && cursor.mark) {
+        const length = Math.min(MARK_BYTES, cursor.offset);
+        if (readRange(fd, cursor.offset - length, length).toString("base64") !== cursor.mark) {
+          restarted = true;
+          start = 0;
+        }
+      }
+    } else if (size > maxBytes) {
+      // The first read of a long file: its end, from the first whole line.
+      start = size - maxBytes;
+      const head = readRange(fd, start, Math.min(maxBytes, MAX_PENDING_LINE));
+      const newline = head.indexOf(0x0a);
+      start = newline >= 0 ? start + newline + 1 : size;
+    }
+
+    const length = Math.min(size - start, maxBytes);
+    const chunk = length > 0 ? readRange(fd, start, length) : Buffer.alloc(0);
+    let end = chunk.lastIndexOf(0x0a) + 1;
+    // A line still being written waits for its newline, unless it never gets one.
+    if (end === 0 && chunk.length >= MAX_PENDING_LINE) end = chunk.length;
+
+    const consumed = chunk.subarray(0, end);
+    const offset = start + end;
+    const markLength = Math.min(MARK_BYTES, offset);
+    const mark =
+      offset === 0
+        ? ""
+        : end >= markLength
+          ? consumed.subarray(end - markLength).toString("base64")
+          : readRange(fd, offset - markLength, markLength).toString("base64");
+
+    const lines = consumed
+      .toString("utf8")
+      .split("\n")
+      .filter((line) => line.trim() !== "");
+    const from = cursor && !restarted ? (cursor.from ?? 0) : start;
+    return { lines, cursor: { offset, mark, from }, restarted };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** Empty a file in place, keeping it open for whoever writes it. */
+export function truncateLogFile(file: string): boolean {
+  try {
+    fs.truncateSync(file, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Drop every `<id>.log` in `dir` whose id is not in `keepIds`. */
 export function pruneLogDir(dir: string, keepIds: Set<string>): number {
   if (!fs.existsSync(dir)) return 0;
