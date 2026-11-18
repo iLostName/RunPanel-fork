@@ -15,6 +15,14 @@ For people already using the panel: where things moved and what was added. Nothi
 - **Expert mode** (from the account menu or **Impostazioni › Account**) shows technical details and opens the "Avanzate" sections. Off, the panel talks about what the app does rather than ports and runtimes.
 - Search (**Ctrl K**) opens pages, projects and databases and runs the most common actions.
 
+## On a phone, like an app
+
+- **It installs**: **Installa l'app** (install the app; in the account menu, or under **Altro** on a phone) puts it on the home screen and in the computer's app menu; it opens full screen, with the shortcuts Progetti, Backup and Nuovo progetto. On an iPhone it is three taps from Share, and the panel shows them. HTTPS is required: on an address without the padlock the panel explains how to get one. See [Installing the panel as an app](operations.md#installing-the-panel-as-an-app).
+- **A bar along the bottom**: Panoramica, Progetti, Database, Backup and **Altro** (more), which opens a sheet with the rest of the menu, the server, notifications and the account. The top keeps the title, search and, on detail pages, the arrow back.
+- **Sheets from the bottom**: confirmations and forms open as sheets rising from the edge, with their buttons under the thumb, and close by dragging them down (not once something has been typed). The "⋯" menus become a full-width list of actions.
+- Tabs scroll sideways and keep the open one in view, fields no longer zoom the page on an iPhone, and toasts no longer end up under the bar.
+- **Always live**: the app never shows stale data. With no network it says so, and after a panel update it offers **Aggiorna** (update) instead of reloading by itself.
+
 ## New project
 
 Three steps, and the project is created only at the end: source (GitHub, or a ZIP dropped on the page), a review of what the panel recognised (for example *Next.js · porta 3000*), and going online with the first deploy followed live. A database the app needs is created and linked along with it; variables are pasted from a `.env`; an address is picked from the configured domains. If a step fails, nothing is left half-made. See [Deploying a project](deploy.md#creating-a-project).

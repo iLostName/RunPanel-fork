@@ -15,6 +15,14 @@ Per chi usa già il pannello: dove sono finite le cose e cosa c'è di nuovo. Nie
 - **Modalità esperto** (dal menu dell'account o da **Impostazioni › Account**): mostra i dettagli tecnici e apre le sezioni «Avanzate». Spenta, il pannello parla di cosa fa l'app invece che di porte e runtime.
 - La ricerca (**Ctrl K**) apre pagine, progetti e database e attiva le azioni più comuni.
 
+## Sul telefono, come un'app
+
+- **Si installa**: **Installa l'app** (nel menu dell'account, o in **Altro** sul telefono) lo mette sulla schermata Home e nel menu delle app del computer; si apre a tutto schermo, con le scorciatoie Progetti, Backup e Nuovo progetto. Su iPhone sono tre tocchi da Condividi, e il pannello li mostra. Serve HTTPS: su un indirizzo senza lucchetto il pannello spiega come metterlo. Vedi [Installare il pannello come app](operations.md#installare-il-pannello-come-app).
+- **Una barra in basso**: Panoramica, Progetti, Database, Backup e **Altro**, che apre un foglio con il resto del menu, il server, le notifiche e l'account. In alto restano il titolo, la ricerca e, nelle pagine di dettaglio, la freccia per tornare indietro.
+- **Finestre dal basso**: conferme e moduli si aprono come fogli che salgono dal bordo, con i bottoni sotto il pollice, e si chiudono trascinandoli giù (non se hai già scritto qualcosa). I menu «⋯» diventano un elenco di azioni a tutta larghezza.
+- Le schede scorrono di lato e tengono in vista quella aperta, i campi non fanno più ingrandire la pagina su iPhone, e le notifiche a comparsa non finiscono più sotto la barra.
+- **Sempre dal vivo**: l'app non mostra mai dati vecchi. Senza rete lo dice, e dopo un aggiornamento del pannello propone **Aggiorna** invece di ricaricare da sola.
+
 ## Nuovo progetto
 
 Tre passi, e il progetto viene creato solo alla fine: sorgente (GitHub o ZIP trascinato), revisione di quello che il pannello ha riconosciuto (per esempio *Next.js · porta 3000*), messa online con il primo deploy seguito dal vivo. Se serve un database viene creato e collegato insieme; le variabili si incollano da un `.env`; un indirizzo si sceglie tra i domini configurati. Se un passo non riesce, non resta niente a metà. Vedi [Distribuire un progetto](deploy.md#creare-un-progetto).
