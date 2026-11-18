@@ -47,7 +47,7 @@ export function SectionTabs({ section }: { section: NavSectionId }) {
             href={href(tab.href)}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "touch-chrome flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors max-md:min-h-11",
+              "max-md:touch-chrome flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors max-md:min-h-11",
               active
                 ? "border-accent text-foreground font-medium"
                 : "text-muted hover:text-foreground border-transparent"

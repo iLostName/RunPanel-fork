@@ -388,7 +388,7 @@ export function CommandPalette() {
                 onClick={() => void choose(command)}
                 onMouseEnter={() => setActive(position)}
                 className={cn(
-                  "touch-chrome flex w-full cursor-pointer items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-left text-sm max-md:min-h-11",
+                  "max-md:touch-chrome flex w-full cursor-pointer items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-left text-sm max-md:min-h-11",
                   // The palette lists the same destinations as the sidebar, from
                   // the same array, with the same icons — so the highlighted row
                   // should look like the sidebar's, not like a grey rectangle.

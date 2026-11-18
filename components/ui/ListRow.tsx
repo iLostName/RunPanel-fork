@@ -138,7 +138,7 @@ export function ListRow({
           {href ? (
             <Link
               href={href}
-              className="text-foreground touch-chrome min-w-0 truncate text-sm font-medium hover:underline max-md:after:absolute max-md:after:inset-0"
+              className="text-foreground max-md:touch-chrome min-w-0 truncate text-sm font-medium hover:underline max-md:after:absolute max-md:after:inset-0"
             >
               {title}
             </Link>
