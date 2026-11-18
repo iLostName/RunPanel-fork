@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
+import { distinctFolderNames } from "@/lib/overview-groups";
 import { isVisible, visibleFolderIds, visibleProjectIds, visibleServiceIds } from "@/lib/principal";
 import { signedFetch } from "@/services/cluster/client";
 import { clusterState, listMembers } from "@/services/cluster/state";
@@ -21,8 +22,10 @@ type RawService = { id: string; name: string; display_name: string | null; proje
 
 /**
  * Everything a grant can point at, across the cluster, with the server's name
- * appended so two "api" projects on two servers can be told apart. Each
- * member answers for the signed-in user, so the lists are what they may see.
+ * appended so two "api" projects on two servers can be told apart. A folder is
+ * the same on every server, so it is listed once and with no server; two folders
+ * with one name take a suffix instead. Each member answers for the signed-in
+ * user, so the lists are what they may see.
  */
 export async function GET() {
   const denied = await requirePermission("users.manage");
@@ -34,7 +37,7 @@ export async function GET() {
 
   const out: GrantTargets = { folder: [], project: [], service: [], linkedService: [] };
   const add = (lists: { folders: Named[]; projects: Named[]; services: RawService[] }, memberName: string | null) => {
-    for (const f of lists.folders) out.folder.push({ id: f.id, name: label(f.name, memberName) });
+    for (const f of lists.folders) if (!out.folder.some((x) => x.id === f.id)) out.folder.push({ id: f.id, name: f.name });
     for (const p of lists.projects) out.project.push({ id: p.id, name: label(p.name, memberName) });
     for (const s of lists.services) {
       (s.project_id ? out.linkedService : out.service).push({ id: s.id, name: label(s.display_name || s.name, memberName) });
@@ -82,5 +85,6 @@ export async function GET() {
     );
   }
 
+  out.folder = distinctFolderNames(out.folder);
   return NextResponse.json(out, { headers: { "Cache-Control": "no-store" } });
 }

@@ -101,18 +101,23 @@ export function AppSidebar({ version }: { version: string }) {
       </div>
 
       <nav className="relative flex-1 overflow-y-auto p-2" aria-label="Navigazione principale">
-        {NAV_GROUPS.map((group) => (
-          <div key={group.id} className="space-y-0.5">
-            {group.label && (
-              <p className="text-muted/60 text-meta px-3 pt-4 pb-1.5 tracking-wider uppercase">
-                {group.label}
-              </p>
-            )}
-            {navItemsIn(group.id, allowed).map((item) => (
-              <NavLink key={item.href} item={item} active={isActiveNav(pathname, item)} />
-            ))}
-          </div>
-        ))}
+        {NAV_GROUPS.map((group) => {
+          const items = navItemsIn(group.id, allowed);
+          // An account with only grants holds nothing under "Gestione".
+          if (items.length === 0) return null;
+          return (
+            <div key={group.id} className="space-y-0.5">
+              {group.label && (
+                <p className="text-muted/60 text-meta px-3 pt-4 pb-1.5 tracking-wider uppercase">
+                  {group.label}
+                </p>
+              )}
+              {items.map((item) => (
+                <NavLink key={item.href} item={item} active={isActiveNav(pathname, item)} />
+              ))}
+            </div>
+          );
+        })}
       </nav>
 
       {/* Configuration, and the version. Outside the scroll area: these are the

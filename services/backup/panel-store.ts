@@ -5,6 +5,7 @@ import { sql } from "kysely";
 import { getSecret } from "@/lib/config";
 import { getDb } from "@/lib/db";
 import { getEnv } from "@/lib/env";
+import { envFlags } from "@/lib/service-exec";
 import { docker, dockerToFile, dockerTry } from "../docker/cli";
 import { execArgs, serviceTarget } from "../service-databases";
 import { DumpSkipped } from "./dumpers";
@@ -170,12 +171,13 @@ async function dumpPostgres(
     "-d", connection.database,
   ];
 
+  const env = { PGPASSWORD: connection.password };
   let args: string[];
   let method: string;
 
   if (managed) {
     ctx.log(`  il database del pannello è il servizio "${managed.name}": lo leggo dal suo container`);
-    args = [...execArgs(serviceTarget(managed), { PGPASSWORD: connection.password }), ...dumpArgs];
+    args = [...execArgs(serviceTarget(managed), env), ...dumpArgs];
     method = `docker exec ${managed.container_name}`;
   } else {
     const image = `postgres:${major}-alpine`;
@@ -188,7 +190,7 @@ async function dumpPostgres(
       // The same host-reachability trick the service provisioner uses, rather
       // than --network host, which does not exist on Docker Desktop.
       "--add-host=host.docker.internal:host-gateway",
-      "-e", `PGPASSWORD=${connection.password}`,
+      ...envFlags(env),
       image,
       ...dumpArgs,
       // "localhost" inside the container means the container, so it has to be
@@ -200,6 +202,7 @@ async function dumpPostgres(
   }
 
   const result = await dockerToFile(args, destination, {
+    env,
     // The custom format is already compressed.
     compress: false,
     onStderr: (line) => ctx.log(`  ${line}`),

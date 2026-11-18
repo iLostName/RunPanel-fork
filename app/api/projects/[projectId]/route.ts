@@ -31,7 +31,11 @@ import { containerMounts, listOwnedVolumes, removeProjectVolumes, removeVolumes 
 import { removePm2Artifacts } from "@/services/process-drivers/pm2-driver";
 import { forgetRun } from "@/services/process-drivers/run-log";
 import { removeEnvFile } from "@/services/env-file";
-import { clearQueuedDeploy } from "@/services/deploy-queue";
+import { sealContract } from "@/services/build-env";
+import { cancelDeploy, clearQueuedDeploy } from "@/services/deploy-queue";
+import { applyLogPath } from "@/services/project-mounts";
+import { moveLogPath } from "@/services/project-repo";
+import { busyMessage, tryLock } from "@/services/project-lock";
 import { syncAutoDeploy } from "@/services/webhook-manage";
 import { processLogHub } from "@/services/process-logs";
 import { applyProxy, applyProxySoon, forgetCertificate } from "@/services/proxy";
@@ -275,7 +279,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         What the settings form actually needed was to re-read the contract when
         the row changes, which is where the staleness lived — see `SettingsTab`.
       */
-      updates.builder_config = JSON.stringify({ version: 1, ...normalized });
+      // Build arguments are sealed on the way in: see `lib/build-env-seal.ts`.
+      updates.builder_config = sealContract(JSON.stringify({ version: 1, ...normalized }), projectId);
     }
 
     // --- who may reach the app -------------------------------------------------
@@ -352,13 +357,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       // columns are written so the restart reads the state it is meant to apply.
       const result = await restartFromLastDeployment(projectId);
       if ("error" in result) restartError = result.error;
-    } else if (restartNeeded) {
-      // Nothing is running, so nothing has to move: the binding applies at the
-      // next start, which reads these columns. The gate still goes up, for the
-      // same reason the boot reconciliation puts it up — a container with a
-      // restart policy can come back without the panel starting it, and it comes
-      // back on the loopback port. It also keeps the page from saying "gate non
-      // attivo" about a restriction that is in force.
+    } else if (access) {
+      // No restart to do: either the list alone changed, and the gate has to
+      // start judging by it now rather than at the next restart, or nothing is
+      // running and the binding applies at the next start, which reads these
+      // columns. The gate goes up in that case too, for the same reason the boot
+      // reconciliation puts it up — a container with a restart policy can come
+      // back without the panel starting it, and it comes back on the loopback
+      // port. It also keeps the page from saying "gate non attivo" about a
+      // restriction that is in force.
       const row = await db
         .selectFrom("projects")
         .selectAll()
@@ -444,6 +451,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
  * about it but not offer anything else — so removing a project you no longer
  * needed meant losing a database you still did.
  */
+const DELETE_CANCEL_WAIT_MS = 15_000;
+
 export async function DELETE(request: NextRequest, { params }: Params) {
   return withAudit(request, { category: "delete", action: "project.delete", scope: "project", scopeId: async () => (await params).projectId }, async () => {
     const { projectId } = await params;
@@ -472,6 +481,19 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 
     const { slug } = project;
 
+    // A deploy that went on running would put back a container, an image and a
+    // row-less checkout right after they are taken away.
+    const deploy = cancelDeploy(projectId);
+    if (deploy) {
+      await Promise.race([deploy, new Promise((resolve) => setTimeout(resolve, DELETE_CANCEL_WAIT_MS))]);
+    }
+
+    const release = tryLock(projectId, "stop");
+    if (!release) {
+      return NextResponse.json({ error: busyMessage(projectId) }, { status: 409 });
+    }
+
+    try {
     // Drop any follow-up deploy and stop following this project's logs before
     // taking anything apart, so nothing tries to redeploy what we are deleting.
     clearQueuedDeploy(projectId);
@@ -567,6 +589,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     removePm2Artifacts(slug);
     forgetRun(slug);
     removeEnvFile(slug);
+    fs.rmSync(moveLogPath(projectId), { force: true });
+    fs.rmSync(applyLogPath(projectId), { force: true });
 
     try {
       await removeProjectNetwork(slug);
@@ -588,5 +612,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     }
 
     return NextResponse.json({ success: true, volumesRemoved, servicesKept });
+    } finally {
+      release();
+    }
   });
 }

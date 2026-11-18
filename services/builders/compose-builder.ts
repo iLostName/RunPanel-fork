@@ -38,6 +38,7 @@ export const composeBuilder: IBuilder = {
         env,
         timeout: ctx.buildTimeout,
         onLog,
+        signal: ctx.signal,
       });
 
       onLog(`Compose stack built from ${compose.file}`);

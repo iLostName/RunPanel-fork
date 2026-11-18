@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireProject } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
+import { containerStats } from "@/services/docker/stats";
 import { processManager } from "@/services/process-manager";
 
 type Params = { params: Promise<{ projectId: string }> };
@@ -26,6 +27,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
   // did while idle. /api/monitor has always guarded this; here it did not.
   let processInfo = null;
   if (project.status === "running" || project.status === "deploying") {
+    // Somebody is looking at this project, which is what the stats stream waits
+    // for. The driver only reads what the stream has collected.
+    if (project.runtime_type === "docker" || project.runtime_type === "compose") {
+      void containerStats.ensureStarted();
+    }
     try {
       processInfo = await processManager.status(project.slug, project.runtime_type);
     } catch { /* a driver that cannot answer is reported as no process info */ }

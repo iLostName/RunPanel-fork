@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isDenied, requireMember } from "@/lib/auth-guard";
 import { nowIso } from "@/lib/db";
 import { directoryHash } from "@/services/cluster/directory";
+import { foldersHash } from "@/services/cluster/folders";
 import { clusterState, recordMemberSeen } from "@/services/cluster/state";
 import { panelRelease } from "@/services/panel-update/release";
 
@@ -23,6 +24,7 @@ export async function GET() {
       version: release.label,
       time: nowIso(),
       directoryHash: await directoryHash(),
+      foldersHash: await foldersHash(),
     },
     { headers: { "Cache-Control": "no-store" } }
   );

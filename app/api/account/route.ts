@@ -3,6 +3,7 @@ import { isDenied, requireUser } from "@/lib/auth-guard";
 import { audit } from "@/lib/audit";
 import { createSession, destroyUserSessions, verifyPassword } from "@/lib/auth";
 import { trustedClientIp } from "@/lib/client-ip";
+import { clearRateLimit, consumeRateLimit } from "@/lib/rate-limit";
 import { getUser, normalizeEmail, setOwnEmail, setOwnPassword } from "@/lib/users";
 
 /**
@@ -12,6 +13,11 @@ import { getUser, normalizeEmail, setOwnEmail, setOwnPassword } from "@/lib/user
  * set it. Both changes need the current password: a session left open on a
  * shared machine must not be enough to take the account over.
  */
+
+/** The same guess the login form caps, tried from a session: counted per account. */
+const MAX_PASSWORD_ATTEMPTS = 5;
+const PASSWORD_WINDOW_MS = 15 * 60 * 1000;
+
 export async function GET() {
   const ctx = await requireUser({ allowMissingEmail: true });
   if (isDenied(ctx)) return ctx;
@@ -40,9 +46,20 @@ export async function PATCH(request: NextRequest) {
 
   const user = await getUser(ctx.session.user.id);
   if (!user?.password_hash) return NextResponse.json({ error: "Account non trovato" }, { status: 404 });
+
+  const attemptsKey = `account:pw:${user.id}`;
+  const limit = await consumeRateLimit(attemptsKey, MAX_PASSWORD_ATTEMPTS, PASSWORD_WINDOW_MS);
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: `Troppi tentativi. Riprova tra ${Math.ceil(limit.retryAfter / 60)} minuti.` },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfter) } }
+    );
+  }
   if (typeof currentPassword !== "string" || !(await verifyPassword(currentPassword, user.password_hash))) {
+    await audit({ userId: user.id, category: "security", action: "account.password.failed", scope: "user", scopeId: user.id, request });
     return NextResponse.json({ error: "Password attuale errata" }, { status: 401 });
   }
+  await clearRateLimit(attemptsKey);
 
   if (email !== undefined) {
     const normalized = normalizeEmail(email);

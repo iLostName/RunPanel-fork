@@ -4,6 +4,7 @@ import { githubRequest, githubToken, parseRepoSlug, type RepoSlug } from "@/lib/
 import { getSetting } from "@/lib/settings";
 import { DEFAULT_POLL_INTERVAL, POLL_INTERVAL_SETTING } from "@/lib/polling";
 import { enqueueDeploy } from "./deploy-queue";
+import { isPanelClosing } from "./project-lock";
 
 /**
  * Auto-deploy by asking, for the panels nothing can reach.
@@ -236,6 +237,10 @@ async function checkProject(
     takes the same line with a policy that has never run.
   */
   const first = project.poll_sha === null;
+
+  // Left for the next tick, on the panel that is coming up: recording the commit
+  // now would mark it as handled with nobody left to deploy it.
+  if (isPanelClosing()) return "unchanged";
 
   // Written before the deploy is queued, and deliberately: a commit that fails
   // to build must not be retried every interval forever. One attempt per

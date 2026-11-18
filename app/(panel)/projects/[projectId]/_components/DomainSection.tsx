@@ -275,6 +275,8 @@ export function DomainSection({ projectId }: { projectId: string }) {
 
       {!data ? null : !data.hasPort ? (
         <FieldHint>Senza una porta non c&apos;è niente da servire: impostala in Build e avvio.</FieldHint>
+      ) : !data.canManageDomains ? (
+        <FieldHint>Un nuovo nome lo assegna chi ha il permesso Accesso all&apos;host.</FieldHint>
       ) : domains.length === 0 ? (
         <Hint title="Nessun dominio su questo server">Aggiungine uno da {domainsLink}, poi torna qui.</Hint>
       ) : (

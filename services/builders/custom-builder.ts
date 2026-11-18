@@ -21,7 +21,7 @@ export const customBuilder: IBuilder = {
         success: false,
         artifactDir: projectDir,
         startCmd: "",
-        error: "Start command is required for custom runtime. Configure it in project settings.",
+        error: "Il runtime custom richiede un comando di avvio: impostalo nelle impostazioni del progetto.",
       };
     }
 
@@ -38,7 +38,7 @@ export const customBuilder: IBuilder = {
         const cmds = installCmd.split("\n").map(c => c.trim()).filter(Boolean);
         const joined = cmds.join(" && ");
         onLog(cmds.map(c => `> ${c}`).join("\n"));
-        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog });
+        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog, signal: ctx.signal });
         onLog("Install completed.");
       }
 
@@ -49,7 +49,7 @@ export const customBuilder: IBuilder = {
         const cmds = buildCmd.split("\n").map(c => c.trim()).filter(Boolean);
         const joined = cmds.join(" && ");
         onLog(cmds.map(c => `> ${c}`).join("\n"));
-        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog });
+        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog, signal: ctx.signal });
         onLog("Build completed.");
       }
 

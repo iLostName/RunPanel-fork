@@ -66,6 +66,19 @@ export async function PUT(request: NextRequest, { params }: Params) {
       data.includeSecretKey ?? existing.include_secret_key === 1
     );
     if (problem) return NextResponse.json({ error: problem }, { status: 403 });
+
+    // As in POST: otherwise an unknown id surfaces as a foreign key error.
+    if (data.destinationId !== undefined) {
+      const destination = await db
+        .selectFrom("backup_destinations")
+        .select("id")
+        .where("id", "=", data.destinationId)
+        .executeTakeFirst();
+      if (!destination) {
+        return NextResponse.json({ error: "Destinazione non trovata" }, { status: 404 });
+      }
+    }
+
     const patch: Record<string, unknown> = { updated_at: nowIso() };
 
     if (data.name !== undefined) patch.name = data.name;

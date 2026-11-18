@@ -4,6 +4,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { getDb, nowIso } from "@/lib/db";
+import { getEnv } from "@/lib/env";
 import { getSetting } from "@/lib/settings";
 import { listenPort, readAccess } from "@/lib/access-columns";
 import { compileRules } from "@/lib/ip-access";
@@ -137,6 +138,7 @@ async function loadHosts() {
       "project_hosts.auth_hash",
       "project_hosts.check_token",
       "project_hosts.status",
+      "project_hosts.project_id",
       "projects.port",
       "projects.access_mode",
       "projects.access_allow",
@@ -148,6 +150,47 @@ async function loadHosts() {
 }
 
 type HostRow = Awaited<ReturnType<typeof loadHosts>>[number];
+
+/**
+ * Who else listens on each port: the panel, every service, every project, by
+ * its public port and by the loopback one its gate moved it to.
+ *
+ * `port` is a number the project's `settings` grant may set to anything, and
+ * nginx proxies to it with a valid certificate. Without this a name could
+ * publish the panel itself, or another project's real listener past its allow
+ * list. The value is the owning project, null for the panel and services.
+ */
+export async function claimedPorts(): Promise<Map<number, string | null>> {
+  const db = await getDb();
+  const [projects, services] = await Promise.all([
+    db.selectFrom("projects").select(["id", "port", "access_port"]).execute(),
+    db.selectFrom("services").select(["port", "access_port"]).execute(),
+  ]);
+  const claimed = new Map<number, string | null>();
+  const claim = (port: number | null, owner: string | null) => {
+    if (!port) return;
+    // A port two owners share is nobody's to proxy to.
+    claimed.set(port, claimed.has(port) && claimed.get(port) !== owner ? null : owner);
+  };
+  claim(getEnv().port, null);
+  for (const service of services) {
+    claim(service.port, null);
+    claim(service.access_port, null);
+  }
+  for (const project of projects) {
+    claim(project.port, project.id);
+    claim(project.access_port, project.id);
+  }
+  return claimed;
+}
+
+/** Why a project may not be proxied to `port`, or null when the port is its own. */
+export function upstreamConflict(claimed: Map<number, string | null>, projectId: string, port: number): string | null {
+  if (!claimed.has(port) || claimed.get(port) === projectId) return null;
+  return port === getEnv().port
+    ? "La porta del progetto è quella del pannello: un nome non può pubblicarlo."
+    : `La porta ${port} appartiene a un altro progetto o servizio: un nome può servire solo il proprio.`;
+}
 
 function certificateOnDisk(hostname: string): { fullchain: string; privkey: string } | null {
   const paths = certificatePaths(hostname);
@@ -171,15 +214,23 @@ function certificateExpiry(fullchain: string): string | null {
  * allow list has to be nginx's job — otherwise a restricted project would be
  * one domain away from open to everyone.
  */
-function siteFor(found: ProxyProbe, row: HostRow, withoutCertificate: boolean): SiteInput | string {
+function siteFor(
+  found: ProxyProbe,
+  row: HostRow,
+  withoutCertificate: boolean,
+  claimed: Map<number, string | null>
+): SiteInput | string {
   if (!row.port) return "Il progetto non ha una porta: non c'è niente da servire.";
   const access = readAccess(row);
   const allow =
     access.mode === "restricted" && !row.public_access ? compileRules(access.allow).map((rule) => rule.text) : null;
+  const upstreamPort = listenPort(row, row.port);
+  const conflict = upstreamConflict(claimed, row.project_id, upstreamPort);
+  if (conflict) return conflict;
 
   return {
     hostname: row.hostname,
-    upstreamPort: listenPort(row, row.port),
+    upstreamPort,
     allow,
     certificate: withoutCertificate ? null : certificateOnDisk(row.hostname),
     checkToken: row.check_token,
@@ -220,7 +271,7 @@ export interface ApplyResult {
 }
 
 async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
-  const rows = await loadHosts();
+  const [rows, claimed] = await Promise.all([loadHosts(), claimedPorts()]);
   const ours = new Set(rows.map((row) => row.hostname));
   /** Not served at all, and why. */
   const left = new Map<string, string>();
@@ -235,7 +286,7 @@ async function writeAndReload(found: ProxyProbe): Promise<ApplyResult> {
     const files = new Map<string, string>();
     for (const row of rows) {
       if (left.has(row.hostname)) continue;
-      const site = siteFor(found, row, httpOnly.has(row.hostname));
+      const site = siteFor(found, row, httpOnly.has(row.hostname), claimed);
       if (typeof site === "string") {
         left.set(row.hostname, site);
         continue;
@@ -608,7 +659,10 @@ async function renew(): Promise<void> {
     .execute();
   if (active.length === 0) return;
 
-  const env = (await cloudflareEnv().catch(() => null)) ?? undefined;
+  // The token only when a name on Cloudflare is among those renewed: one
+  // `certbot renew` covers them all, and the HTTP ones have no use for it.
+  const needsToken = active.some((host) => host.cloudflare === 1);
+  const env = needsToken ? ((await cloudflareEnv().catch(() => null)) ?? undefined) : undefined;
   const email = (await getSetting(ACME_EMAIL_SETTING))?.trim() || null;
 
   // A domain that joined or left Cloudflare after its names got their

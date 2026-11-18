@@ -5,7 +5,8 @@ import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { LoadError } from "@/components/ui/LoadError";
+import { ErrorDetail, LoadError } from "@/components/ui/LoadError";
+import { readableError } from "@/lib/error-text";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -164,7 +165,7 @@ export default function ServersPage() {
         title="Server"
         description="Gli altri RunPanel collegati a questo: stessi account, un solo pannello."
         actions={
-          <div className="flex gap-2">
+          <>
             {others.length > 0 && (
               <Button variant="ghost" size="sm" onPress={rotate} isPending={rotating}>
                 <Icon icon="solar:key-linear" width={16} aria-hidden />
@@ -175,7 +176,7 @@ export default function ServersPage() {
               <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
               Collega un server
             </Button>
-          </div>
+          </>
         }
       />
 
@@ -227,7 +228,12 @@ export default function ServersPage() {
                         </span>
                       )}
                     </div>
-                    {m.lastError && <p className="text-danger text-xs">{m.lastError}</p>}
+                    {m.lastError && (
+                      <>
+                        <p className="text-danger text-xs">{readableError(m.lastError).text}</p>
+                        <ErrorDetail detail={readableError(m.lastError).detail} />
+                      </>
+                    )}
                   </div>
                   {!m.self && (
                     <div className="flex shrink-0 flex-wrap gap-1.5">

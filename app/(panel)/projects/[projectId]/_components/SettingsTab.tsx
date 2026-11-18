@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
+import type { LogLine } from "@/components/ui/LogViewer";
 import { useResource } from "@/lib/hooks/useResource";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
@@ -29,7 +30,7 @@ import { OneTimeCommandsSection } from "./OneTimeCommandsSection";
 import type { PendingSave, RegisterPendingSave } from "./pending-saves";
 import { RepoPathSection } from "./RepoPathSection";
 import { WebhookSection } from "./WebhookSection";
-import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
+import { normalizeContractInput, parseContractJson, type DeployContract } from "@/lib/deploy-contract";
 import type { RuntimeType } from "@/lib/validation";
 import type { Project } from "./types";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
@@ -60,7 +61,9 @@ function contractPatch(stored: string, loaded: DeployContract, current: DeployCo
   let raw: RawContract = {};
   try {
     const parsed: unknown = stored ? JSON.parse(stored) : {};
-    if (isPlainObject(parsed)) raw = parsed;
+    // Translated first: a row in the old shape has no `version`, so a patch of
+    // the new shape laid over it would be read back as the old one, and refused.
+    if (isPlainObject(parsed)) raw = normalizeContractInput(parsed);
   } catch {
     /* an unreadable column is replaced by what the form knows */
   }
@@ -110,6 +113,7 @@ export function SettingsTab({
   project,
   onProjectChange,
   onRefresh,
+  operationLines,
 }: {
   project: Project;
   /**
@@ -120,6 +124,8 @@ export function SettingsTab({
   onProjectChange: (update: Project | ((prev: Project) => Project)) => void;
   /** Re-read the project from the server, after an action that changed it there. */
   onRefresh: () => void;
+  /** What a files move or a mount apply is saying, live. */
+  operationLines: LogLine[];
 }) {
   const api = useNodeApi();
   const href = useServerHref();
@@ -804,6 +810,7 @@ export function SettingsTab({
             projectId={project.id}
             mounts={project.mounts ?? []}
             onApplied={onRefresh}
+            logLines={operationLines}
           />
         </Section>
       )}
@@ -820,6 +827,7 @@ export function SettingsTab({
           repoPath={project.repo_path}
           move={project.repoMove}
           onChanged={onRefresh}
+          logLines={operationLines}
         />
       )}
 

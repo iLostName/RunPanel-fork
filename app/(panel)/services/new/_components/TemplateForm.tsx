@@ -11,10 +11,8 @@ import type { DockerTemplate } from "../_data/catalog";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
- * A prebuilt image with a few fields, configured as the project's app.
- *
- * The template's own settings go into the contract's `docker.image` plus the
- * template fields, so nothing about a specific image is hardcoded elsewhere.
+ * A prebuilt image configured as the project's app: version and port are all
+ * the contract can say about it. The image runs with its stock configuration.
  */
 export function TemplateForm({
   projectId,
@@ -29,9 +27,6 @@ export function TemplateForm({
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState(template.versions[0]);
   const [port, setPort] = useState(template.defaultPort);
-  const [fields, setFields] = useState<Record<string, string>>(() =>
-    Object.fromEntries(template.fields.map((f) => [f.key, f.default]))
-  );
 
   async function create() {
     setSaving(true);
@@ -46,8 +41,6 @@ export function TemplateForm({
           builderConfig: {
             version: 1,
             docker: { image: `${template.image}:${version}` },
-            dockerTemplate: template.id,
-            dockerFields: fields,
           },
         }),
       });
@@ -93,17 +86,6 @@ export function TemplateForm({
           <Label>Porta sull&apos;host</Label>
           <Input type="number" />
         </TextField>
-
-        {template.fields.map((field) => (
-          <TextField
-            key={field.key}
-            value={fields[field.key] ?? ""}
-            onChange={(v) => setFields((prev) => ({ ...prev, [field.key]: v }))}
-          >
-            <Label>{field.label}</Label>
-            <Input placeholder={field.placeholder} className="font-mono text-sm" />
-          </TextField>
-        ))}
       </Panel>
 
       <div className="flex justify-end">

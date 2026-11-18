@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { promisify } from "util";
-import { getEnv } from "@/lib/env";
+import { getEnv, sanitizedProcessEnv } from "@/lib/env";
 import { staleWhileRevalidate } from "@/lib/stale-cache";
 import { toolchainPath, whichSync } from "../env-utils";
 import {
@@ -76,7 +76,8 @@ async function run(command: string, args: string[], timeoutMs: number, env: Reco
     const { stdout, stderr } = await exec(command, args, {
       timeout: timeoutMs,
       windowsHide: true,
-      env: { ...process.env, ...env, PATH: toolchainPath() },
+      // Without the panel's own secrets: certbot and its hooks need none of them.
+      env: { ...sanitizedProcessEnv(), ...env, PATH: toolchainPath() },
       maxBuffer: 4 * 1024 * 1024,
     });
     return { ok: true, output: `${stdout}${stderr}`.trim() };

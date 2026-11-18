@@ -5,6 +5,8 @@ import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { isPathShapeSafe, resolveInside } from "@/lib/fs-safe";
 import { getRepoPath } from "@/services/git-manager";
+import { appContainerName } from "@/services/docker/labels";
+import { assertOwnAppContainer, ForeignContainerError } from "@/services/process-drivers/docker-driver";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { config } from "@/lib/config";
@@ -29,7 +31,7 @@ const BINARY_EXTENSIONS = new Set([
  * Note on the two runtimes below.
  *
  * For a Docker project this file manager browses the CONTAINER from `/` — the
- * listing endpoint runs `ls -la /` and the terminal tab opens a shell in the
+ * listing endpoint reads `/` and the terminal tab opens a shell in the
  * same place. An absolute path there is the feature, not an escape, so the
  * Docker branch is left alone deliberately.
  *
@@ -69,7 +71,8 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   try {
     if (project.runtime_type === "docker") {
-      const containerName = `runpanel-${project.slug}`;
+      await assertOwnAppContainer(project.slug);
+      const containerName = appContainerName(project.slug);
       const tmpDir = config.tmpDir;
       fs.mkdirSync(tmpDir, { recursive: true });
       const tmpFile = path.join(tmpDir, `${project.slug}-${Date.now()}`);
@@ -103,7 +106,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     }
 
     if (!fs.existsSync(fullPath)) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
+      return NextResponse.json({ error: "File non trovato" }, { status: 404 });
     }
 
     const stat = fs.statSync(fullPath);
@@ -115,7 +118,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     return NextResponse.json({ content, path: filePath });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to read file";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: err instanceof ForeignContainerError ? 409 : 500 });
   }
 }
 
@@ -161,7 +164,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
     try {
       if (project.runtime_type === "docker") {
-        const containerName = `runpanel-${project.slug}`;
+        await assertOwnAppContainer(project.slug);
+        const containerName = appContainerName(project.slug);
         const tmpDir = config.tmpDir;
         fs.mkdirSync(tmpDir, { recursive: true });
         const tmpFile = path.join(tmpDir, `${project.slug}-${Date.now()}`);
@@ -187,7 +191,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       return NextResponse.json({ success: true });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to write file";
-      return NextResponse.json({ error: message }, { status: 500 });
+      return NextResponse.json({ error: message }, { status: err instanceof ForeignContainerError ? 409 : 500 });
     }
   });
 }

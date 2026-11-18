@@ -1,7 +1,9 @@
+import { randomBytes } from "crypto";
 import type { DeployContract } from "@/lib/deploy-contract";
 import { mountStringSchema } from "@/lib/validation";
 import { parseMountString } from "@/lib/mount";
-import { docker } from "./docker/cli";
+import { docker, dockerTry } from "./docker/cli";
+import { withDockerEnv } from "./docker/env-file";
 import { reachesDataDir } from "./data-dir-guard";
 import { labelArgs, networkName } from "./docker/labels";
 import { ensureProjectNetwork } from "./docker-network";
@@ -43,7 +45,17 @@ interface ReleaseOptions {
   env: Record<string, string>;
   contract: DeployContract;
   onLog: (line: string) => void;
+  timeout?: number;
+  signal?: AbortSignal;
 }
+
+const RELEASE_TIMEOUT_MS = 600_000;
+
+/** What the docker client gets on top, once the container has been removed. */
+const CONTAINER_REMOVAL_GRACE_MS = 30_000;
+
+/** How often the removal is tried again while the client has not returned. */
+const CONTAINER_REMOVAL_RETRY_MS = 2_000;
 
 /**
  * Run the one-shot release command.
@@ -65,14 +77,18 @@ export async function runReleaseCommand(command: string, opts: ReleaseOptions): 
     await runCommand(script, {
       cwd: opts.projectDir,
       env: opts.env,
-      timeout: 600_000,
+      timeout: opts.timeout ?? RELEASE_TIMEOUT_MS,
       onLog: opts.onLog,
+      signal: opts.signal,
     });
     return;
   }
 
+  const timeout = opts.timeout ?? RELEASE_TIMEOUT_MS;
   const network = opts.contract.docker.network;
-  const args = ["run", "--rm", ...labelArgs({ project: opts.slug, kind: "app" })];
+  // Named so it can be removed: see the timer below.
+  const name = `runpanel-oneoff-${opts.slug}-${randomBytes(4).toString("hex")}`;
+  const args = ["run", "--rm", "--name", name, ...labelArgs({ project: opts.slug, kind: "app" })];
 
   if (network === "host") {
     args.push("--network", "host");
@@ -98,13 +114,50 @@ export async function runReleaseCommand(command: string, opts: ReleaseOptions): 
     }
     args.push("-v", mount);
   }
-  for (const [key, value] of Object.entries(opts.env)) args.push("-e", `${key}=${value}`);
+  const invocation = [opts.image, "sh", "-c", script];
 
-  args.push(opts.image, "sh", "-c", script);
+  /*
+    A timeout on the docker client does not end the command. The client proxies
+    SIGTERM to the container's PID 1, a `sh` that ignores it as every PID 1 does
+    without a handler, so the client kept waiting and the deploy with it. Removing
+    the container is what really stops the command, and the client then returns
+    by itself.
+  */
+  if (opts.signal?.aborted) throw new Error(`Comando interrotto: ${script}`);
 
-  const result = await docker(args, { timeout: 600_000 });
-  for (const line of `${result.stdout}\n${result.stderr}`.split("\n")) {
-    if (line.trim()) opts.onLog(line.trim());
+  // Repeated until the client returns: right after the spawn the container may
+  // not exist yet, and a removal that finds nothing would leave it to run.
+  let ended: string | null = null;
+  let remover: NodeJS.Timeout | undefined;
+  const remove = () => void dockerTry(["rm", "-f", name], { timeout: CONTAINER_REMOVAL_GRACE_MS });
+  const end = (why: string) => {
+    if (ended) return;
+    ended = why;
+    remove();
+    remover = setInterval(remove, CONTAINER_REMOVAL_RETRY_MS);
+  };
+  const timer = setTimeout(
+    () => end(`interrotto dopo ${Math.round(timeout / 1000)}s (timeout)`),
+    timeout
+  );
+  const onAbort = () => end("interrotto");
+  opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+  try {
+    // Values off argv for as long as the migration runs: see `lib/docker-env.ts`.
+    const result = await withDockerEnv(opts.env, (envArgs) =>
+      docker([...args, ...envArgs, ...invocation], { timeout: timeout + CONTAINER_REMOVAL_GRACE_MS })
+    );
+    for (const line of `${result.stdout}\n${result.stderr}`.split("\n")) {
+      if (line.trim()) opts.onLog(line.trim());
+    }
+  } catch (err) {
+    if (ended) throw new Error(`Comando ${ended}: ${script}`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    clearInterval(remover);
+    opts.signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -114,6 +167,7 @@ interface HealthOptions {
   port: number;
   contract: DeployContract;
   onLog: (line: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface HealthResult {
@@ -138,7 +192,7 @@ export async function waitForHealthy(opts: HealthOptions): Promise<HealthResult>
 
   if (healthcheck.startPeriodSec > 0) {
     opts.onLog(`Waiting ${healthcheck.startPeriodSec}s before probing (start period)...`);
-    await sleep(healthcheck.startPeriodSec * 1000);
+    await sleep(healthcheck.startPeriodSec * 1000, opts.signal);
   }
 
   const port = healthcheck.port ?? opts.port;
@@ -147,13 +201,15 @@ export async function waitForHealthy(opts: HealthOptions): Promise<HealthResult>
   let lastReason = "the process never reported as running";
 
   while (Date.now() < deadline) {
+    if (opts.signal?.aborted) return { healthy: false, reason: "interrotto" };
+
     attempt++;
     const info = await processManager.status(opts.slug, opts.runtimeType);
 
     if (!info.running) {
       lastReason = "the process is not running";
       if (attempt % 5 === 0) opts.onLog(`Not running yet (attempt ${attempt})...`);
-      await sleep(healthcheck.intervalSec * 1000);
+      await sleep(healthcheck.intervalSec * 1000, opts.signal);
       continue;
     }
 
@@ -175,7 +231,7 @@ export async function waitForHealthy(opts: HealthOptions): Promise<HealthResult>
       opts.onLog(`${probe.reason} (attempt ${attempt}, ${left}s left)...`);
     }
 
-    await sleep(healthcheck.intervalSec * 1000);
+    await sleep(healthcheck.intervalSec * 1000, opts.signal);
   }
 
   return { healthy: false, reason: lastReason };
@@ -237,6 +293,19 @@ async function probeHttp(
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Ends early when aborted: the caller looks at the signal right after. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
 }

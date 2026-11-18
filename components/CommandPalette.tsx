@@ -6,7 +6,7 @@ import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { NAV_PAGES } from "@/lib/nav";
-import { useAllowedNav } from "@/lib/hooks/useMe";
+import { useAllowedNav, useCan } from "@/lib/hooks/useMe";
 import { serviceDisplayName } from "@/lib/service-name";
 import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
@@ -25,6 +25,8 @@ interface Command {
   id: string;
   label: string;
   hint?: string;
+  /** Matched by the search but not shown. */
+  also?: string;
   icon: string;
   run: () => void | Promise<void>;
 }
@@ -43,6 +45,9 @@ export function CommandPalette() {
   // The same destinations the sidebar shows, from the same list and filter.
   const allowed = useAllowedNav();
   const PAGES = useMemo(() => NAV_PAGES.filter(allowed), [allowed]);
+  const canCreate = useCan("projects.create");
+  const canBackup = useCan("backup");
+  const canAutostart = useCan("autostart");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -147,49 +152,56 @@ export function CommandPalette() {
         id: `service:${service.memberId ?? ""}:${service.id}`,
         label: serviceDisplayName(service),
         hint: `servizio · ${service.type}${service.memberName ? ` · ${service.memberName}` : ""}`,
+        also: service.name,
         icon: "solar:database-linear",
         run: () => router.push(href(`/services/${service.id}`, service.memberId)),
       });
     }
 
-    list.push({
-      id: "action:new-project",
-      label: "Nuovo progetto",
-      hint: "azione",
-      icon: "solar:add-circle-linear",
-      run: () => router.push(href("/projects/new")),
-    });
-    list.push({
-      id: "action:new-backup",
-      label: "Nuova pianificazione di backup",
-      hint: "azione",
-      icon: "solar:archive-linear",
-      run: () => router.push(href("/backups/new")),
-    });
-    list.push({
-      id: "action:reconcile",
-      label: "Simula l'avvio automatico",
-      hint: "azione",
-      icon: "solar:power-linear",
-      run: async () => {
-        const res = await fetch(api("/api/autostart/reconcile"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dryRun: true }),
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          toast.error(body.error || "Simulazione non riuscita");
-          return;
-        }
-        toast.success(
-          `${(body.entries ?? []).filter((entry: { action: string }) => entry.action === "would-start").length} elementi verrebbero avviati`
-        );
-      },
-    });
+    if (canCreate) {
+      list.push({
+        id: "action:new-project",
+        label: "Nuovo progetto",
+        hint: "azione",
+        icon: "solar:add-circle-linear",
+        run: () => router.push(href("/projects/new")),
+      });
+    }
+    if (canBackup) {
+      list.push({
+        id: "action:new-backup",
+        label: "Nuova pianificazione di backup",
+        hint: "azione",
+        icon: "solar:archive-linear",
+        run: () => router.push(href("/backups/new")),
+      });
+    }
+    if (canAutostart) {
+      list.push({
+        id: "action:reconcile",
+        label: "Simula l'avvio automatico",
+        hint: "azione",
+        icon: "solar:power-linear",
+        run: async () => {
+          const res = await fetch(api("/api/autostart/reconcile"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dryRun: true }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            toast.error(body.error || "Simulazione non riuscita");
+            return;
+          }
+          toast.success(
+            `${(body.entries ?? []).filter((entry: { action: string }) => entry.action === "would-start").length} elementi verrebbero avviati`
+          );
+        },
+      });
+    }
 
     return list;
-  }, [index, router, PAGES, api, href]);
+  }, [index, router, PAGES, api, href, canCreate, canBackup, canAutostart]);
 
   // Keeps the highlighted row in view while the arrows walk past the fold.
   useEffect(() => {
@@ -202,7 +214,7 @@ export function CommandPalette() {
     if (!needle) return commands.slice(0, 12);
     return commands
       .filter((command) =>
-        `${command.label} ${command.hint ?? ""}`.toLowerCase().includes(needle)
+        `${command.label} ${command.hint ?? ""} ${command.also ?? ""}`.toLowerCase().includes(needle)
       )
       .slice(0, 12);
   }, [commands, query]);

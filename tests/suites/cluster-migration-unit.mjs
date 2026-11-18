@@ -80,6 +80,24 @@ export async function run({ repoRoot }) {
     }
     r.check("a tombstone is unique per kind and id", dupTomb !== null);
 
+    // --- what a panel remembers of a server -------------------------------------
+    const lastSeenFile = files.find((f) => f.startsWith("028-"));
+    r.check("migration 028 exists", Boolean(lastSeenFile), files.join(", "));
+    const m028 = await load(lastSeenFile);
+    await m028.up(db);
+    await db.insertInto("users").values({ id: "u2", email: "b@b.c", password_hash: "$2b$12$h", is_owner: 0, disabled: 0, created_by: null, created_at: now, last_login_at: null, updated_at: now }).execute();
+    await db.insertInto("cluster_members").values(memberRow("m2")).execute();
+    const seenRow = (user_id, member_id, kind) => ({ user_id, member_id, kind, rows: "[]", updated_at: now });
+    await db.insertInto("cluster_last_seen").values([seenRow("u1", "m1", "projects"), seenRow("u1", "m1", "services"), seenRow("u1", "m2", "projects"), seenRow("u2", "m1", "projects")]).execute();
+    const seenCount = () => db.selectFrom("cluster_last_seen").selectAll().execute().then((rows) => rows.length);
+    r.check("one copy per account, server and list", (await seenCount()) === 4);
+    await db.deleteFrom("cluster_members").where("id", "=", "m2").execute();
+    r.check("a revoked server takes its copies with it", (await seenCount()) === 3);
+    await db.deleteFrom("users").where("id", "=", "u2").execute();
+    r.check("a deleted account takes its copies with it", (await seenCount()) === 2);
+    await m028.down(db);
+    r.check("down drops the copies", !sqlite.prepare("select name from sqlite_master where type = 'table'").all().some((x) => x.name === "cluster_last_seen"));
+
     // --- and back ---------------------------------------------------------------
     await m024.down(db);
     const after = sqlite.prepare("select name from sqlite_master where type = 'table' order by name").all().map((x) => x.name);
@@ -93,6 +111,30 @@ export async function run({ repoRoot }) {
     r.check("up runs again after down", (await db.selectFrom("users").select("updated_at").where("id", "=", "u1").executeTakeFirst())?.updated_at === now);
   } finally {
     await db.destroy();
+  }
+
+  // --- credentials left in repository URLs ---------------------------------------
+  {
+    const store = new SQLite(":memory:");
+    store.exec("create table projects (id text primary key, source_url text)");
+    const rows = {
+      http: ["https://bot:p@ss@github.com/a/b.git", "https://github.com/a/b.git"],
+      ssh: ["ssh://git@github.com/a/b.git", "ssh://git@github.com/a/b.git"],
+      scp: ["git@github.com:a/b.git", "git@github.com:a/b.git"],
+      path: ["https://github.com/a@b/c.git", "https://github.com/a@b/c.git"],
+      clean: ["https://github.com/a/b.git", "https://github.com/a/b.git"],
+      none: [null, null],
+    };
+    for (const [id, [url]] of Object.entries(rows)) store.prepare("insert into projects values (?, ?)").run(id, url);
+
+    const memory = new Kysely({ dialect: new SqliteDialect({ database: store }) });
+    const m029 = await load(files.find((f) => f.startsWith("029-")));
+    await m029.up(memory);
+    for (const [id, [, expected]] of Object.entries(rows)) {
+      const row = store.prepare("select source_url from projects where id = ?").get(id);
+      r.check(`migration 029: ${id}`, row.source_url === expected, String(row.source_url));
+    }
+    await memory.destroy();
   }
 
   return r.result();

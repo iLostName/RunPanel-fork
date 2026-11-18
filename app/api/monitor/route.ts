@@ -2,57 +2,39 @@ import { NextResponse } from "next/server";
 import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { processManager } from "@/services/process-manager";
-import { containerStats } from "@/services/docker/stats";
-import { dockerTry, lines } from "@/services/docker/cli";
+import { containerStats, dockerSnapshot, type DockerSnapshot } from "@/services/docker/stats";
+import { composeProjectName } from "@/services/docker/compose";
+import { appContainerName, foreignOwner } from "@/services/docker/labels";
 import { hostMetrics } from "@/services/host-metrics";
 import { serviceDisplayName } from "@/lib/service-name";
+import { appProcessInfo, stackProcessInfo } from "@/lib/docker-snapshot";
+import { isReservedSlug } from "@/lib/project-slug";
 
-const UPTIME_FORMAT = "{{.Name}}|{{.State.Running}}|{{.State.StartedAt}}";
+const NO_CONTAINERS: DockerSnapshot = { rows: [], facts: new Map() };
 
 /**
- * Uptime for every running container, in one call.
+ * A Docker project, answered from the snapshot.
  *
- * Uptime is not in the stats stream, so it has to be inspected — but this was
- * one `docker inspect` per container on an endpoint the monitor page polls
- * every 3 seconds. Ten services meant ten process spawns every 3 seconds,
- * forever, for a number that advances by itself.
- *
- * `docker inspect` takes any number of names, so one spawn answers for all of
- * them. The name is included in the format because that is what makes the
- * result a map rather than a list whose order has to be trusted.
+ * The monitor page polls this route every 3 seconds, and asking each driver cost
+ * a `docker inspect` per Docker project and a `docker compose ps` per stack on
+ * every poll. Uptime is not in the stats stream, so an inspect is still needed;
+ * `docker inspect` takes any number of names, so one spawn answers for all.
  */
-async function containerUptimes(names: string[]): Promise<Map<string, number>> {
-  const uptimes = new Map<string, number>();
-  if (names.length === 0) return uptimes;
+function dockerProject(slug: string, { rows, facts }: DockerSnapshot) {
+  const name = appContainerName(slug);
+  const row = rows.find((candidate) => candidate.names.includes(name));
+  // The driver answers the same for a name that belongs to something else.
+  if (!row || foreignOwner(slug, row.labels, isReservedSlug(slug))) return { running: false };
 
-  const collect = (line: string) => {
-    const [name, running, startedAt] = line.split("|");
-    if (!name || running !== "true" || !startedAt) return;
-    const started = new Date(startedAt).getTime();
-    if (Number.isNaN(started)) return;
-    // `.Name` comes back with a leading slash.
-    uptimes.set(name.replace(/^\//, ""), Math.floor((Date.now() - started) / 1000));
-  };
+  return appProcessInfo(facts.get(name), containerStats.get(name));
+}
 
-  const batch = await dockerTry(["inspect", ...names, "--format", UPTIME_FORMAT], {
-    timeout: 5_000,
-  });
-
-  if (batch) {
-    lines(batch.stdout).forEach(collect);
-    return uptimes;
-  }
-
-  // A single name docker does not recognise fails the whole batch — a container
-  // removed behind the panel's back, which the status column may not know about
-  // yet. Ask one at a time so the others still report.
-  const singles = await Promise.all(
-    names.map((name) => dockerTry(["inspect", name, "--format", UPTIME_FORMAT], { timeout: 5_000 }))
+function composeProject(slug: string, { rows }: DockerSnapshot) {
+  const stack = composeProjectName(slug);
+  return stackProcessInfo(
+    rows.filter((row) => row.composeProject === stack && !row.oneOff),
+    containerStats.get
   );
-  for (const result of singles) {
-    if (result) lines(result.stdout).forEach(collect);
-  }
-  return uptimes;
 }
 
 export async function GET() {
@@ -72,14 +54,20 @@ export async function GET() {
     db.selectFrom("services").selectAll().execute(),
   ]);
 
-  const uptimes = await containerUptimes(
-    services.filter((s) => s.status === "running").map((s) => s.container_name)
-  );
+  const isActive = (p: (typeof projects)[number]) => p.status === "running" || p.status === "deploying";
+  const names = [
+    ...services.filter((s) => s.status === "running").map((s) => s.container_name),
+    ...projects.filter((p) => isActive(p) && p.runtime_type === "docker").map((p) => appContainerName(p.slug)),
+  ];
+  // Nothing to ask on a panel that runs only native processes, which may well
+  // be a machine with no Docker at all.
+  const needsDocker = names.length > 0 || projects.some((p) => isActive(p) && p.runtime_type === "compose");
+  const snapshot = needsDocker ? await dockerSnapshot(names) : NO_CONTAINERS;
 
   /** Resource usage for one service, whether or not it belongs to a project. */
   function enrich(s: (typeof services)[number]) {
     const stats = s.status === "running" ? containerStats.get(s.container_name) : null;
-    const uptime = s.status === "running" ? uptimes.get(s.container_name) : undefined;
+    const uptime = s.status === "running" ? snapshot.facts.get(s.container_name)?.uptime : undefined;
 
     return {
       id: s.id,
@@ -96,9 +84,11 @@ export async function GET() {
   const projectStats = await Promise.all(
     projects.map(async (p) => {
       let processInfo = null;
-      if (p.status === "running" || p.status === "deploying") {
+      if (isActive(p)) {
         try {
-          processInfo = await processManager.status(p.slug, p.runtime_type);
+          if (p.runtime_type === "docker") processInfo = dockerProject(p.slug, snapshot);
+          else if (p.runtime_type === "compose") processInfo = composeProject(p.slug, snapshot);
+          else processInfo = await processManager.status(p.slug, p.runtime_type);
         } catch {
           /* a driver that cannot answer is reported as no process info */
         }

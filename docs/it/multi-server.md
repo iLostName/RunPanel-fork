@@ -32,9 +32,10 @@ Il ruolo si cambia da **Sistema › Server** e vale per tutti. Un pannello che d
 Il server di una pagina sta nel suo indirizzo (`?server=…`): un link a un progetto di or apre sempre or, chiunque lo apra. Il selettore in alto a destra (nel menu, su telefono) cambia quel parametro.
 
 - **Liste di tutti i server.** **Panoramica**, **Progetti**, **Servizi**, **Backup**, **Monitor**, **Diagnostica** e **Aggiornamenti** mostrano tutti i server insieme, ogni riga con il nome del suo server; il filtro "Tutti i server" li restringe a uno. Un server che non risponde compare come "non raggiungibile" e non blocca la lista.
-- **Panoramica.** Una scheda per server con CPU, memoria, disco, Docker, versione, progetti attivi e avvisi (disco quasi pieno, versione diversa, cose da sistemare, aggiornamento disponibile). Sotto, progetti e servizi divisi per server, ognuno con le sue cartelle. Le stesse schede sono in **Sistema › Server**.
+- **Panoramica.** Una scheda per server con CPU, memoria, disco, Docker, versione, progetti attivi e avvisi (disco quasi pieno, versione diversa, cose da sistemare, aggiornamento disponibile). Sotto, le cartelle, comuni a tutti i server, e poi quello che ogni server tiene fuori dalle cartelle. Le stesse schede sono in **Sistema › Server**.
+- **Cartelle.** Una cartella vale per tutti i server: contiene progetti e servizi di qualunque server, ognuno con il nome del suo. Si crea, si rinomina e si elimina da qualunque pannello; il server di un progetto ricorda dove è archiviato, quindi la scelta resta anche se il pannello cambia o si riavvia. Se un server non risponde, i suoi progetti restano nella loro cartella come **Non raggiungibile**, con gli ultimi dati visti da questo pannello e per questo account: non si aprono e non si spostano finché il server non torna. Eliminare una cartella riporta fuori il contenuto su ogni server; un server spento lo fa quando torna.
 - **Azioni.** Avviare un servizio, eseguire un backup, scaricare un archivio, applicare una correzione della diagnostica o aggiornare un server partono sempre dal server della riga.
-- **Creare.** Nuovo progetto, nuovo database, nuova cartella e nuova pianificazione di backup chiedono su quale server.
+- **Creare.** Nuovo progetto, nuovo database e nuova pianificazione di backup chiedono su quale server.
 - **Pagine di un server.** La pagina di un progetto o di un servizio, Avvio automatico, Pulizia Docker, Impostazioni e Registro attività riguardano un server alla volta: il nome del server compare nel percorso in alto. Un link a un progetto che sta su un altro server porta lì da solo.
 - **Palette dei comandi** (Ctrl+K) cerca progetti e servizi su tutti i server, **Notifiche Telegram** iniziano con il nome del server che le manda, e il banner degli aggiornamenti dice su quale server ce n'è uno.
 
@@ -44,7 +45,7 @@ Restano del pannello che stai usando, qualunque server sia selezionato: **Access
 
 ## Cosa si condivide
 
-Utenti, permessi e accessi sono replicati su tutti i server e si modificano da qualunque pannello. Ogni modifica viene spinta subito agli altri, nodi compresi, e un controllo al minuto ripara quello che non è arrivato (un server spento, per esempio). Se due server modificano lo stesso account, vince la modifica più recente. Un account cancellato lascia una traccia per 30 giorni, perché una copia vecchia non lo faccia tornare.
+Utenti, permessi, accessi e cartelle sono replicati su tutti i server e si modificano da qualunque pannello. Ogni modifica viene spinta subito agli altri, nodi compresi, e un controllo al minuto ripara quello che non è arrivato (un server spento, per esempio). Se due server modificano lo stesso account o la stessa cartella, vince la modifica più recente; l'eliminazione di una cartella vince sempre, anche su una rinomina fatta dopo. Un account o una cartella cancellati lasciano una traccia per 30 giorni, perché una copia vecchia non li faccia tornare.
 
 Si condividono anche il token GitHub e il bot Telegram (token e chat): ogni server clona e notifica con le stesse credenziali, e le cifra con la propria chiave.
 
@@ -72,4 +73,7 @@ Il server revocato conosce ancora il segreto, quindi la revoca propone di **rige
 ## Limiti
 
 - Lo stato "invitato" di un utente non è replicato: su un altro pannello compare come "invito scaduto" finché non imposta la password.
-- Una cartella appartiene al server su cui è stata creata.
+- Le cartelle create prima di questa versione restano separate anche se hanno lo stesso nome su due server: compaiono entrambe, e per unirle si sposta il contenuto in una e si elimina l'altra. Lo stesso succede quando due pannelli creano o rinominano una cartella con lo stesso nome prima di essersi sincronizzati. Due cartelle omonime si distinguono dalle prime cifre dell'id, aggiunte al nome.
+- Creare una cartella richiede un accesso a **tutto**: una cartella vale per tutto il pannello, e un accesso su di essa raggiunge quello che chiunque ci archivia.
+- Chi ha accesso solo a singoli progetti vede una cartella per quello che contiene: un progetto di un altro server ci entra solo con un accesso alla cartella.
+- Un server con una versione più vecchia non riceve le cartelle degli altri: i suoi progetti si spostano solo nelle sue finché non viene aggiornato.

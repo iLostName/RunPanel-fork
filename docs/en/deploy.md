@@ -40,7 +40,7 @@ What RunPanel needs to know to deploy a project. The fields are runtime-neutral 
 
 | Field | Docker | PM2 / native |
 |---|---|---|
-| `buildEnv`, `buildEnvPrefixes` | one `--build-arg` per entry | install and build environment |
+| `buildEnv`, `buildEnvPrefixes` | one `--build-arg` per entry | install and build environment (`buildEnv` values written in the panel are encrypted in the store; going back to an earlier panel version, they have to be written again) |
 | `envFile` | written 0600 and mounted read-only | written 0600 in the repository (path relative to its root) |
 | `commands.release` | throwaway container before start | command in the repository folder |
 | `healthcheck` | probed by RunPanel after start | same |
@@ -88,6 +88,8 @@ Variables prefixed `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` or `REACT_APP_` also reach
 7. **Health check**: RunPanel probes the app every 2 seconds, after a 3-second wait and for at most 30 (`startPeriodSec`, `timeoutSec`). Any HTTP response passes unless the contract sets `expectStatus`; a container without a port only has to stay up.
 
 If the health check fails, the deploy is marked failed with the process's last 40 lines in the log, and the project goes into error. **There is no automatic return to the previous version**, which has already been stopped: to go back see [Going back to a commit](automation.md#going-back-to-a-commit).
+
+Stopping a project during a deploy cancels the deploy: the running command is interrupted, the deploy ends as failed, the app stays down and a queued deploy is dropped too. Restarts, checkout moves, bind applies and volume restores never overlap: a deploy requested meanwhile starts as soon as they finish.
 
 **Re-build da zero** (rebuild from scratch, in the **Altro** menu) stops the app, deletes the runtime's build files and redoes everything from the code already there, with no `git pull`:
 

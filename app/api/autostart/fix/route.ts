@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db";
 import { autostartFixSchema } from "@/lib/validation";
 import { applyFix } from "@/services/autostart/install";
 import { setRestartPolicy } from "@/services/autostart/probe";
+import { assertOwnAppContainer } from "@/services/process-drivers/docker-driver";
 
 /**
  * The one-click repairs the page offers.
@@ -81,6 +82,7 @@ export async function POST(request: NextRequest) {
       }
 
       const wanted = resolveAutostart("project", project).autostart ? "unless-stopped" : "no";
+      await assertOwnAppContainer(project.slug);
       await setRestartPolicy(`runpanel-${project.slug}`, wanted);
       return NextResponse.json({ ok: true, message: `Restart policy allineata a "${wanted}"` });
     } catch (err) {

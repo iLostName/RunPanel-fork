@@ -53,6 +53,14 @@ interface StorageData {
   retention: { imagesPerProject: number; buildCacheHours: number };
 }
 
+/** What `docker system df` calls each row, which is the only place these names come from. */
+const DOCKER_USAGE_LABEL: Record<string, string> = {
+  Images: "Immagini",
+  Containers: "Container",
+  "Local Volumes": "Volumi",
+  "Build Cache": "Cache di build",
+};
+
 export default function StoragePage() {
   const api = useNodeApi();
   const [data, setData] = useState<StorageData | null>(null);
@@ -242,7 +250,7 @@ export default function StoragePage() {
               <tbody>
                 {data.usage.map((row) => (
                   <tr key={row.type} className="border-border/50 border-b last:border-0">
-                    <td className="text-foreground py-2 pr-4">{row.type}</td>
+                    <td className="text-foreground py-2 pr-4">{DOCKER_USAGE_LABEL[row.type] ?? row.type}</td>
                     <td className="text-muted py-2 pr-4 tabular-nums">{row.total}</td>
                     <td className="text-muted py-2 pr-4 tabular-nums">{row.active}</td>
                     <td className="text-foreground py-2 pr-4 font-mono text-xs">{row.size}</td>
@@ -257,7 +265,7 @@ export default function StoragePage() {
             {data.usage.map((row) => (
               <li key={row.type} className="py-2.5 first:pt-0 last:pb-0">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-foreground text-sm">{row.type}</span>
+                  <span className="text-foreground text-sm">{DOCKER_USAGE_LABEL[row.type] ?? row.type}</span>
                   <span className="text-foreground font-mono text-xs">{row.size}</span>
                 </div>
                 <p className="text-muted text-meta mt-0.5">

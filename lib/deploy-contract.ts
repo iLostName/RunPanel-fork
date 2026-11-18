@@ -148,6 +148,19 @@ const legacySchema = z.object({
   dockerFields: z.record(z.string(), z.string()).optional(),
 });
 
+/**
+ * Keys only the old shape ever had. `packageManager` is in both shapes, so it
+ * says nothing either way.
+ */
+const LEGACY_ONLY_KEYS = [
+  "installCmd",
+  "buildCmd",
+  "startCmd",
+  "dockerImage",
+  "dockerTemplate",
+  "dockerFields",
+] as const;
+
 type RawObject = Record<string, unknown>;
 
 /** Keys that reach an object's prototype chain when assigned or read. */
@@ -163,6 +176,19 @@ function isPlainObject(value: unknown): value is RawObject {
 }
 
 /**
+ * Legacy means a legacy key and no `version`, which that shape never had.
+ *
+ * `version` is optional in the current shape, and the presets and a
+ * `runpanel.json` usually leave it out. Reading "no version" as "legacy" ran them
+ * through `legacySchema`, which strips what it does not know: a detected preset
+ * and a whole repository contract came back as `{}` with no error. An unknown
+ * `version` is not legacy either: it stays as it is and the schema refuses it.
+ */
+function isLegacyShape(raw: RawObject): boolean {
+  return !Object.hasOwn(raw, "version") && LEGACY_ONLY_KEYS.some((key) => Object.hasOwn(raw, key));
+}
+
+/**
  * Translate the old four-field shape into the current one, WITHOUT applying
  * defaults. Keeping it partial is what lets a repository contract fill in
  * everything the panel did not explicitly set.
@@ -171,9 +197,27 @@ export function normalizeContractInput(raw: unknown): RawObject {
   return normalizeRaw(raw);
 }
 
+/**
+ * Whether a body sent for `builder_config` can be read as a contract at all.
+ *
+ * `false` is what the route must refuse: everything here would otherwise parse
+ * as an empty contract and overwrite the stored one with defaults, answering
+ * 200. Fields of the current shape are not judged here, because the schema does
+ * that with a better message. A key nothing knows (`comands`) is only a problem
+ * when it is all there is: stored rows may carry `dockerTemplate` next to a
+ * `version`, and `contractPatch` in the settings form sends them back.
+ */
+export function isContractInput(raw: unknown): boolean {
+  if (!isPlainObject(raw)) return false;
+  if (isLegacyShape(raw)) return legacySchema.safeParse(raw).success && Object.keys(normalizeRaw(raw)).length > 0;
+
+  const keys = Object.keys(raw);
+  return keys.length === 0 || keys.some((key) => Object.hasOwn(deployContractSchema.shape, key));
+}
+
 function normalizeRaw(raw: unknown): RawObject {
   if (!isPlainObject(raw)) return {};
-  if (raw.version === 1) return raw;
+  if (!isLegacyShape(raw)) return raw;
 
   const parsed = legacySchema.safeParse(raw);
   if (!parsed.success) return {};
@@ -300,6 +344,21 @@ export function stripPanelOnlyFields(repoRaw: unknown): StrippedContract {
     rejected.push(key);
   }
 
+  /*
+    A sealed build argument is the panel's to open, never a repository's: one
+    copied from somewhere else would be decrypted into the build and printed by
+    it. `enc:v1:` is `SEALED_PREFIX` in lib/build-env-seal.ts, written out here
+    because this file imports nothing but zod.
+  */
+  if (isPlainObject(contract.buildEnv)) {
+    const kept: RawObject = {};
+    for (const [key, value] of Object.entries(contract.buildEnv)) {
+      if (typeof value === "string" && value.startsWith("enc:v1:")) rejected.push(`buildEnv.${key}`);
+      else kept[key] = value;
+    }
+    contract.buildEnv = kept;
+  }
+
   for (const [parent, child] of PANEL_ONLY_FIELDS) {
     const branch = Object.hasOwn(contract, parent) ? contract[parent] : undefined;
     if (!isPlainObject(branch) || !Object.hasOwn(branch, child)) continue;
@@ -329,12 +388,29 @@ export function stripPanelOnlyFields(repoRaw: unknown): StrippedContract {
  * here.
  */
 export function resolveContract(panelRaw: unknown, repoRaw: unknown): DeployContract {
-  const panel = normalizeRaw(panelRaw);
+  const panel = withoutEmptyCommands(normalizeRaw(panelRaw));
   if (!isPlainObject(repoRaw)) return parseContract(panel);
 
   const merged = deepMerge(normalizeRaw(repoRaw), panel);
   const result = deployContractSchema.safeParse(merged);
   return result.success ? result.data : parseContract(panel);
+}
+
+/**
+ * A field left empty in the settings form is no answer, not the answer "nothing":
+ * it would otherwise cover the repository's command with an empty one.
+ *
+ * Except `release`, the one command a project does fine without: there, emptying
+ * the field is how an operator turns off the repository's migration.
+ */
+function withoutEmptyCommands(raw: RawObject): RawObject {
+  if (!isPlainObject(raw.commands)) return raw;
+  return {
+    ...raw,
+    commands: Object.fromEntries(
+      Object.entries(raw.commands).filter(([key, value]) => key === "release" || value !== "")
+    ),
+  };
 }
 
 /** Same, taking the panel side as the JSON string stored on the project. */
@@ -353,6 +429,64 @@ export function resolveContractJson(panelJson: string | null | undefined, repoRa
  * process needs. Build args are additionally reported so the deploy log can
  * name them without printing the values.
  */
+/** Runtimes whose builder works out install, build and start from the repository. */
+const SELF_DETECTING_RUNTIMES: ReadonlySet<string> = new Set(["node", "static"]);
+
+function hasCommands(raw: unknown): boolean {
+  if (!isPlainObject(raw)) return false;
+  const { commands } = normalizeContractInput(raw);
+  // Not `release`: it says what to run after a build, not how to build or start,
+  // so on its own it leaves a preset's answer to those standing.
+  return isPlainObject(commands) && Object.entries(commands).some(([key, value]) => key !== "release" && Boolean(value));
+}
+
+/**
+ * What a preset found by looking at the repository may contribute to a deploy.
+ *
+ * A guess, so it only fills what nobody decided. Its settings (timeouts, the
+ * health check, build-time prefixes) always apply; its commands are another
+ * matter. On a runtime whose builder detects them they would replace a better
+ * answer: `npm run build` on a pnpm repository, or a build with no install
+ * before it on a static site. Anywhere else they count only when neither the
+ * operator nor the repository gave any, because a preset's install command
+ * alongside somebody else's start command is a pairing nobody chose.
+ */
+export function detectedPresetLayer(
+  contract: object,
+  runtimeType: string,
+  configured: { panel: unknown; repo: unknown }
+): object {
+  const keepCommands =
+    !SELF_DETECTING_RUNTIMES.has(runtimeType) &&
+    !hasCommands(configured.panel) &&
+    !hasCommands(configured.repo);
+  if (keepCommands) return contract;
+
+  const settings: RawObject = { ...contract };
+  delete settings.commands;
+  return settings;
+}
+
+/**
+ * A stored contract with its mounts replaced and nothing else touched.
+ *
+ * Not the parsed contract: that one has every default filled in, and
+ * `builder_config` is sparse on purpose. Written back whole, those defaults
+ * would become the operator's own settings and outrank the repository's
+ * `runpanel.json` on every deploy after this one.
+ */
+export function withContractMounts(json: string | null | undefined, mounts: string[]): string {
+  let parsed: unknown = {};
+  try {
+    parsed = JSON.parse(json ?? "{}", safeJsonReviver);
+  } catch {
+    /* unreadable reads as empty, as it does for `parseContractJson` */
+  }
+  const contract = normalizeContractInput(parsed);
+  const docker = isPlainObject(contract.docker) ? contract.docker : {};
+  return JSON.stringify({ ...contract, version: 1, docker: { ...docker, mounts } });
+}
+
 export function selectBuildEnv(
   contract: DeployContract,
   envVars: Record<string, string>

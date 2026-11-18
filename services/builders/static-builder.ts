@@ -30,7 +30,7 @@ export const staticBuilder: IBuilder = {
       if (buildCmd) {
         onLog(`> ${buildCmd}`);
         // Was a hardcoded 120s, which the contract could not raise.
-        await runCommand(buildCmd, { cwd: projectDir, env: envVars, timeout: ctx.buildTimeout, onLog });
+        await runCommand(buildCmd, { cwd: projectDir, env: envVars, timeout: ctx.buildTimeout, onLog, signal: ctx.signal });
         onLog("Build completed.");
       }
 

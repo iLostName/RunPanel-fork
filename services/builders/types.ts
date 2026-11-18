@@ -28,6 +28,9 @@ export interface BuildContext {
    */
   onPhase?: (phase: BuildPhase) => Promise<void>;
 
+  /** Aborted when the operator stops the deploy. */
+  signal?: AbortSignal;
+
   // Docker template fields
   dockerImage?: string;
   dockerTemplate?: string;

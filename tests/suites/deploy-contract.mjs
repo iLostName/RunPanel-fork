@@ -17,6 +17,16 @@ import { tmpdir } from "node:os";
 export const meta = { name: "deploy-contract", needsDocker: true, drivers: ["sqlite"] };
 
 const PORT = 3311;
+const SEALED_VALUE = "sigillato #1 con spazi";
+const ODD_VALUES = {
+  LEAD: "  leading and trailing  ",
+  HASH: "a # not a comment",
+  DOLLAR: "$HOME and ${PATH}",
+  EQ: "a=b=c",
+  UNI: "è € 日本",
+  MULTI: "line one\nline two",
+  LONG: "x".repeat(61_000),
+};
 
 export async function run({ base, dataDir }) {
   const r = createReporter("deploy-contract");
@@ -46,6 +56,8 @@ export async function run({ base, dataDir }) {
 ARG NEXT_PUBLIC_BASE_URL
 RUN test -n "$NEXT_PUBLIC_BASE_URL" || (echo "FATAL: NEXT_PUBLIC_BASE_URL build arg is required" && exit 1)
 RUN echo "$NEXT_PUBLIC_BASE_URL" > /baked-url
+ARG SEALED_ARG
+RUN echo "$SEALED_ARG" > /sealed-arg
 WORKDIR /app
 COPY server.js .
 CMD ["node","server.js"]
@@ -64,6 +76,8 @@ http.createServer((req, res) => {
     envFileHasSecret: (envFile || "").includes("SECRET_TOKEN"),
     quoted: (envFile || "").match(/QUOTED_VALUE=(.*)/)?.[1] ?? null,
     releaseMarker: read("/shared/released"),
+    sealedArg: read("/sealed-arg"),
+    env: Object.fromEntries(["LEAD", "HASH", "DOLLAR", "EQ", "UNI", "MULTI", "LONG"].map((k) => [k, process.env[k] ?? null])),
   }));
 }).listen(${PORT}, "0.0.0.0");
 `);
@@ -75,6 +89,8 @@ http.createServer((req, res) => {
         { key: "NEXT_PUBLIC_BASE_URL", value: "https://contract.example" },
         { key: "SECRET_TOKEN", value: "s3cr3t" },
         { key: "QUOTED_VALUE", value: 'has spaces and "quotes"' },
+        // What an env file could get wrong, now that values go through one.
+        ...Object.entries(ODD_VALUES).map(([key, value]) => ({ key, value })),
       ],
     }),
   });
@@ -89,6 +105,7 @@ http.createServer((req, res) => {
         version: 1,
         commands: { release: "echo released-ok > /shared/released" },
         envFile: { enabled: true, path: "/app/.env" },
+        buildEnv: { SEALED_ARG: SEALED_VALUE },
         docker: { mounts: [`${shared.replace(/\\/g, "/")}:/shared`] },
         healthcheck: { enabled: true, path: "/healthz", expectStatus: [200], startPeriodSec: 2, timeoutSec: 60 },
       },
@@ -118,6 +135,12 @@ http.createServer((req, res) => {
   r.note(`app reports: ${JSON.stringify(probe)}`);
 
   r.check("build arg reached the Dockerfile", probe.bakedUrl === "https://contract.example", String(probe.bakedUrl));
+  r.check("a sealed build argument reaches the build readable", probe.sealedArg === SEALED_VALUE, String(probe.sealedArg));
+  const stored = (await api.call(`/api/projects/${projectId}`)).body?.builder_config ?? "";
+  r.check("and is not in the store in the clear", stored.includes("enc:v1:") && !stored.includes(SEALED_VALUE), stored.slice(0, 160));
+  for (const [key, value] of Object.entries(ODD_VALUES)) {
+    r.check(`the variable ${key} arrives exactly as written`, probe.env?.[key] === value, JSON.stringify(probe.env?.[key])?.slice(0, 80));
+  }
   r.check("env file mounted into the container", probe.envFilePresent === true);
   r.check("env file carries the runtime secret", probe.envFileHasSecret === true);
   r.check(
@@ -140,7 +163,12 @@ http.createServer((req, res) => {
     method: "PUT",
     body: JSON.stringify({ vars: [{ key: "SECRET_TOKEN", value: "s3cr3t" }] }),
   });
+  const deployments = async () => (await api.call(`/api/projects/${projectId}/logs`)).body?.length ?? 0;
+  const before = await deployments();
   await api.call(`/api/projects/${projectId}/deploy`, { method: "POST", body: "{}" });
+  // Right after a deploy this one may wait for the lock with the row still saying
+  // `running`, which is not the answer: its own deployment row is the start line.
+  for (let i = 0; i < 60 && (await deployments()) === before; i++) await new Promise((resolve) => setTimeout(resolve, 500));
   const second = await waitForDeploy(api, projectId);
   r.check("a missing build arg fails the deploy", second === "error" || second === "stopped", `status=${second}`);
 

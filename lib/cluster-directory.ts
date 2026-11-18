@@ -5,7 +5,8 @@
  * settings and the tombstones of what was deleted. Any panel may edit any of
  * it; copies converge by merging per record:
  *
- *   - a tombstone wins over a record changed at or before the deletion
+ *   - a tombstone wins over a record changed at or before the deletion (a
+ *     folder's wins over any record: see Folders below)
  *   - otherwise the record with the newer `updated_at` wins
  *   - on an exact tie the smaller canonical serialisation wins, so both sides
  *     pick the same one whichever direction the merge runs
@@ -252,7 +253,7 @@ function wins(candidate: { updated_at: string }, incumbent: { updated_at: string
 }
 
 function mergeRecords<T extends Versioned>(
-  kind: TombstoneKind,
+  kind: string,
   local: T[],
   remote: T[],
   deletedAt: Map<string, string>
@@ -273,7 +274,7 @@ function mergeRecords<T extends Versioned>(
     if (!winner) continue;
 
     const tomb = deletedAt.get(`${kind}:${id}`);
-    if (tomb && winner.updated_at <= tomb) {
+    if (tomb && (kind === "folder" || winner.updated_at <= tomb)) {
       if (l) remove.push(id);
       continue;
     }
@@ -282,4 +283,82 @@ function mergeRecords<T extends Versioned>(
     if (!l || stableStringify(winner) !== stableStringify(l)) upsert.push(winner);
   }
   return { upsert, remove, result };
+}
+
+// --- Folders ----------------------------------------------------------------
+//
+// A folder of the Overview is one row with one id on every member, merged by
+// the rules at the top of this file; what sits in it stays in `folder_id` on
+// the member that holds the project. That is what lets a project of any server
+// sit in any folder, and it costs nothing when a member is down: the filing
+// lives with the project, the folder on everyone else.
+//
+// Folders travel apart from `DirectorySnapshot`, in their own exchange:
+// `directorySchema` is strict, so a member on an older release would refuse a
+// snapshot carrying them, and accounts would stop replicating until every
+// server had been updated. A member that does not advertise a folders hash in
+// its ping is simply skipped.
+//
+// One rule differs from the top of this file: a folder's tombstone wins whatever
+// the dates say. By the time it travels, the delete has emptied the folder and
+// dropped its grants, so a rename that raced it would keep a name with nothing
+// behind it. A user or a member can be edited back to life; a folder id is never
+// reused, so nothing legitimate is lost.
+
+export interface DirectoryFolder {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FolderTombstone {
+  id: string;
+  deleted_at: string;
+}
+
+export interface FolderSet {
+  folders: DirectoryFolder[];
+  tombstones: FolderTombstone[];
+}
+
+export interface FolderMergePlan {
+  upsert: DirectoryFolder[];
+  remove: string[];
+  /** The union of both sides' tombstones: what to store. */
+  tombstones: FolderTombstone[];
+  /** The folders as they stand after the plan is applied. */
+  result: FolderSet;
+}
+
+function normalizeFolderSet(s: FolderSet): FolderSet {
+  const tombstones = new Map<string, FolderTombstone>();
+  for (const t of s.tombstones) {
+    const prev = tombstones.get(t.id);
+    if (!prev || prev.deleted_at < t.deleted_at) tombstones.set(t.id, { id: t.id, deleted_at: t.deleted_at });
+  }
+  return {
+    folders: s.folders.map((f) => ({ id: f.id, name: f.name, created_at: f.created_at, updated_at: f.updated_at })).sort(byId),
+    tombstones: [...tombstones.values()].sort(byId),
+  };
+}
+
+/** A stable string for hashing, like `canonicalDirectory`. */
+export function canonicalFolders(s: FolderSet): string {
+  return stableStringify(normalizeFolderSet(s));
+}
+
+/** What `local` must do to converge with `remote`. Pure: nothing is applied here. */
+export function mergeFolders(localRaw: FolderSet, remoteRaw: FolderSet): FolderMergePlan {
+  const local = normalizeFolderSet(localRaw);
+  const remote = normalizeFolderSet(remoteRaw);
+  const { tombstones } = normalizeFolderSet({ folders: [], tombstones: [...local.tombstones, ...remote.tombstones] });
+  const deletedAt = new Map(tombstones.map((t) => [`folder:${t.id}`, t.deleted_at]));
+  const merged = mergeRecords("folder", local.folders, remote.folders, deletedAt);
+  return {
+    upsert: merged.upsert,
+    remove: merged.remove,
+    tombstones,
+    result: normalizeFolderSet({ folders: merged.result, tombstones }),
+  };
 }

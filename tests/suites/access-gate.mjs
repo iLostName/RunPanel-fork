@@ -64,6 +64,34 @@ function probe(port, { host = "127.0.0.1", localAddress, payload = "ping", timeo
   });
 }
 
+/**
+ * A client that stays connected, the way a database pool or a WebSocket does.
+ *
+ * Resolves once a round trip through the gate has worked, so the connection is
+ * known to be forwarding before the suite does anything to it.
+ */
+function hold(port, { localAddress } = {}) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host: "127.0.0.1", port, ...(localAddress ? { localAddress } : {}) });
+    const closed = new Promise((done) => socket.once("close", () => done(true)));
+    socket.on("error", () => {});
+    socket.once("connect", () => socket.write("hold"));
+    socket.once("data", () => resolve({ socket, closed }));
+    setTimeout(() => reject(new Error("no round trip through the gate")), 3000).unref();
+  });
+}
+
+/** Whether a promise settles in time, without ever hanging the suite. */
+function settlesWithin(promise, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    promise.then(
+      () => { clearTimeout(timer); resolve(true); },
+      () => { clearTimeout(timer); resolve(true); }
+    );
+  });
+}
+
 /** A non-loopback IPv4 this machine holds, to originate a connection from. */
 function ownLanAddress() {
   for (const addresses of Object.values(os.networkInterfaces())) {
@@ -94,6 +122,17 @@ export async function run({ repoRoot }) {
     ...extra,
   });
 
+  // A gate of its own on a port of its own, for the checks that keep a client
+  // connected through it.
+  const heldPort = { value: 0 };
+  async function openHeld(makeSpec, id) {
+    const port = await allocateLoopbackPort();
+    heldPort.value = port;
+    const open = (matches) => openGate(makeSpec(matches, { id, label: id, publicPort: port }));
+    await open(() => true);
+    return { port, open };
+  }
+
   try {
     // --- an allowed source is forwarded ------------------------------------
     {
@@ -105,7 +144,7 @@ export async function run({ repoRoot }) {
     // --- a refused source gets nothing --------------------------------------
     {
       // Same ports, different rules: this exercises the in-place swap, which is
-      // what keeps editing the list from dropping live connections.
+      // what keeps editing the list from dropping the connections it still admits.
       await openGate(spec(() => false));
       const { data } = await probe(publicPort);
       r.check("a refused source receives no bytes", data === "", JSON.stringify(data));
@@ -189,6 +228,61 @@ export async function run({ repoRoot }) {
       r.check("a closed gate has no status", gateStatus("service", "suite") === null);
       const { data, error } = await probe(publicPort, { timeout: 1500 });
       r.check("and the port is no longer answering", data === "" && error !== null, String(error));
+    }
+
+    // --- closing with a client still connected ---------------------------------
+    {
+      // A pooled database connection or a WebSocket never hangs up by itself,
+      // and a restart or an access change waits on this call.
+      const held = await hold((await openHeld(spec, "held")).port);
+      const closing = closeGate("service", "held");
+      r.check("closeGate returns with a client still connected", await settlesWithin(closing, 1500));
+      r.check("and that client is disconnected", await settlesWithin(held.closed, 1500));
+      held.socket.destroy();
+
+      const { data, error } = await probe(heldPort.value, { timeout: 1500 });
+      r.check("and the port is released", data === "" && error !== null, String(error));
+    }
+
+    // --- a listener that never reports closing ---------------------------------
+    {
+      const { port } = await openHeld(spec, "stuck");
+      const held = await hold(port);
+      const { server } = globalThis.__runpanelGates.get("service:stuck");
+      const realClose = server.close.bind(server);
+      // The handle goes, the callback never comes.
+      server.close = () => { realClose(); return server; };
+
+      const closing = closeGate("service", "stuck");
+      r.check("closeGate has a deadline of its own", await settlesWithin(closing, 4000));
+      r.check("and forgets the gate either way", gateStatus("service", "stuck") === null);
+      held.socket.destroy();
+    }
+
+    // --- editing the rules with connections open --------------------------------
+    {
+      const revoked = "127.0.0.2";
+      const { port, open } = await openHeld(spec, "edit");
+      const staying = await hold(port);
+      const leaving = await hold(port, { localAddress: revoked });
+
+      await open(() => true);
+      r.check(
+        "rules that still admit everyone drop nobody",
+        !(await settlesWithin(Promise.race([staying.closed, leaving.closed]), 300))
+      );
+
+      await open((address) => !address.endsWith(revoked));
+      r.check("removing an address disconnects it", await settlesWithin(leaving.closed, 1500));
+      r.check("and leaves the others connected", !(await settlesWithin(staying.closed, 300)));
+
+      const reply = new Promise((done) => staying.socket.once("data", (chunk) => done(chunk.toString())));
+      staying.socket.write("still");
+      r.check("and they keep forwarding", (await Promise.race([reply, new Promise((done) => setTimeout(done, 1500))])) === "still");
+      r.check("without counting the revoked one as refused", recentRejections("service", "edit").length === 0);
+
+      staying.socket.destroy();
+      await closeGate("service", "edit");
     }
   } finally {
     await closeAllGates();

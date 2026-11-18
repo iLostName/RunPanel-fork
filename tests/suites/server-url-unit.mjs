@@ -15,7 +15,11 @@ export const meta = { name: "server-url-unit", needsDocker: false, drivers: [], 
 
 export async function run({ repoRoot }) {
   const r = createReporter("server-url-unit");
-  const { withServer, serverFromSearch, isAggregatePath } = await import(pathToFileURL(join(repoRoot, "lib", "server-url.ts")).href);
+  const { withServer, serverFromSearch, isAggregatePath, serverOptionLabel } = await import(pathToFileURL(join(repoRoot, "lib", "server-url.ts")).href);
+
+  r.check("a selector names this server", serverOptionLabel({ id: "a", name: "or", status: "unreachable" }, "a") === "or (questo)");
+  r.check("a selector flags a server that is down", serverOptionLabel({ id: "b", name: "nodo", status: "unreachable" }, "a") === "nodo · non raggiungibile");
+  r.check("a selector shows any other server by name", serverOptionLabel({ id: "b", name: "nodo", status: "ok" }, "a") === "nodo");
 
   r.check("adds the server to a bare path", withServer("/projects/abc", "or1") === "/projects/abc?server=or1");
   r.check("keeps other parameters", withServer("/projects/abc?tab=logs", "or1") === "/projects/abc?tab=logs&server=or1", withServer("/projects/abc?tab=logs", "or1"));

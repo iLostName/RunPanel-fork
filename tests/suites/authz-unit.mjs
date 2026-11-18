@@ -23,6 +23,7 @@ export async function run({ repoRoot }) {
     projectAccess,
     serviceAccess,
     folderAccess,
+    seesEverything,
     satisfies,
     hasPermission,
     canEditUser,
@@ -124,6 +125,8 @@ export async function run({ repoRoot }) {
 
   // --- folders ---------------------------------------------------------------
   r.check("folderAccess reads folder and all grants", folderAccess(user([g("all", null, "operate")]), "f9").level === "operate");
+  r.check("a grant on everything sees everything", seesEverything(user([g("all", null, "read")])));
+  r.check("grants on some projects do not", !seesEverything(user([g("project", "p1", "manage"), g("folder", "f1", "manage")])));
 
   // --- global permissions ----------------------------------------------------
   r.check("a held permission is held", hasPermission(user([], ["backup"]), "backup"));
@@ -193,6 +196,16 @@ export async function run({ repoRoot }) {
       preset.permissions.every((p) => GLOBAL_PERMISSIONS.includes(p)) && preset.grants.length > 0
     );
   }
+
+  // --- what a list row lets the page show -----------------------------------------
+  const { rowAllows } = authz;
+  const row = (level) => ({ permission: { level, terminal: false } });
+  r.check("a row at manage can be moved", rowAllows(row("manage"), PROJECT_ACTIONS.settings));
+  r.check("a row at operate cannot be moved", !rowAllows(row("operate"), PROJECT_ACTIONS.settings));
+  r.check("a row at operate can be started", rowAllows(row("operate"), SERVICE_ACTIONS.control));
+  r.check("a row at read cannot be started", !rowAllows(row("read"), SERVICE_ACTIONS.control));
+  r.check("a folder seen only for its content cannot be managed", !rowAllows(row(null), { level: "manage" }));
+  r.check("a row from an older server keeps its actions: that server decides", rowAllows({}, PROJECT_ACTIONS.settings));
 
   return r.result();
 }

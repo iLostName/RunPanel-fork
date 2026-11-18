@@ -9,7 +9,8 @@ import { projectEvents, type MountPhase } from "./events";
 import { AppendLogFile, logPathFor, readLogFile } from "./log-file";
 import { processManager } from "./process-manager";
 import { getRepoPath } from "./git-manager";
-import { restartFromLastDeployment } from "./project-restart";
+import { appIsUp, restartFromLastDeployment } from "./project-restart";
+import { busyMessage, tryLock } from "./project-lock";
 
 /**
  * Putting a native project's checkout on a different disk.
@@ -57,6 +58,7 @@ export class RepoMoveRefused extends Error {
     readonly code:
       | "runtime-not-native"
       | "move-in-progress"
+      | "project-busy"
       | "same-location"
       | "no-repo"
       | "destination-not-empty"
@@ -167,6 +169,36 @@ export async function startRepoMove(
   project: ProjectsTable,
   target: string | null
 ): Promise<RepoMoveJournal> {
+  // Held for the whole move. A deploy or a restart in the middle of it would
+  // write into a checkout that is being copied, or that is no longer there.
+  const release = tryLock(project.id, "repo-move");
+  if (!release) throw new RepoMoveRefused("project-busy", busyMessage(project.id));
+
+  let started = false;
+  try {
+    const journal = await beginRepoMove(project.id, target, release);
+    started = true;
+    return journal;
+  } finally {
+    if (!started) release();
+  }
+}
+
+async function beginRepoMove(
+  projectId: string,
+  target: string | null,
+  release: () => void
+): Promise<RepoMoveJournal> {
+  // Read again now that nothing else can change it: whether the process is up
+  // decides whether the move has to stop it and bring it back.
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .selectAll()
+    .where("id", "=", projectId)
+    .executeTakeFirst();
+  if (!project) throw new RepoMoveRefused("no-repo", "Il progetto non esiste più.");
+
   if (project.runtime_type === "docker" || project.runtime_type === "compose") {
     throw new RepoMoveRefused(
       "runtime-not-native",
@@ -229,6 +261,7 @@ export async function startRepoMove(
 
   void runMove(project, journal, current, finalDestination).finally(() => {
     inFlight.delete(project.id);
+    release();
   });
 
   return journal;
@@ -256,7 +289,7 @@ async function runMove(
 
   const link = getRepoPath(project.slug);
   const aside = `${link}${ASIDE_SUFFIX}`;
-  const wasRunning = project.status === "running";
+  const wasRunning = await appIsUp(project);
   const db = await getDb();
 
   /*
@@ -338,7 +371,7 @@ async function runMove(
 
     if (wasRunning) {
       emit("Riavvio il progetto…");
-      await restartFromLastDeployment(project.id);
+      await restartUnderLock(project.id);
     } else {
       emit("Il progetto era fermo: resta fermo.");
     }
@@ -371,7 +404,13 @@ async function runMove(
         fs.rmSync(link, { recursive: true, force: true });
         fs.symlinkSync(from, link, process.platform === "win32" ? "junction" : "dir");
       }
-      if (wasRunning) await restartFromLastDeployment(project.id);
+      // The column moved with the checkout if the failure came after it.
+      await db
+        .updateTable("projects")
+        .set({ repo_path: project.repo_path, updated_at: nowIso() })
+        .where("id", "=", project.id)
+        .execute();
+      if (wasRunning) await restartUnderLock(project.id);
       journal.rolledBack = true;
       emit("Il progetto è di nuovo com'era.");
     } catch (rollbackErr) {
@@ -385,6 +424,41 @@ async function runMove(
   } finally {
     file.flush();
   }
+}
+
+/**
+ * Moves the last process never finished.
+ *
+ * Nothing ends them otherwise: the journal would say "in progress" for ever and
+ * refuse every new move. Not undone: which steps ran is not recorded, and guessing
+ * could remove the only good copy. The page shows where the checkout really is.
+ */
+export async function reconcileRepoMoves(): Promise<number> {
+  const db = await getDb();
+  const rows = await db
+    .selectFrom("projects")
+    .select(["id", "repo_move"])
+    .where("repo_move", "is not", null)
+    .execute();
+
+  let repaired = 0;
+  for (const row of rows) {
+    const journal = parseRepoMove(row.repo_move);
+    if (!journal || !isMoveInFlight(journal)) continue;
+    journal.phase = "failed";
+    journal.finishedAt = nowIso();
+    journal.error = "Il pannello si è riavviato durante lo spostamento: controlla dove punta il checkout.";
+    journal.rolledBack = false;
+    await writeJournal(row.id, journal);
+    repaired++;
+  }
+  return repaired;
+}
+
+/** A restart that could not start the app has to fail the move, not end it well. */
+async function restartUnderLock(projectId: string): Promise<void> {
+  const result = await restartFromLastDeployment(projectId, { underLock: true });
+  if ("error" in result) throw new Error(result.error);
 }
 
 /**

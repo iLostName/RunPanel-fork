@@ -1,17 +1,19 @@
-import { spawn } from "child_process";
 import fs from "fs";
 import { buildEnv, getShellPath, isWindows } from "../env-utils";
+import { runShell } from "./run-shell";
 
 export interface RunCommandOpts {
   cwd: string;
   env?: Record<string, string>;
   timeout?: number;
   onLog: (line: string) => void;
+  /** Ends the command and everything it started, the way a timeout does. */
+  signal?: AbortSignal;
 }
 
 export function runCommand(command: string, opts: RunCommandOpts): Promise<void> {
   return new Promise((resolve, reject) => {
-    const { cwd, env, timeout = 300_000, onLog } = opts;
+    const { cwd, env, timeout = 300_000, onLog, signal } = opts;
 
     // Node reports a missing working directory as ENOENT *on the executable*:
     // `spawn C:\Windows\system32\cmd.exe ENOENT`, which reads as "the shell is
@@ -35,76 +37,6 @@ export function runCommand(command: string, opts: RunCommandOpts): Promise<void>
       return;
     }
 
-    const proc = isWindows
-      ? spawn(shell, ["/c", command], {
-          cwd,
-          env: fullEnv,
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout,
-          windowsHide: true,
-          // Without this Node quotes the argument list for a C runtime that
-          // cmd.exe is not: the whole command gets wrapped in quotes and every
-          // quote inside it escaped as \", which cmd does not understand. A
-          // command like
-          //     node -e "require('fs').writeFileSync('x','y')"
-          // then exits 0 having done nothing — no error, no output, nothing
-          // written. Any install, build or release command containing a double
-          // quote failed that way, silently, on Windows only. Verbatim hands
-          // cmd the line as written, which is what a shell invocation wants.
-          windowsVerbatimArguments: true,
-        })
-      : spawn(shell, ["-c", command], {
-          cwd,
-          env: fullEnv,
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout,
-        });
-
-    let lastLine = "";
-
-    proc.stdout.on("data", (data: Buffer) => {
-      const text = lastLine + data.toString();
-      const lines = text.split("\n");
-      lastLine = lines.pop() || "";
-      for (const line of lines) {
-        if (line.trim()) onLog(line);
-      }
-    });
-
-    proc.stderr.on("data", (data: Buffer) => {
-      const lines = data.toString().split("\n");
-      for (const line of lines) {
-        if (line.trim()) onLog(`[stderr] ${line}`);
-      }
-    });
-
-    /*
-      A timeout has to say so.
-
-      `spawn` enforces `timeout` by sending SIGTERM, and a killed process closes
-      with a null code — so this used to report a build that ran out of time as
-      `exited with code null`, which sends the reader looking for a crash that
-      never happened. `killed` is how Node distinguishes the two.
-    */
-    proc.on("close", (code) => {
-      if (lastLine.trim()) onLog(lastLine);
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      if (proc.killed && code === null) {
-        reject(
-          new Error(
-            `Command "${command}" interrotto dopo ${Math.round(timeout / 1000)}s (timeout del build)`
-          )
-        );
-        return;
-      }
-      reject(new Error(`Command "${command}" exited with code ${code}`));
-    });
-
-    proc.on("error", (err) => {
-      reject(new Error(`Failed to run "${command}": ${err.message}`));
-    });
+    runShell(command, { shell, windows: isWindows, cwd, env: fullEnv, timeout, onLog, signal }).then(resolve, reject);
   });
 }

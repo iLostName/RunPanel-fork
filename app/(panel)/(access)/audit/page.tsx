@@ -64,6 +64,7 @@ const ACTION_LABEL: Record<string, string> = {
   "api-tokens.disable": "Accesso via token spento",
   "account.email": "Email cambiata",
   "account.password": "Password cambiata",
+  "account.password.failed": "Password attuale errata",
   "audit.settings": "Registro configurato",
   "project.deploy": "Deploy",
   "project.control": "Avvio / stop / riavvio",
@@ -72,12 +73,65 @@ const ACTION_LABEL: Record<string, string> = {
   "project.env": "Variabili d'ambiente",
   "project.delete": "Progetto eliminato",
   "project.create": "Progetto creato",
+  "project.app.delete": "App rimossa dal progetto",
+  "project.backup": "Backup del progetto modificato",
+  "project.files": "File modificato",
+  "project.host.add": "Dominio aggiunto al progetto",
+  "project.host.update": "Dominio del progetto modificato",
+  "project.host.remove": "Dominio rimosso dal progetto",
+  "project.host.retry": "Certificato richiesto di nuovo",
+  "project.mounts": "Mount del progetto",
+  "project.one-time": "Comandi una tantum modificati",
+  "project.one-time.delete": "Comando una tantum eliminato",
+  "project.pin": "Versione sbloccata",
+  "project.repo-path": "Cartella del repository spostata",
+  "project.repo-path.reset": "Cartella del repository ripristinata",
+  "project.upload": "Archivio caricato",
+  "project.webhook": "Webhook GitHub",
   "service.control": "Avvio / stop / riavvio servizio",
   "service.update": "Impostazioni servizio",
   "service.delete": "Servizio eliminato",
   "service.create": "Servizio creato",
+  "service.console.engine": "Console del database aperta",
+  "service.console.shell": "Shell del servizio aperta",
+  "service.database.create": "Database creato",
+  "service.database.delete": "Database eliminato",
+  "service.mounts": "Mount del servizio",
+  "folder.create": "Cartella creata",
+  "folder.update": "Cartella modificata",
+  "folder.delete": "Cartella eliminata",
   "backup.run": "Backup eseguito",
+  "backup.run.delete": "Backup eliminato",
   "backup.restore": "Ripristino avviato",
+  "backup.policy.create": "Pianificazione creata",
+  "backup.policy.update": "Pianificazione modificata",
+  "backup.policy.delete": "Pianificazione eliminata",
+  "backup.destination.create": "Destinazione creata",
+  "backup.destination.update": "Destinazione modificata",
+  "backup.destination.delete": "Destinazione eliminata",
+  "cluster.token.issue": "Token di collegamento creato",
+  "cluster.member.join": "Server collegato",
+  "cluster.member.update": "Server modificato",
+  "cluster.member.revoke": "Server revocato",
+  "cluster.linked": "Collegato a un pannello",
+  "cluster.left": "Uscito dal cluster",
+  "cluster.secret.rotate": "Segreto del cluster rigenerato",
+  "cluster.secret.resend": "Segreto reinviato a un server",
+  "domain.create": "Dominio aggiunto",
+  "domain.delete": "Dominio eliminato",
+  "domain.settings": "Impostazioni dei domini",
+  "domain.proxy": "Proxy nginx configurato",
+  "domain.cloudflare.connect": "Cloudflare collegato",
+  "domain.cloudflare.disconnect": "Cloudflare scollegato",
+  "autostart.update": "Avvio automatico modificato",
+  "autostart.host": "Avvio automatico dell'host",
+  "autostart.fix": "Avvio automatico riparato",
+  "autostart.reconcile": "Avvio automatico riallineato",
+  "notifications.update": "Notifiche modificate",
+  "registries.update": "Registry salvato",
+  "registries.delete": "Registry eliminato",
+  "settings.update": "Impostazioni del pannello",
+  "storage.clean": "Pulizia Docker",
   "updates.apply": "Aggiornamento del pannello",
 };
 
@@ -134,6 +188,7 @@ function AuditList({ category, from, to }: { category: string; from: string; to:
   const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   const query = useCallback(
     (before?: string) => {
@@ -156,6 +211,7 @@ function AuditList({ category, from, to }: { category: string; from: string; to:
     query()
       .then((data) => {
         if (cancelled) return;
+        setError(null);
         setEntries(data.entries);
         setNext(data.nextBefore);
       })
@@ -163,7 +219,7 @@ function AuditList({ category, from, to }: { category: string; from: string; to:
     return () => {
       cancelled = true;
     };
-  }, [query]);
+  }, [query, attempt]);
 
   async function more() {
     if (!next) return;
@@ -182,7 +238,7 @@ function AuditList({ category, from, to }: { category: string; from: string; to:
   return (
     <>
       {error ? (
-        <LoadError what="il registro" error={error} />
+        <LoadError what="il registro" error={error} onRetry={() => setAttempt((n) => n + 1)} />
       ) : entries === null ? (
         <SkeletonBlock className="h-64" />
       ) : entries.length === 0 ? (

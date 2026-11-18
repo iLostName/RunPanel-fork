@@ -9,6 +9,7 @@ import { Segmented } from "@/components/ui/Segmented";
 import { FieldHint } from "@/components/ui/Hint";
 import { SelectField } from "@/components/ui/SelectField";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { LoadError } from "@/components/ui/LoadError";
 import { useResource } from "@/lib/hooks/useResource";
 import { PRESETS, levelRank, type GlobalPermission, type Grant, type Level } from "@/lib/authz";
 import { LEVEL_OPTIONS, PERMISSION_GROUPS } from "./labels";
@@ -25,7 +26,8 @@ interface Named {
 
 /**
  * What a grant can point at, by kind, with the names the panel shows — from
- * every server of the cluster, each name suffixed with the server's.
+ * every server of the cluster, each name suffixed with the server's. Folders
+ * are on every server, so only two with one name carry a suffix, from their id.
  */
 function useTargets() {
   const targets = useResource<{ folder: Named[]; project: Named[]; service: Named[]; linkedService: Named[] }>("/api/cluster/targets");
@@ -35,8 +37,10 @@ function useTargets() {
       project: targets.data?.project ?? [],
       service: targets.data?.service ?? [],
       linkedService: targets.data?.linkedService ?? [],
+      error: targets.error,
+      refresh: targets.refresh,
     }),
-    [targets.data]
+    [targets.data, targets.error, targets.refresh]
   );
 }
 
@@ -138,6 +142,11 @@ export function AccessEditor({
           description="Il livello più alto tra quelli che valgono per un elemento è quello che conta"
         />
 
+        {/* Otherwise every grant reads as "Elemento non visibile" and the picker as empty. */}
+        {targets.error && (
+          <LoadError what="gli elementi a cui dare accesso" error={targets.error} onRetry={() => void targets.refresh()} />
+        )}
+
         {value.grants.length === 0 ? (
           <EmptyState
             icon="solar:lock-keyhole-linear"
@@ -196,7 +205,15 @@ export function AccessEditor({
 
         <div className="border-border space-y-2 border-t pt-4">
           <span className="text-foreground block text-sm font-medium">Aggiungi un accesso</span>
-          <TextField value={filter} onChange={setFilter} isDisabled={isDisabled}>
+          <TextField
+            value={filter}
+            onChange={(text) => {
+              // A choice the filter may hide must not stay armed behind "Aggiungi".
+              setFilter(text);
+              setPick("");
+            }}
+            isDisabled={isDisabled}
+          >
             <Label className="sr-only">Cerca</Label>
             <Input placeholder="Cerca per nome…" />
           </TextField>
@@ -208,7 +225,9 @@ export function AccessEditor({
               isDisabled={isDisabled}
               onChange={setPick}
               options={[
-                ...(taken.has("all:") ? [] : [{ value: "all:", label: SCOPE_LABEL.all }]),
+                ...(taken.has("all:") || (q && !SCOPE_LABEL.all.toLowerCase().includes(q))
+                  ? []
+                  : [{ value: "all:", label: SCOPE_LABEL.all }]),
                 // The scope that used to be an <optgroup> header rides along as
                 // each option's second line.
                 ...options.flatMap((group) =>

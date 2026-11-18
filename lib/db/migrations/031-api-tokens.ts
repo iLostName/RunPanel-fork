@@ -11,10 +11,16 @@ import { Kysely } from "kysely";
  * Kept apart from `sessions` on purpose: a session ends after a week and when
  * the password changes, a token lives until its own expiry or until it is
  * revoked, and the two are listed and revoked in different places.
+ *
+ * Born as `028-api-tokens`, renumbered when upstream took 027–029 for its own
+ * migrations. A store that ran it under the old name already has the table and
+ * runs this again after `forgetRenamedMigrations`, so both steps are
+ * `ifNotExists`: the tokens already issued stay exactly as they are.
  */
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("api_tokens")
+    .ifNotExists()
     .addColumn("id", "text", (col) => col.primaryKey())
     .addColumn("user_id", "text", (col) => col.notNull().references("users.id").onDelete("cascade"))
     .addColumn("name", "text", (col) => col.notNull())
@@ -26,7 +32,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("expires_at", "text")
     .execute();
 
-  await db.schema.createIndex("idx_api_tokens_user").on("api_tokens").column("user_id").execute();
+  await db.schema.createIndex("idx_api_tokens_user").ifNotExists().on("api_tokens").column("user_id").execute();
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {

@@ -18,7 +18,7 @@ Accendendo **Limita**, le reti della macchina sono già spuntate. Una lista vuot
 
 Sono indirizzi singoli o intervalli CIDR, IPv4 o IPv6. Il pannello propone come caselle le reti delle interfacce della macchina, etichettate: LAN, VPN (Tailscale è riconosciuta, sia `100.64.0.0/10` sia `fd7a:115c:a1e0::/48`) e switch virtuali. Con un [reverse proxy configurato](configuration.md#metterlo-su-internet) propone anche **Il tuo indirizzo ora**.
 
-Un intervallo `/0` è rifiutato, i bit dell'host vengono azzerati (`192.168.1.14/24` diventa `192.168.1.0/24`) e un IPv4 con zeri iniziali non è accettato. Modificare le regole vale per le connessioni nuove; quelle aperte restano.
+Un intervallo `/0` è rifiutato, i bit dell'host vengono azzerati (`192.168.1.14/24` diventa `192.168.1.0/24`) e un IPv4 con zeri iniziali non è accettato. Modificare le regole vale subito: una connessione aperta da un indirizzo tolto dalla lista viene chiusa.
 
 Le connessioni respinte compaiono sotto **Rifiutati di recente** (le ultime cinque) con un pulsante **Consenti**. Il pannello le ricorda in memoria, al massimo venti per porta, e le dimentica a ogni riavvio.
 

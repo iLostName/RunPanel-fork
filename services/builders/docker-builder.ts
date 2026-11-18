@@ -2,7 +2,7 @@ import { IBuilder, BuildContext, BuildResult } from "./types";
 import { resolveInside } from "@/lib/fs-safe";
 import { docker, DockerError, lines } from "../docker/cli";
 import { labelArgs } from "../docker/labels";
-import { buildArgsToFlags, currentImageTag, imageTag, pullImage } from "../docker/images";
+import { imageTag, pullImage } from "../docker/images";
 import fs from "fs";
 import path from "path";
 
@@ -35,19 +35,22 @@ export const dockerBuilder: IBuilder = {
     }
 
     const versioned = imageTag(slug, deploymentId);
-    const current = currentImageTag(slug);
     const buildArgs = ctx.buildArgs ?? {};
 
-    // Two tags on one build: an immutable one per deployment so an older image
-    // is still addressable, and a moving alias the runtime starts from. The
-    // previous builder reused a single tag, which orphaned the prior image as a
-    // dangling layer set on every redeploy.
+    // An immutable tag per deployment, and that is the tag the deployment
+    // records and starts from. The moving `:current` alias is not touched here:
+    // it follows success, in the pipeline. When the build itself moved it, a
+    // deploy that failed afterwards (a release command, say) left every restart
+    // starting the failed image instead of the last good one.
     const args = [
       "build",
       "-t", versioned,
-      "-t", current,
       ...labelArgs({ project: slug, kind: "app", deployment: deploymentId }),
-      ...buildArgsToFlags(buildArgs),
+      // On argv: `docker build` has no file for them, and passing them by name
+      // would let names a repository chooses into the client's environment (see
+      // `lib/docker-env.ts`). A build argument is no place for a secret anyway:
+      // Docker records it in the image's history.
+      ...Object.entries(buildArgs).flatMap(([key, value]) => ["--build-arg", `${key}=${value}`]),
     ];
 
     /*
@@ -85,14 +88,18 @@ export const dockerBuilder: IBuilder = {
       // Names only — a build arg is frequently a secret.
       onLog(`Build args: ${argNames.join(", ")}`);
     }
-    onLog(`> docker build -t ${versioned} -t ${current} ${ctx.buildContext ?? "."}`);
+    onLog(`> docker build -t ${versioned} ${ctx.buildContext ?? "."}`);
 
     try {
-      const result = await docker(args, { cwd: projectDir, timeout: ctx.buildTimeout ?? 900_000 });
+      const result = await docker(args, {
+        cwd: projectDir,
+        timeout: ctx.buildTimeout ?? 900_000,
+        signal: ctx.signal,
+      });
       for (const line of lines(result.stderr)) onLog(line);
       onLog(`Docker image built: ${versioned}`);
 
-      return { success: true, artifactDir: projectDir, startCmd: `docker:${current}` };
+      return { success: true, artifactDir: projectDir, startCmd: `docker:${versioned}` };
     } catch (err: unknown) {
       const message =
         err instanceof DockerError

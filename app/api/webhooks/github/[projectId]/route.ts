@@ -11,6 +11,7 @@ import { getDb, nowIso } from "@/lib/db";
 import type { WebhookStatus } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
 import { consumeRateLimit } from "@/lib/rate-limit";
+import { readBodyCapped } from "@/lib/read-body";
 import { verifyWebhookSignature } from "@/services/git-manager";
 import { enqueueDeploy } from "@/services/deploy-queue";
 import type { GitHubPushPayload } from "@/lib/github";
@@ -83,16 +84,13 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   // Verify signature — cap payload size first
   const signature = request.headers.get("x-hub-signature-256") || "";
-  const contentLength = Number.parseInt(request.headers.get("content-length") || "0", 10);
-  if (contentLength > MAX_PAYLOAD_BYTES) {
+  const raw = await readBodyCapped(request, MAX_PAYLOAD_BYTES);
+  if (!raw) {
     return NextResponse.json({ error: "File troppo grande" }, { status: 413 });
   }
-  const body = await request.text();
-  if (Buffer.byteLength(body) > MAX_PAYLOAD_BYTES) {
-    return NextResponse.json({ error: "File troppo grande" }, { status: 413 });
-  }
+  const body = raw.toString("utf8");
 
-  if (!verifyWebhookSignature(Buffer.from(body), signature, project.webhook_secret)) {
+  if (!verifyWebhookSignature(raw, signature, project.webhook_secret)) {
     console.warn(`[webhook] Rejected delivery for project ${projectId}: invalid signature`);
     await recordRejection({
       event: request.headers.get("x-github-event"),
@@ -203,6 +201,12 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   if (result.status === "not-found") {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+  }
+
+  // Said as a failure so the delivery shows up red and can be sent again.
+  if (result.status === "unavailable") {
+    await recordDelivery("ignored", { ...summary, reason: "panel restarting" });
+    return NextResponse.json({ error: "Panel restarting" }, { status: 503 });
   }
 
   if (result.status === "queued") {

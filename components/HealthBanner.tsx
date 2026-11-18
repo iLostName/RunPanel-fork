@@ -8,7 +8,8 @@ import { CheckList, type Check } from "@/components/ui/CheckList";
 import { useResource } from "@/lib/hooks/useResource";
 import { useCan } from "@/lib/hooks/useMe";
 import { useMemberApi, useNode, useServerHref } from "@/lib/hooks/useNode";
-import type { PerServer } from "@/lib/cluster-merge";
+import { healthVerdict, type PerServer } from "@/lib/cluster-merge";
+import { readableError } from "@/lib/error-text";
 import { cn } from "@/lib/utils";
 
 /**
@@ -59,7 +60,7 @@ export function HealthBanner() {
     return (
       <div role="status" className="text-muted mb-6 flex flex-wrap items-center gap-2 text-xs">
         <Icon icon="solar:danger-triangle-linear" width={14} className="text-warning" aria-hidden />
-        Controlli di salute non disponibili ({error}).
+        Controlli di salute non disponibili: {readableError(error).text}.
         <button type="button" onClick={() => void refresh()} className="hover:text-foreground underline">
           Riprova
         </button>
@@ -73,14 +74,19 @@ export function HealthBanner() {
   const problems: Problem[] = isSolo
     ? (solo.data?.checks ?? []).filter(isBad).map((check) => ({ check, memberId: null, memberName: "" }))
     : servers.flatMap((s) => (s.data?.checks ?? []).filter(isBad).map((check) => ({ check, memberId: s.memberId, memberName: s.memberName })));
-  const silent = servers.filter((s) => !s.data && !s.reachable);
+  const verdict = healthVerdict(servers);
   const diagnosticsLink = href("/diagnostics");
 
   if (problems.length === 0) {
     return (
       <div className="text-muted mb-6 flex flex-wrap items-center gap-2 text-xs">
-        <Icon icon="solar:check-circle-linear" width={14} className="text-success" aria-hidden />
-        Nessun problema rilevato{silent.length > 0 ? ` (non raggiungibile: ${silent.map((s) => s.memberName).join(", ")})` : ""}.
+        <Icon
+          icon={verdict.clean ? "solar:check-circle-linear" : "solar:danger-triangle-linear"}
+          width={14}
+          className={verdict.clean ? "text-success" : "text-warning"}
+          aria-hidden
+        />
+        {verdict.text}
         <Link href={diagnosticsLink} className="hover:text-foreground underline">
           Diagnostica
         </Link>
@@ -132,13 +138,15 @@ export function HealthBanner() {
         </div>
       ))}
 
+      {verdict.missing && <p className="text-muted mt-3 text-xs">{verdict.missing}: controlli non eseguiti.</p>}
+
       {problems.length > 3 && (
         <button
           type="button"
           className="text-muted hover:text-foreground mt-2 text-xs underline"
           onClick={() => setExpanded((current) => !current)}
         >
-          {expanded ? "Mostra meno" : `Mostra le altre ${problems.length - 3}`}
+          {expanded ? "Mostra meno" : problems.length === 4 ? "Mostra l'altra" : `Mostra le altre ${problems.length - 3}`}
         </button>
       )}
     </Panel>

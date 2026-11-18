@@ -210,6 +210,27 @@ export async function run({ base, repoRoot }) {
     res = await a.call("/api/cluster/folders");
     r.check("aggregated folders answer", res.status === 200 && Array.isArray(res.body.items), String(res.status));
 
+    // --- folders shared by every server ------------------------------------------
+    res = await a.call("/api/folders", { method: "POST", body: JSON.stringify({ name: "Di tutti" }) });
+    r.check("A creates a folder", res.status === 201, `${res.status} ${JSON.stringify(res.body)}`);
+    const sharedFolder = res.body.id;
+    await a.call("/api/cluster/sync", { method: "POST" });
+    res = await b.call("/api/folders");
+    r.check("the folder reaches B with the same id", Array.isArray(res.body) && res.body.some((f) => f.id === sharedFolder), JSON.stringify(res.body));
+    res = await a.call(`/api/nodes/${memberB.id}/projects/${projectId}`, { method: "PATCH", body: JSON.stringify({ folderId: sharedFolder }) });
+    r.check("a project of B is filed in a folder created on A", res.status === 200, `${res.status} ${JSON.stringify(res.body)}`);
+    res = await a.call("/api/cluster/projects");
+    r.check("and the filing is what B reports", res.body.items?.some((p) => p.id === projectId && p.folder_id === sharedFolder), JSON.stringify(res.body.items).slice(0, 300));
+    res = await a.call(`/api/folders/${sharedFolder}`, { method: "PATCH", body: JSON.stringify({ name: "Rinominata" }) });
+    r.check("A renames it", res.status === 200, String(res.status));
+    res = await a.call(`/api/folders/${sharedFolder}`, { method: "DELETE" });
+    r.check("A deletes it", res.status === 200, String(res.status));
+    res = await a.call("/api/cluster/folders");
+    r.check("a deleted folder is gone at once, even where B still lists it", !res.body.items?.some((f) => f.id === sharedFolder), JSON.stringify(res.body.items));
+    await a.call("/api/cluster/sync", { method: "POST" });
+    res = await a.call("/api/cluster/projects");
+    r.check("what it held on B goes back to the root", res.body.items?.some((p) => p.id === projectId && p.folder_id === null), JSON.stringify(res.body.items).slice(0, 300));
+
     res = await a.call("/api/cluster/backups");
     r.check("aggregated backups carry each server's destinations", res.status === 200 && res.body.destinations?.some((d) => d.memberId === memberB.id) && res.body.perServer?.length === 2, JSON.stringify(res.body).slice(0, 300));
 
@@ -348,6 +369,20 @@ export async function run({ base, repoRoot }) {
       pushed = Boolean(res.body.access?.permissions?.includes("storage"));
     }
     r.check("the node pushes the edit to the panel by itself", pushed, JSON.stringify(res.body.access));
+
+    // --- what only a panel may call -----------------------------------------------------
+    // `/api/nodes` signs whatever path it is given. A forwarded call carries a user,
+    // and that is what keeps an account away from the directory of another server.
+    for (const [method, path] of [
+      ["GET", "cluster/ping"],
+      ["POST", "cluster/directory"],
+      ["POST", "cluster/folders/sync"],
+      ["POST", "cluster/secret"],
+      ["POST", "cluster/leave"],
+    ]) {
+      res = await a.call(`/api/nodes/${memberB.id}/${path}`, { method, ...(method === "POST" ? { body: "{}" } : {}) });
+      r.check(`an account cannot reach ${path} of another server`, res.status === 403, `${res.status} ${JSON.stringify(res.body)}`);
+    }
 
     // --- revocation ----------------------------------------------------------------------
     res = await a.call(`/api/cluster/members/${memberB.id}`, { method: "DELETE" });

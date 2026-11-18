@@ -133,8 +133,6 @@ export async function run({ repoRoot }) {
 
   // preflight has to say so too, because that is where an operator reads it
   // before a ten-minute build finds out.
-  // `version: 1` matters: without it `normalizeRaw` reads the object as the
-  // legacy four-field shape and strips everything it does not recognise.
   const issues = preflight(
     resolveContract({ version: 1, docker: { context: "../.." } }, {}),
     { runtimeType: "docker", envVars: {} }

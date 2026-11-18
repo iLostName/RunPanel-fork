@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import type { ServicesTable } from "@/lib/db/schema";
 import { docker, dockerToFile, dockerTry } from "../docker/cli";
+import { mongoToolCall } from "@/lib/service-exec";
 import { databaseAdmin, execArgs, serviceTarget, type ServiceTarget } from "../service-databases";
 import { formatBytes } from "@/lib/format";
 import type { RunContext, StagedFile } from "./types";
@@ -114,9 +115,10 @@ const postgres: EngineDump = {
     // credentials would silently leave `staging` and `analytics` out. Without a
     // named database we take the lot, roles and grants included, which is what
     // `pg_dumpall` is for.
+    const env = { PGPASSWORD: target.credentials.password };
     const args = database
       ? [
-          ...execArgs(target, { PGPASSWORD: target.credentials.password }),
+          ...execArgs(target, env),
           "pg_dump",
           "-U", target.credentials.user,
           "--format=plain", "--create", "--clean", "--if-exists",
@@ -124,13 +126,14 @@ const postgres: EngineDump = {
           "-d", database,
         ]
       : [
-          ...execArgs(target, { PGPASSWORD: target.credentials.password }),
+          ...execArgs(target, env),
           "pg_dumpall",
           "-U", target.credentials.user,
           "--clean", "--if-exists",
         ];
 
     const result = await dockerToFile(args, destination, {
+      env,
       compress: true,
       onStderr: (line) => ctx.log(`  ${line}`),
       signal: ctx.signal,
@@ -158,8 +161,9 @@ const mysql: EngineDump = {
     const binary = await findBinary(target, ["mysqldump", "mariadb-dump"]);
     if (!binary) throw new DumpSkipped("L'immagine non contiene mysqldump né mariadb-dump");
 
+    const env = { MYSQL_PWD: target.credentials.password };
     const args = [
-      ...execArgs(target, { MYSQL_PWD: target.credentials.password }),
+      ...execArgs(target, env),
       binary,
       "-u", "root",
       // A consistent snapshot of InnoDB without taking a lock, streamed row by
@@ -176,6 +180,7 @@ const mysql: EngineDump = {
     ];
 
     const result = await dockerToFile(args, destination, {
+      env,
       compress: true,
       // mysqldump writes advisory warnings to stderr on a perfectly good dump,
       // so only the exit code is allowed to decide whether this failed.
@@ -205,20 +210,17 @@ const mongodb: EngineDump = {
       throw new DumpSkipped("L'immagine non contiene mongodump");
     }
 
-    const args = [
-      ...execArgs(target, {}),
+    const { env, argv } = mongoToolCall(target, [
       "mongodump",
       // `--archive` with no value writes to stdout, which is exactly the shape
       // we want; `--gzip` means we must not compress it a second time.
       "--archive",
       "--gzip",
-      "-u", target.credentials.user,
-      "-p", target.credentials.password,
-      "--authenticationDatabase", "admin",
       ...(database ? ["--db", database] : []),
-    ];
+    ]);
 
-    const result = await dockerToFile(args, destination, {
+    const result = await dockerToFile([...execArgs(target, env), ...argv], destination, {
+      env,
       compress: false,
       onStderr: (line) => ctx.log(`  ${line}`),
       signal: ctx.signal,
@@ -247,8 +249,9 @@ const redis: EngineDump = {
     // and writes it to stdout: consistent, and with no need to reach into the
     // volume. The password goes through REDISCLI_AUTH rather than `-a` for the
     // same reason MySQL uses MYSQL_PWD — the warning would land in the data.
+    const env: Record<string, string> = password ? { REDISCLI_AUTH: password } : {};
     const args = [
-      ...execArgs(target, password ? { REDISCLI_AUTH: password } : {}),
+      ...execArgs(target, env),
       "redis-cli",
       "--no-auth-warning",
       "--rdb", "-",
@@ -256,6 +259,7 @@ const redis: EngineDump = {
 
     try {
       const result = await dockerToFile(args, destination, {
+        env,
         compress: true,
         onStderr: (line) => ctx.log(`  ${line}`),
         signal: ctx.signal,
@@ -297,11 +301,11 @@ async function bgsaveFallback(
     ...rest,
   ];
 
-  await docker(cli("BGSAVE"), { timeout: 30_000 });
+  await docker(cli("BGSAVE"), { env: auth, timeout: 30_000 });
 
   const deadline = Date.now() + 10 * 60_000;
   for (;;) {
-    const info = await docker(cli("INFO", "persistence"), { timeout: 30_000 });
+    const info = await docker(cli("INFO", "persistence"), { env: auth, timeout: 30_000 });
     if (/rdb_bgsave_in_progress:0/.test(info.stdout)) break;
     if (Date.now() > deadline) throw new Error("BGSAVE non è terminato entro dieci minuti");
     ctx.log("  BGSAVE in corso…");

@@ -25,6 +25,7 @@ export async function run({ repoRoot }) {
     unusedImageRefs,
     composeOrphanImages,
     CONTAINER_LOG_ARGS,
+    imagesToRetire,
   } = await import(pathToFileURL(join(repoRoot, "lib", "docker-cleanup.ts")).href);
 
   // --- sizes, as Docker prints them -------------------------------------------
@@ -118,6 +119,44 @@ export async function run({ repoRoot }) {
     r.check("a live project's is not", !orphans.includes("runpanel-alive-web:latest"));
     r.check("a stack the panel never ran is never touched", !orphans.includes("immich-server:v2"));
     r.check("nor an image compose did not build", !orphans.includes("plain:latest"));
+  }
+
+  // --- which image tags of a project are retired ----------------------------------------
+  {
+    const repo = "runpanel/app";
+    const image = (id, tag, repository = repo) => ({ id, tag, repository });
+    const tags = (list) => list.map((entry) => entry.tag).join(",");
+
+    // Newest first, as `docker images` lists them. "good" is what `:current`
+    // points at, with three failed builds on top of it.
+    const images = [
+      image("f3", "fail3"),
+      image("f2", "fail2"),
+      image("f1", "fail1"),
+      image("g", "good"),
+      image("g", "current"),
+      image("old", "older"),
+      image("x", "<none>"),
+      image("o", "other", "runpanel/else"),
+    ];
+
+    const retired = imagesToRetire(images, repo, "current", 2);
+    r.check(
+      "failed builds do not push the last good image out",
+      !retired.some((entry) => entry.tag === "good"),
+      tags(retired)
+    );
+    r.check("the alias itself is never retired", !retired.some((entry) => entry.tag === "current"));
+    r.check("what is past the limit goes", tags(retired) === "fail2,fail1,older", tags(retired));
+    r.check(
+      "the image in use counts towards the limit",
+      tags(imagesToRetire([image("c", "three"), image("c", "current"), image("b", "two"), image("a", "one")], repo, "current", 2)) === "one"
+    );
+    r.check("another project's image is not looked at", !retired.some((entry) => entry.tag === "other"));
+    r.check(
+      "with no alias yet the newest are simply kept",
+      tags(imagesToRetire([image("a", "one"), image("b", "two")], repo, "current", 1)) === "two"
+    );
   }
 
   // --- containers keep their logs bounded ---------------------------------------------

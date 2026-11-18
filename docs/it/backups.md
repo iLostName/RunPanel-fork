@@ -79,7 +79,8 @@ Un archivio su S3 viene prima scaricato nella cartella di lavoro del ripristino 
 Prima di sovrascrivere, il pannello prende un **backup di sicurezza** delle destinazioni sul disco locale (etichetta "Sicurezza pre-ripristino", mai tolto dalla retention, si cancella a mano). Se fallisce il ripristino si ferma, a meno che tu non abbia spuntato **Procedi anche senza backup di sicurezza**.
 
 - **Volume**: il progetto si ferma; i suoi container rimasti accesi vengono fermati e riavviati alla fine, mentre un container di un altro progetto che usa il volume blocca il ripristino. I percorsi esclusi restano come sono. Un volume Compose che non esiste più si ricrea con un deploy, poi si ripete il ripristino.
-- **Repository**: i file vengono sovrascritti, quelli in più non vengono cancellati.
+- **Database**: se il servizio appartiene a un progetto acceso, il progetto si ferma e riparte alla fine. Su Postgres il ripristino rifiuta di partire se resta aperta una connessione, perché lo script cancella i database in ordine e si fermerebbe a metà. MySQL e Mongo sovrappongono il dump a quello che c'è. Un dump completo MySQL o Mongo porta con sé gli utenti del server di origine: su un altro servizio li sostituisce, e il ripristino finisce in errore dicendo che le credenziali salvate non valgono più, con i dati già al loro posto.
+- **Repository**: i file vengono sovrascritti, quelli in più non vengono cancellati. Durante un deploy il ripristino rifiuta.
 - **Configurazione di un progetto**: il progetto deve esistere ancora.
 - **Store del pannello (SQLite)**: non viene ripristinato a caldo. Il database viene messo da parte ed entra in servizio al riavvio successivo, con il precedente conservato accanto. La chiave di cifratura non viene rimessa: se serve, va copiata a mano.
 - **Store del pannello (Postgres)**: il pannello rifiuta; il comando `pg_restore` da eseguire a pannello fermo è nel `manifest.json`.

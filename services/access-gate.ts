@@ -66,13 +66,31 @@ export class GateError extends Error {
   }
 }
 
+/** One forwarded connection: the two sockets live and die together. */
+interface Connection {
+  client: net.Socket;
+  upstream: net.Socket;
+  /** The source the rules were asked about, so they can be asked again. */
+  address: string;
+}
+
 interface Gate {
   spec: GateSpec;
   server: net.Server;
   rejections: Map<string, Rejection>;
+  connections: Set<Connection>;
 }
 
 const REJECTION_MEMORY = 20;
+
+/**
+ * How long closing waits for the listener to report it is gone.
+ *
+ * Every connection is destroyed first, so this is normally a few milliseconds.
+ * It is a deadline because restarts, deploys and access changes all await the
+ * close: a gate that cannot say it has closed must not take those down with it.
+ */
+const CLOSE_DEADLINE_MS = 2_000;
 
 /**
  * Held on `globalThis`, like the database handle and the housekeeping timer.
@@ -118,6 +136,11 @@ function record(gate: Gate, address: string): void {
   }
 }
 
+function disconnect(connection: Connection): void {
+  connection.client.destroy();
+  connection.upstream.destroy();
+}
+
 function handle(gate: Gate, socket: net.Socket): void {
   const address = socket.remoteAddress ?? "";
 
@@ -134,17 +157,20 @@ function handle(gate: Gate, socket: net.Socket): void {
   const upstream = net.connect({ host: "127.0.0.1", port: gate.spec.targetPort });
   upstream.setNoDelay(true);
 
+  const connection: Connection = { client: socket, upstream, address };
+  gate.connections.add(connection);
+
   // Either end failing takes both down. Without this an upstream that is simply
   // not there (the container is stopped) leaves the client socket open forever.
   const teardown = () => {
-    socket.destroy();
-    upstream.destroy();
+    gate.connections.delete(connection);
+    disconnect(connection);
   };
 
   socket.on("error", teardown);
   upstream.on("error", teardown);
-  socket.on("close", () => upstream.destroy());
-  upstream.on("close", () => socket.destroy());
+  socket.on("close", teardown);
+  upstream.on("close", teardown);
 
   upstream.on("connect", () => {
     socket.pipe(upstream);
@@ -155,9 +181,10 @@ function handle(gate: Gate, socket: net.Socket): void {
 /**
  * Open the gate for a target, or re-point one that is already open.
  *
- * Changing only the rules swaps them in place instead of rebinding: a rule set
- * applies to the next connection, and dropping every live one to say so would
- * make editing the list an outage.
+ * Changing only the rules swaps them in place instead of rebinding, and asks
+ * them again about every open connection: removing an address has to cut it off
+ * now, not whenever it next reconnects, while dropping the ones the new rules
+ * still admit would make editing the list an outage.
  *
  * Order matters at the call site. Turning a restriction ON means recreating the
  * container (or restarting the process) FIRST, so it releases the public port,
@@ -170,6 +197,9 @@ export async function openGate(spec: GateSpec): Promise<void> {
 
   if (existing && existing.spec.publicPort === spec.publicPort && existing.spec.targetPort === spec.targetPort) {
     existing.spec = spec;
+    for (const connection of existing.connections) {
+      if (!spec.matches(connection.address)) disconnect(connection);
+    }
     // A remembered refusal the new rules admit is no longer news. Without this,
     // adding the address that was knocking leaves the notice about it on screen
     // — which reads as "still blocked" right after allowing it.
@@ -182,7 +212,7 @@ export async function openGate(spec: GateSpec): Promise<void> {
   if (existing) await closeGate(spec.kind, spec.id);
 
   const server = net.createServer();
-  const gate: Gate = { spec, server, rejections: new Map() };
+  const gate: Gate = { spec, server, rejections: new Map(), connections: new Set() };
 
   server.on("connection", (socket) => handle(gate, socket));
 
@@ -218,14 +248,33 @@ export async function openGate(spec: GateSpec): Promise<void> {
   gates.set(key, gate);
 }
 
-/** Close a gate and forget it. Safe to call for a target that has none. */
+/**
+ * Close a gate and forget it. Safe to call for a target that has none.
+ *
+ * `server.close()` only stops accepting: its callback waits for every existing
+ * connection to end, and a pooled database client or a WebSocket never ends by
+ * itself. So the connections go first, in the same tick as the close, which
+ * leaves no gap for a new one to arrive in between.
+ */
 export async function closeGate(kind: GateKind, id: string): Promise<void> {
   const key = gateKey(kind, id);
   const gate = gates.get(key);
   if (!gate) return;
 
   gates.delete(key);
-  await new Promise<void>((resolve) => gate.server.close(() => resolve()));
+  for (const connection of gate.connections) disconnect(connection);
+
+  await new Promise<void>((resolve) => {
+    const deadline = setTimeout(() => {
+      console.warn(`[RunPanel] access gate ${gate.spec.label}:${gate.spec.publicPort} — close not confirmed in time`);
+      resolve();
+    }, CLOSE_DEADLINE_MS);
+
+    gate.server.close(() => {
+      clearTimeout(deadline);
+      resolve();
+    });
+  });
 }
 
 export interface GateStatus {

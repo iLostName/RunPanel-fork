@@ -1,10 +1,13 @@
 import fs from "fs";
 import { parseContractJson } from "@/lib/deploy-contract";
+import { stripRemoteCredentials } from "@/lib/git-remote";
+import { projectBackupSummary } from "@/lib/project-redact";
 import { resolveInside } from "@/lib/fs-safe";
 import { isPanelEnvFile } from "../env-file";
 import path from "path";
 import crypto from "crypto";
 import { decrypt, encrypt } from "@/lib/crypto";
+import { openContract } from "../build-env";
 import { config } from "@/lib/config";
 import { getDb } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
@@ -33,8 +36,6 @@ import {
  * restore every byte of data and still not know which project it belonged to,
  * how it was built, or what its environment was.
  */
-
-const REDACTED = "***";
 
 /**
  * Directories that are either reproducible or already backed up elsewhere.
@@ -108,9 +109,13 @@ export async function exportProjectConfig(
     createdAt: row.created_at,
   }));
 
+  // Readable inside the one encrypted document, like the variables beside it:
+  // a restore on another panel seals them again with its own key.
+  const readableProject = { ...project, builder_config: openContract(project.builder_config, project.id) };
+
   const payload = {
     schemaVersion: 1,
-    project,
+    project: readableProject,
     envVars: decoded,
     services: services.map((service) => ({
       ...service,
@@ -127,7 +132,7 @@ export async function exportProjectConfig(
   fs.writeFileSync(encPath, encrypt(JSON.stringify(payload)), { mode: 0o600 });
 
   const summary = {
-    project: { ...project, webhook_secret: REDACTED },
+    project: projectBackupSummary(project, stripRemoteCredentials),
     envKeys: decoded.map((v) => v.key),
     services: services.map((s) => ({ id: s.id, name: s.name, type: s.type, version: s.version })),
     databases: databases.map((d) => ({ service_id: d.service_id, name: d.name })),

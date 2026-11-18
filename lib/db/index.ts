@@ -7,6 +7,8 @@ import { getEnv } from "../env";
 import { ensureDataDirs } from "../config";
 import type { Database } from "./schema";
 import { StaticMigrationProvider } from "./migrations";
+import { forgetRenamedMigrations } from "./renamed-migrations";
+import { restrictStoreFiles } from "./store-permissions";
 import { nowIso, rowCount } from "./compat";
 
 export type { Database } from "./schema";
@@ -79,6 +81,7 @@ async function createDialect(): Promise<Dialect> {
 
     const sqlite = new SQLite(dbConfig.file);
     sqlite.pragma("journal_mode = WAL");
+    restrictStoreFiles(dbConfig.file);
     sqlite.pragma("foreign_keys = ON");
     sqlite.pragma("busy_timeout = 5000");
     // The pairing WAL is meant to have. The default `FULL` fsyncs on every
@@ -137,6 +140,13 @@ async function createDialect(): Promise<Dialect> {
 }
 
 async function runMigrations(db: Kysely<Database>): Promise<void> {
+  // Before the Migrator reads its table: a recorded name it no longer knows
+  // stops it from migrating at all. See `lib/db/renamed-migrations.ts`.
+  const forgotten = await forgetRenamedMigrations(db);
+  if (forgotten > 0) {
+    console.log(`[RunPanel] Forgot ${forgotten} renamed migration record(s); they run again under their new names`);
+  }
+
   const migrator = new Migrator({ db, provider: new StaticMigrationProvider() });
   const { error, results } = await migrator.migrateToLatest();
 

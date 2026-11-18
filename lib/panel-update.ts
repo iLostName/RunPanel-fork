@@ -104,9 +104,20 @@ export function isUpdateActive(status: UpdateStatus | null): boolean {
  * already installed, and it stays there until the next scheduled check.
  */
 export function hasUpdate(status: UpdateStatus | null): boolean {
-  if (!status?.check || status.check.error) return false;
-  if (status.check.behind <= 0) return false;
-  return status.check.localSha === status.checkout.head;
+  return pendingCommits(status?.check ?? null, status?.checkout.head ?? null) > 0;
+}
+
+/**
+ * How many commits a stored check still has to offer, against the checkout as
+ * it is now: none when it failed or was taken on another HEAD. The one rule for
+ * the banner, the Updates page and the server cards of the Overview.
+ */
+export function pendingCommits(
+  check: Pick<UpdateCheck, "error" | "behind" | "localSha"> | null,
+  head: string | null
+): number {
+  if (!check || check.error || check.behind <= 0) return 0;
+  return check.localSha === head ? check.behind : 0;
 }
 
 /**

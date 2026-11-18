@@ -32,9 +32,10 @@ The role is changed from **Sistema › Server** and applies everywhere. A panel 
 A page's server is part of its address (`?server=…`): a link to a project on "or" always opens on "or", whoever opens it. The selector top right (in the menu, on a phone) changes that parameter.
 
 - **Lists of every server.** **Panoramica** (overview), **Progetti**, **Servizi**, **Backup**, **Monitor**, **Diagnostica** and **Aggiornamenti** show every server at once, each row with its server's name; the "Tutti i server" filter narrows them to one. A server that does not answer shows as unreachable and never blocks the list.
-- **Overview.** One card per server with CPU, memory, disk, Docker, version, running projects and warnings (disk nearly full, different version, things to fix, update available). Below, projects and services split by server, each with its own folders. The same cards are on **Sistema › Server**.
+- **Overview.** One card per server with CPU, memory, disk, Docker, version, running projects and warnings (disk nearly full, different version, things to fix, update available). Below, the folders, shared by every server, then what each server keeps outside them. The same cards are on **Sistema › Server**.
+- **Folders.** A folder belongs to every server: it holds projects and services of any server, each with its server's name. It is created, renamed and deleted from any panel; a project's server remembers where it is filed, so the choice stays when the panel changes or restarts. When a server does not answer, its projects stay in their folder as **Non raggiungibile** (unreachable), with the last data this panel saw for this account: they cannot be opened or moved until the server is back. Deleting a folder puts its content back outside on every server; a server that is off does so when it returns.
 - **Actions.** Starting a service, running a backup, downloading an archive, applying a diagnostics fix or updating a server always go to the row's server.
-- **Creating.** New project, new database, new folder and new backup policy ask which server.
+- **Creating.** New project, new database and new backup policy ask which server.
 - **Single-server pages.** A project or service page, Autostart, Docker cleanup, Settings and the Activity log are about one server at a time: its name shows in the breadcrumb. A link to a project on another server takes you there by itself.
 - The **command palette** (Ctrl+K) searches projects and services on every server, **Telegram notifications** start with the name of the server that sent them, and the update banner says which server has one.
 
@@ -44,7 +45,7 @@ These stay with the panel you are using, whatever server is selected: **Accessi 
 
 ## What is shared
 
-Users, permissions and grants are replicated to every server and edited from any panel. Every change is pushed to the others at once, nodes included, and a check every minute repairs whatever did not arrive (a server that was off, for instance). If two servers edit the same account, the more recent change wins. A deleted account leaves a trace for 30 days, so a stale copy cannot bring it back.
+Users, permissions, grants and folders are replicated to every server and edited from any panel. Every change is pushed to the others at once, nodes included, and a check every minute repairs whatever did not arrive (a server that was off, for instance). If two servers edit the same account or the same folder, the more recent change wins; deleting a folder always wins, even over a later rename. A deleted account or folder leaves a trace for 30 days, so a stale copy cannot bring it back.
 
 The GitHub token and the Telegram bot (token and chat) are shared too: every server clones and notifies with the same credentials, and encrypts them with its own key.
 
@@ -72,4 +73,7 @@ The revoked server still knows the secret, so revoking offers to **regenerate th
 ## Limits
 
 - A user's "invited" state is not replicated: on another panel it shows as "invitation expired" until they set a password.
-- A folder belongs to the server it was created on.
+- Folders created before this version stay separate even when two servers have the same name: both show, and to join them move the content into one and delete the other. The same happens when two panels create or rename a folder to the same name before they have synced. Two folders with one name are told apart by the first characters of their id, added to the name.
+- Creating a folder takes access to **everything**: a folder belongs to the whole panel, and access to it reaches whatever anyone files in it.
+- An account with access to single projects only sees a folder for what it holds: a project of another server goes in only with access to the folder.
+- A server on an older version does not receive the others' folders: its projects only move into its own until it is updated.

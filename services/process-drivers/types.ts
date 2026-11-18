@@ -5,6 +5,8 @@ export interface ProcessInfo {
   memory?: number;
   cpu?: number;
   containerId?: string;
+  /** Compose only: part of the stack is up, which `running` calls a failure. */
+  partlyUp?: boolean;
 }
 
 export type RestartPolicy = "no" | "on-failure" | "unless-stopped" | "always";

@@ -2,14 +2,24 @@ import { getDb, nowIso } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
 import { formatMountString, parseMountString } from "@/lib/mount";
-import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
+import { parseContractJson, withContractMounts, type DeployContract } from "@/lib/deploy-contract";
 import { appContainerName } from "./docker/labels";
 import { dockerTry } from "./docker/cli";
 import { projectEvents, type MountPhase } from "./events";
 import { AppendLogFile, logPathFor, readLogFile } from "./log-file";
 import { config } from "@/lib/config";
-import { copyOutOfContainer, destinationEntries, freeKb, sizeKb } from "./mount-seed";
-import { restartFromLastDeployment } from "./project-restart";
+import {
+  copyOutOfContainer,
+  destinationEntries,
+  diskOf,
+  freeKb,
+  localFreeKb,
+  sizeInContainerKb,
+  sizeInImageKb,
+} from "./mount-seed";
+import { appIsUp, restartFromLastDeployment } from "./project-restart";
+import { spaceShortfall, type SeedEstimate } from "@/lib/mount-space";
+import { busyMessage, tryLock } from "./project-lock";
 import { assertMountable, MountRefused, type MountJournal } from "./service-mounts";
 import path from "path";
 
@@ -119,6 +129,36 @@ export async function applyProjectMounts(
   next: ProjectMount[],
   opts: { adopt?: string[] } = {}
 ): Promise<MountJournal> {
+  // Held until the apply is over: a deploy in the middle would start the
+  // container from a contract that is being rewritten.
+  const release = tryLock(project.id, "mount-apply");
+  if (!release) throw new MountRefused("project-busy", busyMessage(project.id));
+
+  let started = false;
+  try {
+    const journal = await beginApply(project.id, next, opts, release);
+    started = true;
+    return journal;
+  } finally {
+    if (!started) release();
+  }
+}
+
+async function beginApply(
+  projectId: string,
+  next: ProjectMount[],
+  opts: { adopt?: string[] },
+  release: () => void
+): Promise<MountJournal> {
+  // Read again now that nothing else can change it.
+  const store = await getDb();
+  const project = await store
+    .selectFrom("projects")
+    .selectAll()
+    .where("id", "=", projectId)
+    .executeTakeFirst();
+  if (!project) throw new Error("Il progetto non esiste più.");
+
   if (project.runtime_type !== "docker") {
     throw new MountRefused(
       "runtime-not-docker",
@@ -175,12 +215,28 @@ export async function applyProjectMounts(
   }
 
   if (image && toSeed.length > 0) {
-    const [needed, available] = await Promise.all([
-      sizeKb(image, toSeed[0].source),
-      freeKb(image, toSeed[0].source),
-    ]);
-    if (needed !== null && available !== null && available < needed * 1.05) {
-      throw new MountRefused("insufficient-space", "Non c'è spazio a sufficienza nella destinazione.");
+    const seeds: SeedEstimate[] = [];
+    for (const mount of toSeed) {
+      const [needed, available] = await Promise.all([
+        sizeInContainerKb(appContainerName(project.slug), mount.target).then(
+          (size) => size ?? sizeInImageKb(image, mount.target)
+        ),
+        freeKb(image, mount.source),
+      ]);
+      if (needed === null || available === null) continue;
+      seeds.push({ place: mount.source, disk: diskOf(mount.source), neededKb: needed, freeKb: available });
+    }
+
+    const scratchFree = localFreeKb(config.tmpDir);
+    const short = spaceShortfall(
+      seeds,
+      scratchFree === null ? null : { place: config.tmpDir, disk: diskOf(config.tmpDir), freeKb: scratchFree }
+    );
+    if (short) {
+      throw new MountRefused(
+        "insufficient-space",
+        `Non c'è spazio a sufficienza in ${short.place}: servono ${Math.ceil(short.neededKb / 1024)} MB.`
+      );
     }
   }
 
@@ -188,16 +244,46 @@ export async function applyProjectMounts(
   await writeJournal(project.id, journal);
   inFlight.add(project.id);
 
-  void runApply(project, contract, journal, previous, next, toSeed, image).finally(() => {
+  void runApply(project, journal, previous, next, toSeed, image).finally(() => {
     inFlight.delete(project.id);
+    release();
   });
 
   return journal;
 }
 
+/**
+ * Applications the last process never finished.
+ *
+ * Nothing ends them otherwise: the journal would say "in progress" for ever,
+ * refuse every new apply and replay its log at every visit. Not resumed, for the
+ * reason services are not. A container left removed is up to the project's
+ * restart, which the page offers.
+ */
+export async function reconcileProjectApplies(): Promise<number> {
+  const db = await getDb();
+  const rows = await db
+    .selectFrom("projects")
+    .select(["id", "mount_apply"])
+    .where("mount_apply", "is not", null)
+    .execute();
+
+  let repaired = 0;
+  for (const row of rows) {
+    const journal = parseApplyJournal(row.mount_apply);
+    if (!journal || !isApplyInFlight(journal)) continue;
+    journal.phase = "failed";
+    journal.finishedAt = nowIso();
+    journal.error = "Il pannello si è riavviato durante l'applicazione: controlla i bind e riavvia il progetto.";
+    journal.rolledBack = false;
+    await writeJournal(row.id, journal);
+    repaired++;
+  }
+  return repaired;
+}
+
 async function runApply(
   project: ProjectsTable,
-  contract: DeployContract,
   journal: MountJournal,
   previous: ProjectMount[],
   next: ProjectMount[],
@@ -224,18 +310,67 @@ async function runApply(
   };
 
   const db = await getDb();
-  const write = (mounts: ProjectMount[]) =>
-    db
+
+  /*
+    Both places a mount list lives.
+
+    A restart starts from what the last deployment recorded, not from the
+    project row, so writing only the row left the container exactly as it was
+    while the journal said `done`: the new binds reached it at the next deploy,
+    and not before.
+  */
+  const write = async (mounts: ProjectMount[]): Promise<boolean> => {
+    const strings = mountStrings(mounts);
+    // Read again: seeding takes minutes, and a save made meanwhile is not this
+    // operation's to undo.
+    const { builder_config: stored } = await db
+      .selectFrom("projects")
+      .select("builder_config")
+      .where("id", "=", project.id)
+      .executeTakeFirstOrThrow();
+    await db
       .updateTable("projects")
-      .set({
-        builder_config: JSON.stringify({
-          ...contract,
-          docker: { ...contract.docker, mounts: mountStrings(mounts) },
-        }),
-        updated_at: nowIso(),
-      })
+      .set({ builder_config: withContractMounts(stored, strings), updated_at: nowIso() })
       .where("id", "=", project.id)
       .execute();
+
+    const last = await db
+      .selectFrom("deployments")
+      .select(["id", "resolved_contract"])
+      .where("project_id", "=", project.id)
+      .where("status", "in", ["running", "superseded"])
+      .where("start_cmd", "is not", null)
+      .orderBy("started_at", "desc")
+      .limit(1)
+      .executeTakeFirst();
+
+    if (last?.resolved_contract) {
+      await db
+        .updateTable("deployments")
+        .set({ resolved_contract: withContractMounts(last.resolved_contract, strings) })
+        .where("id", "=", last.id)
+        .execute();
+    }
+    return Boolean(last);
+  };
+
+  const wasUp = await appIsUp(project);
+
+  /** Never deployed or stopped means nothing to recreate: the next start reads the list. */
+  const restart = async (deployed: boolean) => {
+    if (!deployed) {
+      emit("Nessun deploy riuscito finora: la lista vale dal prossimo.");
+      return;
+    }
+    if (!wasUp) {
+      emit("Il progetto era fermo: resta fermo. La lista vale da Avvia o dal prossimo deploy.");
+      return;
+    }
+    const result = await restartFromLastDeployment(project.id, { underLock: true });
+    if ("error" in result) throw new Error(result.error);
+  };
+
+  let recreating = false;
 
   try {
     if (toSeed.length > 0 && image) {
@@ -259,8 +394,8 @@ async function runApply(
     emit("Riavvio il container con la nuova lista…");
     // Written before the restart, because `restartFromLastDeployment` re-reads
     // the row to build the start options.
-    await write(next);
-    await restartFromLastDeployment(project.id);
+    recreating = true;
+    await restart(await write(next));
 
     emit("Fatto.");
     await phase("done");
@@ -271,8 +406,9 @@ async function runApply(
     await phase("rolling-back");
     emit("Torno alla lista precedente…");
     try {
-      await write(previous);
-      await restartFromLastDeployment(project.id);
+      // A seed that failed wrote nothing and touched no container: nothing to undo,
+      // and writing anyway would drop whatever `projectMounts` cannot read.
+      if (recreating) await restart(await write(previous));
       journal.rolledBack = true;
       emit("Il progetto è di nuovo com'era.");
     } catch (rollbackErr) {

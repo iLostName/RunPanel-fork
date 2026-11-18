@@ -1,7 +1,8 @@
-import { directorySchema } from "@/lib/cluster-schema";
+import { directorySchema, folderSetSchema } from "@/lib/cluster-schema";
 import type { ClusterMembersTable } from "@/lib/db/schema";
 import { MemberUnreachableError, pingMember, signedFetch } from "./client";
 import { applySnapshot, directoryHash, localSnapshot } from "./directory";
+import { applyFolderSet, foldersHash, localFolderSet } from "./folders";
 import { clusterState, listMembers, recordMemberSeen } from "./state";
 
 /**
@@ -31,7 +32,33 @@ export interface MemberSyncResult {
   error?: string;
 }
 
-/** Push our snapshot to one member and apply what it sends back. */
+/**
+ * Exchange the folders with a member that has them, when they differ. A
+ * failure here is logged and goes no further: accounts must keep replicating
+ * whatever happens to a folder, the next pass tries again, and the ping has
+ * just shown the member is up, so it must not read as unreachable.
+ */
+async function syncFolders(member: Pick<ClusterMembersTable, "id" | "url">, remoteHash: string | undefined): Promise<void> {
+  if (!remoteHash) return;
+  try {
+    const set = await localFolderSet();
+    if ((await foldersHash(set)) === remoteHash) return;
+    const res = await signedFetch(member, "/api/cluster/folders/sync", {
+      method: "POST",
+      body: JSON.stringify(set),
+      contentType: "application/json",
+      headersTimeoutMs: 15_000,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status} allo scambio delle cartelle`);
+    const parsed = folderSetSchema.safeParse(await res.json());
+    if (!parsed.success) throw new Error("Cartelle ricevute non valide");
+    await applyFolderSet(parsed.data);
+  } catch (err) {
+    console.warn(`[cluster] Folder exchange with ${member.id} failed:`, err instanceof Error ? err.message : err);
+  }
+}
+
+/** Push our snapshot and our folders to one member and apply what it sends back. */
 export async function syncWithMember(member: Pick<ClusterMembersTable, "id" | "url" | "role">): Promise<MemberSyncResult> {
   const state = await clusterState();
   if (!state) return { memberId: member.id, ok: false, error: "Nessun cluster" };
@@ -46,6 +73,8 @@ export async function syncWithMember(member: Pick<ClusterMembersTable, "id" | "u
       await recordMemberSeen(member.id, { error: "Fa parte di un altro cluster" });
       return { memberId: member.id, ok: false, error: "Fa parte di un altro cluster" };
     }
+    await syncFolders(member, ping.foldersHash);
+
     const snapshot = await localSnapshot();
     if ((await directoryHash(snapshot)) === ping.directoryHash) return { memberId: member.id, ok: true };
 

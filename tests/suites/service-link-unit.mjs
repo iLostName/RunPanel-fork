@@ -27,6 +27,7 @@ export async function run({ repoRoot }) {
     serviceConnectionUrl,
     containerPort,
     maskUrlPassword,
+    buildConnectionString,
   } = await import(pathToFileURL(join(repoRoot, "lib", "service-env.ts")).href);
 
   const url = (svc) => `postgresql://user:pw@host:5432/${svc.name}`;
@@ -214,6 +215,26 @@ export async function run({ repoRoot }) {
       maskUrlPassword("redis://:s3cret@localhost:6379/0")
     );
     r.check("a URL without credentials is left alone", maskUrlPassword("redis://localhost:6379/0") === "redis://localhost:6379/0");
+
+    // --- reserved characters --------------------------------------------------
+    const reserved = { user: "app:us/er", password: "Pa#ss@1/x?%&:", database: "my/db" };
+    for (const type of ["postgresql", "mysql", "mongodb"]) {
+      const url = new URL(buildConnectionString(type, { host: "db", port: 5433, ...reserved }));
+      r.check(`${type}: a reserved character cannot move the host`, url.hostname === "db" && url.port === "5433", url.href);
+      r.check(`${type}: the password decodes back to what is stored`, decodeURIComponent(url.password) === reserved.password, url.password);
+      r.check(`${type}: the user decodes back to what is stored`, decodeURIComponent(url.username) === reserved.user, url.username);
+      r.check(`${type}: the database decodes back to what is stored`, decodeURIComponent(url.pathname.slice(1)) === reserved.database, url.pathname);
+    }
+    const redisUrl = new URL(buildConnectionString("redis", { host: "cache", port: 6379, password: reserved.password }));
+    r.check("redis: a reserved character cannot move the host", redisUrl.hostname === "cache", redisUrl.href);
+    r.check("redis: the password decodes back to what is stored", decodeURIComponent(redisUrl.password) === reserved.password);
+    r.check(
+      "an ordinary password is written as it always was",
+      buildConnectionString("postgresql", { host: "db", port: 5432, user: "app", password: "aZ09-_.~", database: "d" }) ===
+        "postgresql://app:aZ09-_.~@db:5432/d"
+    );
+    const maskedReserved = maskUrlPassword(buildConnectionString("postgresql", { host: "db", port: 5432, ...reserved }));
+    r.check("an encoded password is masked whole", !maskedReserved.includes("Pa") && maskedReserved.endsWith("@db:5432/my%2Fdb"), maskedReserved);
     r.check(
       "a password containing @ is still fully hidden",
       maskUrlPassword("mysql://u:p@ss@host:3306/d") === "mysql://u:***@host:3306/d",

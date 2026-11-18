@@ -53,6 +53,11 @@ del pannello che ha prodotto l'archivio (data/.secret oppure RUNPANEL_SECRET).
 Senza quella chiave il file non è leggibile: se l'archivio contiene anche
 panel/secret.key, è perché è stato chiesto esplicitamente — trattalo come
 tratteresti la password di root.
+
+Eccezione: panel/ è lo store così com'è. Variabili e credenziali lì dentro sono
+cifrate, ma la configurazione dei progetti no: i valori di buildEnv, i comandi e
+gli URL dei repository si leggono in chiaro. Un archivio che contiene panel/ va
+custodito come un segreto anche senza panel/secret.key.
 `;
 
 export interface ArchiveResult {

@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { LoadError } from "@/components/ui/LoadError";
+import { readableError } from "@/lib/error-text";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SelectField } from "@/components/ui/SelectField";
 import UpdatesLoading from "../loading";
@@ -214,7 +215,9 @@ export function UpdatesOverview() {
                 ]
                   .filter(Boolean)
                   .join(" · ")
-              : (server.error ?? "");
+              : server.error
+                ? readableError(server.error).text
+                : "";
             return (
               <li key={server.memberId} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:px-5">
                 <div className="min-w-0 flex-1">

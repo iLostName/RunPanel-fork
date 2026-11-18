@@ -15,7 +15,7 @@ export const meta = { name: "cluster-merge-unit", needsDocker: false, drivers: [
 
 export async function run({ repoRoot }) {
   const r = createReporter("cluster-merge-unit");
-  const { mergeByMember, failedMembers, onlyMember, serverWarnings } = await import(
+  const { mergeByMember, failedMembers, onlyMember, serverWarnings, healthVerdict } = await import(
     pathToFileURL(join(repoRoot, "lib", "cluster-merge.ts")).href
   );
 
@@ -74,6 +74,24 @@ export async function run({ repoRoot }) {
     const order = serverWarnings(summary({ ...disk(1 * GB, 45 * GB), version: "v0" }), { reachable: true, panelVersion: "v1" });
     r.check("the worst comes first", order[0].tone === "danger" && order[order.length - 1].tone === "warn");
     r.check("no metrics, no disk warning", kinds(summary({ metrics: null })) === "");
+  }
+
+  // --- the Overview banner ------------------------------------------------------
+  {
+    const answered = { memberName: "hh", data: {}, reachable: true };
+    const down = { memberName: "nodo-b", data: null, reachable: false };
+    const refused = { memberName: "or", data: null, reachable: true };
+
+    r.check("every server answered: all clear", healthVerdict([answered]).clean && healthVerdict([answered]).missing === null);
+    const only = healthVerdict([down]);
+    r.check("a dead server alone is not all clear", !only.clean && !only.text.includes("Nessun problema"), only.text);
+    r.check("and the text names it", only.text.startsWith("nodo-b non raggiungibile"), only.text);
+    const mixed = healthVerdict([answered, down]);
+    r.check("one dead among others is not all clear", !mixed.clean, mixed.text);
+    r.check("the claim is about the others only", mixed.text.includes("Sugli altri server"), mixed.text);
+    const silent = healthVerdict([answered, refused]);
+    r.check("a server that answered with no data is not checked either", !silent.clean && silent.missing?.includes("or"), silent.text);
+    r.check("two dead servers read as plural", healthVerdict([down, { ...down, memberName: "x" }]).text.startsWith("nodo-b, x non raggiungibili"));
   }
 
   return r.result();

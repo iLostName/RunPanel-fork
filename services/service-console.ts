@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "child_process";
 import type { ServicesTable } from "@/lib/db/schema";
+import { sanitizedProcessEnv } from "@/lib/env";
+import { mongoShellCall } from "@/lib/service-exec";
 import { dockerStream, dockerTry } from "./docker/cli";
 import { serviceEvents, type ConsoleMode } from "./events";
 import { serviceAllows, watchAccess } from "@/lib/stream-guard";
@@ -88,11 +90,10 @@ function kill(key: string, session: ConsoleSession): void {
 /**
  * The client to run, per engine, and how its password gets there.
  *
- * Passwords travel as `docker exec -e` and not on the command line — the
- * reasoning is in the header of `services/service-databases.ts`, and
- * `execArgs()` is the one place that builds it. Mongo is the exception the
- * existing `mongo()` helper already makes: `mongosh` has no password
- * environment variable, so it takes one on argv there too.
+ * Passwords travel in the environment of the docker process and never on its
+ * command line — the reasoning is in `lib/service-exec.ts`, and `execArgs()` is
+ * the one place that builds it. `mongosh` has no password variable, so
+ * `mongoShellCall()` hands it over inside the container, like `mongo()` does.
  */
 function engineCommand(
   service: ServicesTable,
@@ -165,16 +166,8 @@ function engineCommand(
       // `--shell` is the one that matters: with stdin on a pipe mongosh treats
       // it as a script and prints nothing that was not explicitly printed, so
       // without it a typed expression evaluates to silence. `--quiet` drops the
-      // banner. The password goes on argv because mongosh has no environment
-      // variable for it — the same exception `mongo()` already makes.
-      return {
-        env: {},
-        argv: [
-          mongoBinary, "--quiet", "--shell",
-          ...(user ? ["-u", user, "-p", password, "--authenticationDatabase", "admin"] : []),
-          ...(database ? [database] : []),
-        ],
-      };
+      // banner.
+      return mongoShellCall(target, mongoBinary, { database: database || undefined, shell: true });
 
     default:
       throw new Error(`Nessuna console per il motore "${service.type}".`);
@@ -261,18 +254,21 @@ export async function openConsole(
   const target = serviceTarget(service);
 
   let args: string[];
+  let env: Record<string, string> = {};
   if (mode === "shell") {
     args = [...execArgs(target, {}, { interactive: true }), "/bin/sh"];
   } else {
     const mongoBinary =
       service.type === "mongodb" ? await resolveMongoBinary(target) : "mongosh";
-    const { env, argv } = engineCommand(service, target, mongoBinary);
-    args = [...execArgs(target, env, { interactive: true }), ...argv];
+    const command = engineCommand(service, target, mongoBinary);
+    env = command.env;
+    args = [...execArgs(target, env, { interactive: true }), ...command.argv];
   }
 
   const proc = spawn("docker", args, {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
+    env: { ...sanitizedProcessEnv(), ...env },
   });
   session.proc = proc;
 

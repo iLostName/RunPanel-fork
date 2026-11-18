@@ -4,6 +4,7 @@ import { isReconcilable, reconciledStatus } from "@/lib/status";
 import { dockerTry, lines } from "./docker/cli";
 import { appContainerName } from "./docker/labels";
 import { processManager } from "./process-manager";
+import { lockHolder } from "./project-lock";
 import { notify } from "./notify";
 import { serviceDisplayName } from "@/lib/service-name";
 
@@ -127,6 +128,9 @@ async function runSweep(): Promise<ReconcileStatusResult> {
 
   for (const project of projects) {
     if (!isReconcilable(project.status)) continue;
+    // A move or a restore takes the app down on purpose and leaves the row alone:
+    // read from here, that is a crash, and a notification saying so.
+    if (lockHolder(project.id)) continue;
 
     const observed = await projectRunning(project, containers);
     if (observed === null) continue;

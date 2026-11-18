@@ -25,8 +25,11 @@ import * as usersAndPermissions from "./023-users-and-permissions";
 import * as cluster from "./024-cluster";
 import * as domains from "./025-domains";
 import * as domainCloudflare from "./026-domain-cloudflare";
-import * as hostPassword from "./027-host-password";
-import * as apiTokens from "./028-api-tokens";
+import * as oneTimeHistoryIndex from "./027-one-time-history-index";
+import * as clusterLastSeen from "./028-cluster-last-seen";
+import * as sourceUrlCredentials from "./029-source-url-credentials";
+import * as hostPassword from "./030-host-password";
+import * as apiTokens from "./031-api-tokens";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -62,8 +65,11 @@ export const migrations: Record<string, Migration> = {
   "024-cluster": cluster,
   "025-domains": domains,
   "026-domain-cloudflare": domainCloudflare,
-  "027-host-password": hostPassword,
-  "028-api-tokens": apiTokens,
+  "027-one-time-history-index": oneTimeHistoryIndex,
+  "028-cluster-last-seen": clusterLastSeen,
+  "029-source-url-credentials": sourceUrlCredentials,
+  "030-host-password": hostPassword,
+  "031-api-tokens": apiTokens,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

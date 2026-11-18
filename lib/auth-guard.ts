@@ -110,11 +110,17 @@ export interface MemberContext {
  * For the few endpoints another member of the cluster calls directly — ping,
  * directory exchange, leave — which carry a signature and no cookie. `role`
  * narrows them to panels: a managed node is never allowed to push a directory.
+ *
+ * A signature naming a user is a request forwarded for that user, and
+ * `/api/nodes/<id>/...` forwards any path. Accepted here, any account could have
+ * pushed a directory making itself owner on another server: these endpoints
+ * answer to the panel itself, which never signs them with a user.
  */
 export async function requireMember(opts: { role?: "panel" } = {}): Promise<NextResponse | MemberContext> {
   const requestHeaders = await headers();
   const caller = await verifySignedHeaders((name) => requestHeaders.get(name));
   if (!caller) return unauthorized();
+  if (caller.userId) return forbidden();
   if (opts.role && caller.member.role !== opts.role) return forbidden("Solo un pannello può farlo");
   return caller;
 }

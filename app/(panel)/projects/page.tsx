@@ -13,6 +13,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useNode, useServerHref } from "@/lib/hooks/useNode";
+import { useCan } from "@/lib/hooks/useMe";
+import { formatWhen } from "@/lib/format";
 import { useClusterList } from "@/lib/hooks/useClusterList";
 import type { Located } from "@/lib/cluster-merge";
 import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
@@ -63,7 +65,7 @@ const ProjectRow = memo(function ProjectRow({ project, href }: { project: Locate
         <div className="text-muted hidden shrink-0 text-right text-xs sm:block">
           <p className="tabular-nums">{project.deploy_count} deploy</p>
           {project.last_deploy_at && (
-            <p className="mt-0.5">{new Date(project.last_deploy_at).toLocaleDateString()}</p>
+            <p className="mt-0.5">{formatWhen(project.last_deploy_at)}</p>
           )}
         </div>
 
@@ -76,6 +78,7 @@ const ProjectRow = memo(function ProjectRow({ project, href }: { project: Locate
 export default function ProjectsPage() {
   const href = useServerHref();
   const { isSolo } = useNode();
+  const canCreate = useCan("projects.create");
   const poll5000 = usePollInterval(5000);
   const [search, setSearch] = useState("");
   const { items: data, failed, loading, error: loadError, refresh } = useClusterList<Project>("/api/cluster/projects", "/api/projects", { intervalMs: poll5000 });
@@ -100,10 +103,12 @@ export default function ProjectsPage() {
         actions={
           <>
             <ServerFilter />
-            <LinkButton href={href("/projects/new")} variant="secondary">
-              <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
-              Nuovo progetto
-            </LinkButton>
+            {canCreate && (
+              <LinkButton href={href("/projects/new")} variant="secondary">
+                <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+                Nuovo progetto
+              </LinkButton>
+            )}
           </>
         }
       />

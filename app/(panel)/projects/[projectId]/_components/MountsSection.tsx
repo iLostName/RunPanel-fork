@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button, Input, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
 import { DeleteButton } from "@/components/ui/DangerAction";
 import { CheckboxField } from "@/components/ui/CheckboxField";
 import { FormError } from "@/components/ui/FormError";
@@ -43,10 +44,12 @@ export function MountsSection({
   projectId,
   mounts,
   onApplied,
+  logLines,
 }: {
   projectId: string;
   mounts: ProjectMountRow[];
   onApplied: () => void;
+  logLines: LogLine[];
 }) {
   const api = useNodeApi();
   const [rows, setRows] = useState<ProjectMountRow[]>(mounts);
@@ -204,6 +207,10 @@ export function MountsSection({
           Salva e applica
         </Button>
       </div>
+
+      {logLines.length > 0 && (
+        <LogViewer lines={logLines} ariaLabel="Log dell'applicazione" className="h-[200px]" />
+      )}
 
       <FieldHint>
         Si salvano da qui e non con il resto delle impostazioni: applicarle ferma l&apos;app, copia

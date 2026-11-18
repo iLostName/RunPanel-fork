@@ -45,6 +45,7 @@ import type {
 } from "./types";
 import type { ProjectVolume } from "./volume-ops";
 import { serviceDisplayName } from "@/lib/service-name";
+import { isPanelClosing, PANEL_CLOSING_MESSAGE } from "../project-lock";
 
 /**
  * One backup, start to finish.
@@ -112,6 +113,8 @@ export async function startBackup(
   request: RunRequest
 ): Promise<{ runId: string; done: Promise<RunSummary> }> {
   if (globalRef.__runpanelBackupActive) throw new BackupBusyError();
+  // The panel exits in a moment, and a half-written archive is not a backup.
+  if (isPanelClosing()) throw new BackupBusyError(PANEL_CLOSING_MESSAGE);
   // A restore writes the very data a backup would read; only its own safety
   // copy may run alongside it. Read through globalThis: restore.ts imports
   // this module, so importing it back would be a cycle.

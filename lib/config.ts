@@ -90,7 +90,12 @@ export function ensureDataDirs() {
   // logins, session hashes — and on a shared host the default 0755 would let
   // any local user read last night's backup, or the copy the updater took
   // twenty minutes ago.
-  for (const dir of [config.backupsDir, config.panelUpdateDir]) {
+  //
+  // The data directory as a whole too: checkouts, uploads, logs and the store
+  // are the panel's and nobody else's. Containers are not affected: the daemon
+  // resolves a bind mount as root, and inside the container only the mounted
+  // directory's own mode counts.
+  for (const dir of [config.dataDir, config.backupsDir, config.panelUpdateDir]) {
     try {
       fs.chmodSync(dir, 0o700);
     } catch {

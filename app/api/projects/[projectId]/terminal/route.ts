@@ -6,6 +6,8 @@ import { terminalActionSchema } from "@/lib/validation";
 import { getDb } from "@/lib/db";
 import { spawn, type ChildProcess } from "child_process";
 import { projectEvents } from "@/services/events";
+import { appContainerName } from "@/services/docker/labels";
+import { assertOwnAppContainer, ForeignContainerError } from "@/services/process-drivers/docker-driver";
 
 interface ShellSession {
   proc: ChildProcess;
@@ -89,7 +91,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Il terminale è disponibile solo per i progetti che girano in un container Docker" }, { status: 400 });
   }
 
-  const containerName = `runpanel-${project.slug}`;
+  const containerName = appContainerName(project.slug);
   const sessionKey = `term-${projectId}-${userId}`;
 
   /*
@@ -108,7 +110,30 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ status: "stopped" });
   }
 
-  if (action === "start" || !sessions.has(sessionKey)) {
+  /*
+    Only an explicit start opens a shell.
+
+    Input used to open one too when the session was gone: the keystrokes were
+    dropped, a shell nobody asked for was audited as opened, and the client was
+    told `started`, so the `dead` answer below could never be sent.
+  */
+  if (action === "start") {
+    // A project whose slug clashes with a service would otherwise get a shell in
+    // that database, with its password in the environment.
+    try {
+      if (!(await assertOwnAppContainer(project.slug))) {
+        return NextResponse.json(
+          { error: "Il container del progetto non esiste: fai un deploy prima di aprire la shell" },
+          { status: 409 }
+        );
+      }
+    } catch (err) {
+      if (err instanceof ForeignContainerError) {
+        return NextResponse.json({ error: err.message }, { status: 409 });
+      }
+      return NextResponse.json({ error: "Docker non risponde: impossibile aprire la shell" }, { status: 503 });
+    }
+
     // Kill existing session
     const existing = sessions.get(sessionKey);
     if (existing) {

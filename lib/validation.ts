@@ -2,10 +2,12 @@ import { z } from "zod";
 import { isValidTimeZone, parseCron } from "./cron";
 import { BRANCH_NAME_RULE, COMMIT_SHA_RULE, isBranchName, isCommitSha } from "./git-ref";
 import { parseMountString } from "./mount";
-import { ruleProblem } from "./ip-access";
+import { parseAddress, ruleProblem } from "./ip-access";
 import { normalizeDomain, normalizeSubdomain } from "./proxy-names";
 import { deployPhases } from "./deploy-phases";
 import { MAX_DISPLAY_NAME } from "./service-name";
+import { isContractInput } from "./deploy-contract";
+import { versionsFor } from "./service-versions";
 import {
   COMPOSE_SERVICE_PATTERN,
   EXCLUDE_PATH_RULE,
@@ -27,6 +29,29 @@ import {
  */
 export const runtimeTypes = ["node", "static", "docker", "compose", "custom"] as const;
 export type RuntimeType = (typeof runtimeTypes)[number];
+
+function isBlockedIpv4(a: number, b: number): boolean {
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 169 && b === 254) return true; // link-local, and cloud metadata
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
+  return false;
+}
+
+/**
+ * The IPv6 forms that carry an IPv4 address the network delivers as such.
+ *
+ * `parseAddress` has already folded `::ffff:a.b.c.d`. The rest are the
+ * IPv4-compatible `::/96` (which also holds `::` and `::1`), NAT64's
+ * `64:ff9b::/96` and 6to4's `2002::/16`, which keeps it in bytes 2 to 5.
+ */
+function embeddedIpv4(bytes: Uint8Array): Uint8Array | null {
+  if (bytes.subarray(0, 12).every((byte) => byte === 0)) return bytes.subarray(12);
+  if (bytes[0] === 0x20 && bytes[1] === 0x02) return bytes.subarray(2, 6);
+  const nat64 = bytes[0] === 0 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b;
+  return nat64 && bytes.subarray(4, 12).every((byte) => byte === 0) ? bytes.subarray(12) : null;
+}
 
 /**
  * Hosts a clone is never allowed to reach.
@@ -51,22 +76,24 @@ export function isBlockedRepoHost(hostname: string): boolean {
 
   if (host === "localhost" || /\.(localhost|local|internal|home\.arpa)$/.test(host)) return true;
 
-  // IPv6: loopback, unspecified, unique-local (fc00::/7), link-local (fe80::/10)
-  if (host === "::1" || host === "::") return true;
-  if (/^f[cd][0-9a-f]{2}:/.test(host)) return true;
-  if (/^fe[89ab][0-9a-f]:/.test(host)) return true;
+  // Bytes, not text: the URL parser rewrites `[::ffff:127.0.0.1]` to
+  // `[::ffff:7f00:1]`, which no pattern on the spelling would recognise. A host
+  // with a colon that does not parse is refused rather than guessed at.
+  if (host.includes(":")) {
+    const parsed = parseAddress(host);
+    if (!parsed) return true;
+    if (parsed.family === 4) return isBlockedIpv4(parsed.bytes[0], parsed.bytes[1]);
+
+    const embedded = embeddedIpv4(parsed.bytes);
+    if (embedded) return isBlockedIpv4(embedded[0], embedded[1]);
+
+    const [first, second] = parsed.bytes;
+    if ((first & 0xfe) === 0xfc) return true; // unique-local, fc00::/7
+    return first === 0xfe && (second & 0xc0) === 0x80; // link-local, fe80::/10
+  }
 
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!v4) return false;
-
-  const a = Number(v4[1]);
-  const b = Number(v4[2]);
-  if (a === 0 || a === 10 || a === 127) return true;
-  if (a === 169 && b === 254) return true; // link-local, and cloud metadata
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
-  return false;
+  return v4 ? isBlockedIpv4(Number(v4[1]), Number(v4[2])) : false;
 }
 
 /**
@@ -74,6 +101,11 @@ export function isBlockedRepoHost(hostname: string): boolean {
  *
  * `z.string().url()` on its own accepts `file:///etc`, `ssh://…`, `javascript:…`
  * and `http://169.254.169.254/…` — it checks shape, not reachability or scheme.
+ *
+ * Credentials are dropped rather than refused. `gitClone` has never used them,
+ * so they do nothing but sit in the row, where read-level users get them back
+ * and the deploy log prints them. Refusing would also block the settings form,
+ * which sends back whatever URL a project already has.
  */
 export const repoUrlSchema = z
   .string()
@@ -89,7 +121,14 @@ export const repoUrlSchema = z
       return url.protocol === "https:" && !isBlockedRepoHost(url.hostname);
     },
     { message: "Repository URL must be a public https:// address" }
-  );
+  )
+  .transform((raw) => {
+    const url = new URL(raw);
+    if (!url.username && !url.password) return raw;
+    url.username = "";
+    url.password = "";
+    return url.href;
+  });
 
 /**
  * Who may reach a published port.
@@ -209,9 +248,13 @@ export const updateProjectSchema = z.object({
    * one. It is accepted loosely here and normalised in the route: a strict
    * schema would silently DROP the legacy keys — Zod strips what it does not
    * know — and a project configured through the old wizard would come back with
-   * no commands at all.
+   * no commands at all. Loose is not unchecked: what could only be read as an
+   * empty contract is refused here, or it would wipe the stored one and answer 200.
    */
-  builderConfig: z.unknown().optional(),
+  builderConfig: z
+    .record(z.string(), z.unknown())
+    .refine(isContractInput, "Configurazione di deploy non valida")
+    .optional(),
   /** See `accessSchema`. Changing it restarts the app: the port has to move. */
   access: accessSchema.optional(),
   /** Where the Overview files it. See `folderIdSchema`. */
@@ -643,20 +686,54 @@ export const createDatabaseSchema = z.object({
   name: databaseNameSchema,
 });
 
-export const createServiceSchema = z.object({
-  name: serviceNameSchema,
-  type: z.enum(["postgresql", "mysql", "redis", "mongodb"]),
-  version: z.string().min(1),
-  port: z.number().int().min(1).max(65535),
-  projectId: z.string().optional(),
-  credentials: z.object({
-    user: z.string().optional(),
-    password: z.string().optional(),
-    database: z.string().optional(),
-  }).optional(),
-  /** Absent means open, which is what every service was before this existed. */
-  access: accessSchema.optional(),
+/**
+ * Credentials chosen for a NEW service. A stored service is never checked
+ * against this: its password goes on working whatever it contains, because
+ * `buildConnectionString` encodes it. Empty means "generate one".
+ *
+ * `database` may start with a digit because the wizard sends `0` for Redis,
+ * where the value is a database index and is otherwise unused.
+ */
+export const serviceCredentialsSchema = z.object({
+  user: z
+    .string()
+    .regex(/^(?:[A-Za-z_][A-Za-z0-9_]{0,62})?$/, "L'utente può contenere lettere, numeri e underscore, al massimo 63 caratteri, e non può iniziare con un numero")
+    .optional(),
+  password: z
+    .string()
+    .max(128, "La password può avere al massimo 128 caratteri")
+    .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "La password non può contenere caratteri di controllo")
+    .optional(),
+  database: z
+    .string()
+    .regex(/^[A-Za-z0-9_]{0,63}$/, "Il database può contenere lettere, numeri e underscore, al massimo 63 caratteri")
+    .optional(),
 });
+
+export const createServiceSchema = z
+  .object({
+    name: serviceNameSchema,
+    type: z.enum(["postgresql", "mysql", "redis", "mongodb"]),
+    version: z.string().min(1).max(32),
+    port: z.number().int().min(1).max(65535),
+    projectId: z.string().optional(),
+    credentials: serviceCredentialsSchema.optional(),
+    /** Absent means open, which is what every service was before this existed. */
+    access: accessSchema.optional(),
+  })
+  // Only here, on the way in. A service created before a version left the
+  // catalogue has to keep opening and being recreated on the tag it has, and
+  // nothing that reads a row goes through this schema. Outside the list, the
+  // tag decides things the panel would have to guess: `latest` is PostgreSQL
+  // 18 to the image and "pre-18" to `postgresVolumePath`, and the data goes.
+  .superRefine((value, ctx) => {
+    if (versionsFor(value.type).includes(value.version)) return;
+    ctx.addIssue({
+      code: "custom",
+      path: ["version"],
+      message: `Versione non disponibile. Scegli tra: ${versionsFor(value.type).join(", ")}`,
+    });
+  });
 
 /**
  * An environment variable name, as a shell and a Dockerfile will accept it.

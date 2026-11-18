@@ -17,6 +17,8 @@ Il pannello non esegue mai `systemctl start`, che metterebbe un secondo pannello
 
 La pagina controlla anche ciò che serve davvero al riavvio: Docker abilitato all'avvio (pulsante **Abilita**) e la lista di PM2 salvata (pulsante **pm2 save**), quando PM2 fa girare almeno un'app. Senza, dopo un riavvio il pannello torna e le app no.
 
+Dopo un riavvio torna su quello che era acceso e quello che si era fermato da solo. Un progetto o un servizio fermato a mano resta fermo.
+
 Ogni progetto e servizio ha un interruttore, un ordine, un ritardo e se aspettare che sia pronto prima di passare al successivo, al massimo un minuto: un servizio quando il motore risponde, un progetto quando passa l'health check del suo ultimo deploy (o, con l'health check spento, quando il processo è acceso). Di default i servizi ripartono e vengono attesi, i progetti no; i servizi partono sempre prima dei progetti. Al boot il pannello aspetta 20 secondi che Docker riavvii da sé quello che sa, poi avvia solo quello che è ancora giù, a 2 secondi di distanza, senza mai lanciare un build. **Simula** mostra cosa farebbe, **Esegui ora** lo fa subito.
 
 Lo stato negli elenchi viene ricontrollato ogni mezzo minuto e dopo la riconciliazione: un progetto può passare a **Fermo** senza che nessuno l'abbia spento in quel momento, vuol dire che era già giù. Il controllo non avvia né ferma niente, e per segnare fermo qualcosa che risultava acceso vuole due letture d'accordo.

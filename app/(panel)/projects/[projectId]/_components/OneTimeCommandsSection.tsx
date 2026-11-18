@@ -177,9 +177,19 @@ export function OneTimeCommandsSection({
       if (!res.ok) {
         setError(data.details?.[0]?.message ?? data.error ?? MSG.saveFailed);
         if (data.code === "queue-changed") {
-          // Le righe tengono id che un deploy ha già preso: si riparte dalla
-          // coda attuale, o ogni salvataggio risponderebbe di nuovo 409.
-          setRows(queued.map(toRow));
+          // Via solo le righe che un deploy ha già preso, o ogni salvataggio
+          // risponderebbe di nuovo 409. Quelle nuove non c'entrano e restano,
+          // col testo scritto. La coda si rilegge: `queued` è dell'ultimo poll,
+          // e il deploy che ha causato il 409 può non esserci ancora.
+          const fresh = await fetch(api(`/api/projects/${projectId}/one-time-commands`))
+            .then((reply) => (reply.ok ? reply.json() : null))
+            .catch(() => null);
+          const live = new Set(
+            ((fresh?.queued ?? queued) as OneTimeCommand[])
+              .filter((command) => command.status === "queued")
+              .map((command) => command.id)
+          );
+          setRows((prev) => prev.filter((row) => !row.id || live.has(row.id)));
           onChanged();
         }
         return false;

@@ -1,4 +1,5 @@
 import path from "path";
+import fs from "fs";
 import { config } from "@/lib/config";
 import { docker, dockerFromFile, dockerToFile, dockerTry } from "./docker/cli";
 
@@ -56,6 +57,58 @@ export async function sizeKb(image: string, mount: string): Promise<number | nul
   const out = await probe(image, ["-v", `${mount}:/from:ro`], "du -sk /from | cut -f1");
   const value = Number.parseInt((out ?? "").split(/\s+/)[0] ?? "", 10);
   return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * KiB at a path inside the image.
+ *
+ * What a project seed is really going to copy: the host side of a new bind is
+ * empty by definition, so measuring that one says zero and never refuses. The
+ * path goes in as an argument, not into the script.
+ */
+export async function sizeInImageKb(image: string, target: string): Promise<number | null> {
+  const result = await dockerTry(
+    ["run", "--rm", "--entrypoint", "sh", image, "-c", 'du -sk "$1" | cut -f1', "sh", target],
+    { timeout: 120_000 }
+  );
+  const value = Number.parseInt((result?.stdout ?? "").trim().split(/\s+/)[0] ?? "", 10);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The size of a path in a container as it stands, or null when it cannot be run.
+ *
+ * What `docker cp` copies is this, writable layer included: the image says
+ * nothing about what the app wrote since it started.
+ */
+export async function sizeInContainerKb(container: string, target: string): Promise<number | null> {
+  const result = await dockerTry(["exec", container, "du", "-sk", target], { timeout: 120_000 });
+  const value = Number.parseInt((result?.stdout ?? "").trim().split(/\s+/)[0] ?? "", 10);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Which disk a path is on. The nearest ancestor answers for one not created yet. */
+export function diskOf(target: string): string {
+  let dir = path.resolve(target);
+  for (;;) {
+    try {
+      return String(fs.statSync(dir).dev);
+    } catch {
+      const parent = path.dirname(dir);
+      if (parent === dir) return target;
+      dir = parent;
+    }
+  }
+}
+
+/** Free KiB on the disk of a directory the panel itself can reach. */
+export function localFreeKb(dir: string): number | null {
+  try {
+    const stats = fs.statfsSync(dir);
+    return Math.floor((stats.bavail * stats.bsize) / 1024);
+  } catch {
+    return null;
+  }
 }
 
 /** Free KiB at the destination, from `df -Pk`. */

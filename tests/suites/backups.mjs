@@ -160,6 +160,13 @@ export async function run({ base, dataDir }) {
 
   const policyId = created.body?.id;
   r.check("the schedule is described in words", created.body?.schedule === "ogni giorno alle 03:00", created.body?.schedule);
+
+  const unknownDestination = await api.call(`/api/backups/policies/${policyId}`, {
+    method: "PUT",
+    body: JSON.stringify({ destinationId: "doesnotexist" }),
+  });
+  r.check("moving a policy to an unknown destination is a 404", unknownDestination.status === 404, String(unknownDestination.status));
+
   r.check("the next run is computed immediately", Boolean(created.body?.nextRunAt), created.body?.nextRunAt);
   r.check(
     "creating it does not also run it",

@@ -41,12 +41,13 @@ function isScpLike(value: string): boolean {
  * back with `git remote set-url`. So the password half goes and the user half
  * stays.
  *
- * `[^/@]*` cannot cross a `/`, so `https://github.com/a@b/c` is left alone, and
- * scp-style has no `://` and never matches.
+ * `[^/?#]*` cannot leave the authority, so `https://github.com/a@b/c` is left
+ * alone, and scp-style has no `://` and never matches. Greedy, because a password
+ * can hold an `@`: the last one is where the credentials end.
  */
 export function stripRemoteCredentials(url: string): string {
   return url.replace(
-    /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/@]*)@/,
+    /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#]*)@/,
     (_all, scheme: string, userinfo: string) => {
       if (/^https?:\/\/$/i.test(scheme)) return scheme;
       const user = userinfo.split(":")[0];

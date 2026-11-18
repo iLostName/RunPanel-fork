@@ -183,7 +183,7 @@ export async function gitCheckoutCommit(
     if (!opts.repoUrl) {
       throw new Error("Nessun repository sul disco: collega un repository GitHub e fai un deploy.");
     }
-    log(`Cloning ${opts.repoUrl}...`);
+    log(`Cloning ${stripRemoteCredentials(opts.repoUrl)}...`);
     await gitClone(opts.repoUrl, branch, projectSlug);
   }
 
@@ -332,6 +332,29 @@ export async function gitCheckoutCommit(
 
 export function repoExists(projectSlug: string): boolean {
   return fs.existsSync(path.join(config.reposDir, projectSlug, ".git"));
+}
+
+/**
+ * Empty a directory of a checkout down to what git tracks.
+ *
+ * Returns false when git tracks nothing in there, or there is no repository,
+ * and removing the directory outright is the right thing to do. A rebuild does
+ * not fetch the source again, so a committed `dist/` deleted here would be gone
+ * until the next deploy: the build breaks, or a static site serves the repo root.
+ */
+export async function cleanKeepingTracked(repoDir: string, relative: string): Promise<boolean> {
+  try {
+    const { stdout } = await exec("git", ["ls-files", "--", relative], {
+      cwd: repoDir,
+      timeout: 30_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    if (!stdout.toString().trim()) return false;
+  } catch {
+    return false;
+  }
+  await exec("git", ["clean", "-fdx", "--", relative], { cwd: repoDir, timeout: 120_000 });
+  return true;
 }
 
 export function getRepoPath(projectSlug: string): string {

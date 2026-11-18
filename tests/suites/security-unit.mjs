@@ -195,6 +195,9 @@ export async function run({ repoRoot }) {
     ["https://github.com/A/R.git", "https://github.com/A/R.git"],
     // The `@` is in the path, not the userinfo.
     ["https://github.com/a@b/c.git", "https://github.com/a@b/c.git"],
+    // A password may hold one: the last `@` before the path is the one that counts.
+    ["https://bot:p@ss@github.com/A/R.git", "https://github.com/A/R.git"],
+    ["https://github.com/A/R.git?at=x@y", "https://github.com/A/R.git?at=x@y"],
   ];
 
   for (const [input, expected] of REMOTES) {

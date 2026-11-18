@@ -15,9 +15,14 @@ export const meta = { name: "scheduled-restart-unit", needsDocker: false, driver
 
 export async function run({ repoRoot }) {
   const r = createReporter("scheduled-restart-unit");
-  const { decideRestart, describeOutcome, isDue } = await import(
+  const { decideRestart, describeOutcome, isDue, stoppedOnPurpose } = await import(
     pathToFileURL(join(repoRoot, "lib", "scheduled-restart.ts")).href
   );
+
+  // --- what autostart leaves alone ----------------------------------------------
+  r.check("a target stopped by hand is left down", stoppedOnPurpose({ status: "stopped", crashedAt: null }));
+  r.check("a crash is not a decision", !stoppedOnPurpose({ status: "stopped", crashedAt: "2026-01-01T00:00:00.000Z" }));
+  r.check("a row a reboot left running is not one either", !stoppedOnPurpose({ status: "running", crashedAt: null }));
 
   // --- what to do -----------------------------------------------------------
   {

@@ -15,6 +15,9 @@ import { Code } from "@/components/ui/Hint";
 import { Section } from "@/components/ui/Section";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
+import { serviceControlText } from "@/lib/status";
+import { SERVICE_ACTIONS, rowAllows, type Access } from "@/lib/authz";
+import { useCan } from "@/lib/hooks/useMe";
 import { serviceDisplayName } from "@/lib/service-name";
 import { useMemberApi, useServerHref } from "@/lib/hooks/useNode";
 import { useClusterList } from "@/lib/hooks/useClusterList";
@@ -30,6 +33,7 @@ interface Service {
   port: number;
   project_id: string | null;
   access_mode: string | null;
+  permission?: Access;
 }
 
 const TYPE_ICONS: Record<string, string> = {
@@ -47,7 +51,7 @@ const ServiceRow = memo(function ServiceRow({
 }: {
   service: Located<Service>;
   href: string;
-  /** Undefined when the service belongs to no project — which is worth showing. */
+  /** Undefined when it is not known: the list lags behind, or the account cannot read that project. */
   projectName?: string;
   onControl: (service: Located<Service>, action: "start" | "stop" | "restart") => void;
 }) {
@@ -63,8 +67,10 @@ const ServiceRow = memo(function ServiceRow({
       />
 
       <Link href={href} className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-foreground truncate text-sm font-medium">{serviceDisplayName(service)}</span>
+        {/* Wraps: on a phone the buttons leave too little room for name and
+            badges on one line, and without it the name was what gave way. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-foreground max-w-full truncate text-sm font-medium">{serviceDisplayName(service)}</span>
           <StatusBadge status={service.status} />
           <ServerBadge memberId={service.memberId} />
         </div>
@@ -82,32 +88,34 @@ const ServiceRow = memo(function ServiceRow({
               limitato
             </span>
           )}
-          {projectName ? (
-            <span className="text-muted">
-              → <span className="text-foreground">{projectName}</span>
-            </span>
-          ) : (
+          {!service.project_id ? (
             <span className="text-warning">nessun progetto collegato</span>
+          ) : (
+            <span className="text-muted">
+              → <span className="text-foreground">{projectName ?? "un progetto"}</span>
+            </span>
           )}
         </p>
       </Link>
 
-      <div className="flex shrink-0 gap-1.5">
-        {running ? (
-          <>
-            <Button variant="ghost" size="sm" isIconOnly aria-label="Riavvia" onPress={() => onControl(service, "restart")}>
-              <Icon icon="solar:refresh-linear" width={16} />
+      {rowAllows(service, SERVICE_ACTIONS.control) && (
+        <div className="flex shrink-0 gap-1.5">
+          {running ? (
+            <>
+              <Button variant="ghost" size="sm" isIconOnly aria-label="Riavvia" onPress={() => onControl(service, "restart")}>
+                <Icon icon="solar:refresh-linear" width={16} />
+              </Button>
+              <Button variant="ghost" size="sm" isIconOnly aria-label="Ferma" onPress={() => onControl(service, "stop")}>
+                <Icon icon="solar:stop-linear" width={16} className="text-danger" />
+              </Button>
+            </>
+          ) : (
+            <Button variant="ghost" size="sm" isIconOnly aria-label="Avvia" onPress={() => onControl(service, "start")}>
+              <Icon icon="solar:play-linear" width={16} className="text-success" />
             </Button>
-            <Button variant="ghost" size="sm" isIconOnly aria-label="Ferma" onPress={() => onControl(service, "stop")}>
-              <Icon icon="solar:stop-linear" width={16} className="text-danger" />
-            </Button>
-          </>
-        ) : (
-          <Button variant="ghost" size="sm" isIconOnly aria-label="Avvia" onPress={() => onControl(service, "start")}>
-            <Icon icon="solar:play-linear" width={16} className="text-success" />
-          </Button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </Panel>
   );
 });
@@ -116,6 +124,7 @@ export default function ServicesPage() {
   const memberApi = useMemberApi();
   const href = useServerHref();
   const poll5000 = usePollInterval(5000);
+  const canCreate = useCan("projects.create");
   const [search, setSearch] = useState("");
   const { items: data, failed, loading, error: loadError, refresh } = useClusterList<Service>("/api/cluster/services", "/api/services", { intervalMs: poll5000 });
 
@@ -153,13 +162,13 @@ export default function ServicesPage() {
       });
       if (!res.ok) {
         const body = await res.json();
-        toast.error(body.error ?? `Azione "${action}" fallita`);
+        toast.error(body.error ?? serviceControlText(action).failed);
         return;
       }
-      toast.success(`Azione "${action}" eseguita`);
+      toast.success(serviceControlText(action).done);
       refresh();
     } catch {
-      toast.error(`Azione "${action}" fallita`);
+      toast.error(serviceControlText(action).failed);
     }
   }
 
@@ -173,10 +182,12 @@ export default function ServicesPage() {
         actions={
           <>
             <ServerFilter />
-            <LinkButton href={href("/services/new")} variant="secondary">
-              <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
-              Nuovo servizio
-            </LinkButton>
+            {canCreate && (
+              <LinkButton href={href("/services/new")} variant="secondary">
+                <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+                Nuovo servizio
+              </LinkButton>
+            )}
           </>
         }
       />

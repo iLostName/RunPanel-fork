@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button, Input, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
+import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
 import { Section } from "@/components/ui/Section";
 import { Field } from "@/components/ui/Field";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
@@ -42,12 +43,14 @@ export function RepoPathSection({
   repoPath,
   move,
   onChanged,
+  logLines,
 }: {
   projectId: string;
   location: { declared: string; real: string | null };
   repoPath: string | null;
   move: RepoMove | null;
   onChanged: () => void;
+  logLines: LogLine[];
 }) {
   const api = useNodeApi();
   const [value, setValue] = useState("");
@@ -111,6 +114,10 @@ export function RepoPathSection({
           <FieldHint>Non c&apos;è ancora niente su disco: serve un deploy.</FieldHint>
         )}
       </div>
+
+      {logLines.length > 0 && (
+        <LogViewer lines={logLines} ariaLabel="Log dello spostamento" className="h-[200px]" />
+      )}
 
       {inFlight ? (
         <Hint tone="warn" title="Spostamento in corso">

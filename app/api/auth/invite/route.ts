@@ -3,6 +3,8 @@ import { createSession } from "@/lib/auth";
 import { audit } from "@/lib/audit";
 import { trustedClientIp } from "@/lib/client-ip";
 import { consumeRateLimit } from "@/lib/rate-limit";
+import { readBodyCapped } from "@/lib/read-body";
+import { refuseCrossOrigin } from "@/lib/request-origin";
 import { inspectInvite, recordLogin, redeemInvite } from "@/lib/users";
 
 /**
@@ -43,14 +45,17 @@ export async function GET(request: NextRequest) {
 
 /** Spend a link: set the password and sign in. */
 export async function POST(request: NextRequest) {
+  const refused = refuseCrossOrigin(request);
+  if (refused) return refused;
+
   const tooMany = await limited(request);
   if (tooMany) return tooMany;
 
   let body: unknown;
   try {
-    const raw = await request.text();
-    if (raw.length > MAX_BODY_BYTES) return NextResponse.json({ error: "Richiesta troppo grande" }, { status: 413 });
-    body = JSON.parse(raw);
+    const raw = await readBodyCapped(request, MAX_BODY_BYTES);
+    if (!raw) return NextResponse.json({ error: "Richiesta troppo grande" }, { status: 413 });
+    body = JSON.parse(raw.toString("utf8"));
   } catch {
     return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
   }
