@@ -167,8 +167,13 @@ export function createUpload(input: { fileName: string; bytes: number }): Upload
   return record;
 }
 
-/** One piece at a time per upload: two writers at the same offset would interleave. */
-const writing = new Set<string>();
+/**
+ * One piece at a time per upload: two writers at the same offset would
+ * interleave. On `globalThis`, like every process-wide flag here: each route
+ * is its own bundle, and a module-level set would be one per route.
+ */
+const writingRef = globalThis as typeof globalThis & { __runpanelUploadWrites?: Set<string> };
+const writing: Set<string> = (writingRef.__runpanelUploadWrites ??= new Set());
 
 /**
  * Write one piece at `offset`.
