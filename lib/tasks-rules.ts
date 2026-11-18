@@ -8,12 +8,14 @@
  * server writes:
  *
  *  - when an occurrence is due, and when it is too late to still count as
- *    that occurrence (`dueVerdict`) — a panel that was down at 03:00 runs the
+ *    that occurrence (`planTick`) — a panel that was down at 03:00 runs the
  *    nightly once when it is back within the grace, and records it as missed
  *    after that. Never one run per missed occurrence: tasks do not pile up;
- *  - whether a run may start (`decideStart`): never twice at once, never
- *    while a deploy or anything else holds the project, never on a project
- *    that moved from a container to the host since the command was saved;
+ *  - whether a run may start (`decideStart`): never twice at once — not even
+ *    beside a run a panel restart lost track of — never while a deploy or
+ *    anything else holds the project, never on a project that moved between
+ *    a container and the host, or started reaching the host, since the
+ *    command was saved;
  *  - what a finished run means for the failure streak, and whether that is
  *    worth a notification (`afterRun`);
  *  - how much output is kept (`OutputCapture`).
@@ -26,7 +28,8 @@
  *   timed_out    killed, with everything it started, at the task's limit
  *   cancelled    stopped by a person, or because a deploy took the project
  *   interrupted  the panel restarted while it ran
- *   skipped      did not start; `error` says why
+ *   skipped      did not start; `error` says why — a container that refused
+ *                the exec (paused, restarting) is one too
  *
  * Only `failed` and `timed_out` are failures. A skip, a stop and an
  * interruption say nothing about whether the command works, so they neither
@@ -107,24 +110,58 @@ export function lateGraceMs(spacingMs: number | null): number {
   return Math.min(LATE_GRACE_MAX_MS, Math.max(LATE_GRACE_MIN_MS, Math.floor(spacingMs / 2)));
 }
 
-export type DueVerdict = "not-due" | "run" | "missed";
+export type TickPlan =
+  | { kind: "wait" }
+  /** Run the occurrence due at `scheduledFor`, and move the schedule to `next`. */
+  | { kind: "run"; scheduledFor: number; next: number | null }
+  /**
+   * The due occurrence is past its grace: one missed record for it and for
+   * everything up to now, the schedule moved to `next` — and `catchUp`, a
+   * later occurrence that is still within its own grace and runs, late.
+   */
+  | { kind: "missed"; next: number | null; catchUp: number | null };
 
-/** `spacingMs`: from this occurrence to the one after it. */
-export function dueVerdict(nextAt: string | null, now: number, spacingMs: number | null): DueVerdict {
-  if (!nextAt) return "not-due";
-  const due = Date.parse(nextAt);
-  if (!Number.isFinite(due) || due > now) return "not-due";
-  return now - due > lateGraceMs(spacingMs) ? "missed" : "run";
+/**
+ * What a tick does with a task whose next occurrence is `dueMs`.
+ *
+ * `next(from)` is the first occurrence strictly after `from` (`lib/cron.ts`'s
+ * `nextAfter`, in the task's zone), passed in so the scheduler and the tests
+ * run the same function. It is the expensive part — a minute schedule costs
+ * tens of milliseconds a call late in the day — so it is asked as little as
+ * possible: once for a run on time, when the occurrence after the due one is
+ * also the one after now, and a few more times only after an outage.
+ *
+ * After an outage the stored occurrence is the OLDEST one missed; what may
+ * still be worth running is the newest. An hourly task back at 10:00:30 after
+ * a night down records 07:00–09:00 as missed and runs 10:00 — never 07:00,
+ * 08:00, 09:00 and 10:00 one after the other.
+ */
+export function planTick(dueMs: number, now: number, next: (fromMs: number) => number | null): TickPlan {
+  if (!Number.isFinite(dueMs) || dueMs > now) return { kind: "wait" };
+
+  const following = next(dueMs);
+  if (now - dueMs <= lateGraceMs(following === null ? null : following - dueMs)) {
+    return { kind: "run", scheduledFor: dueMs, next: following !== null && following > now ? following : next(now) };
+  }
+
+  const upcoming = next(now);
+  const after = upcoming === null ? null : next(upcoming);
+  const window = lateGraceMs(upcoming !== null && after !== null ? after - upcoming : null);
+  const recent = next(now - window - 1);
+  const catchUp = recent !== null && recent <= now && recent > dueMs ? recent : null;
+  return { kind: "missed", next: upcoming, catchUp };
 }
 
 // --- Whether a run may start -----------------------------------------------------
 
 export type SkipCode =
   | "running"
+  | "orphan"
   | "deploying"
   | "busy"
   | "panel-closing"
   | "context-changed"
+  | "host-review"
   | "not-running"
   | "no-directory"
   | "missed";
@@ -132,6 +169,12 @@ export type SkipCode =
 export interface StartFacts {
   /** This task already has a run in flight. */
   alreadyRunning: boolean;
+  /**
+   * Until when a run cut off by a panel restart may still be going, or null.
+   * See `orphanDeadline`.
+   */
+  orphanUntil?: number | null;
+  now?: number;
   /** What holds the project in `services/project-lock.ts`: `deploy`, `restart`… */
   lockHolder: string | null;
   /** The lock's own sentence for it, when something holds it. */
@@ -141,21 +184,58 @@ export interface StartFacts {
   /** Where the command was saved to run, and where the project runs now. */
   savedRunsIn: TaskRunsIn;
   currentRunsIn: TaskRunsIn;
+  /** Whether the project reaches the host now (`projectReachesHost`), and whether the command was saved by someone allowed there. */
+  reachesHost?: boolean;
+  hostApproved?: boolean;
 }
 
 export type StartDecision = { start: true } | { start: false; code: SkipCode; reason: string };
 
 export const SKIP_REASONS: Record<SkipCode, string> = {
   running: "l'esecuzione precedente è ancora in corso",
+  orphan: "l'esecuzione interrotta dal riavvio del pannello potrebbe essere ancora in corso",
   deploying: "era in corso un deploy del progetto",
   busy: "il progetto era occupato da un'altra operazione",
   "panel-closing": "il pannello si stava riavviando",
   "context-changed":
     "il progetto ora gira in un altro modo: apri l'attività e salvala di nuovo per confermare dove deve girare il comando",
+  "host-review":
+    "il progetto ora raggiunge l'host: serve che qualcuno con il permesso «Accesso all'host» apra l'attività e la salvi di nuovo",
   "not-running": "l'app non è in esecuzione",
   "no-directory": "il progetto non ha ancora una cartella sul server: fai prima un deploy",
   missed: "non è partita all'orario previsto: il pannello era spento o troppo occupato",
 };
+
+/**
+ * Why a saved task waits to be saved again before it runs, or null.
+ *
+ * Two things can change under a command after it was approved: where it runs
+ * (a project moved between a container and the host — the command was written
+ * for the other one), and what the place it runs can reach (a container given
+ * host networking, capabilities or bind mounts, by somebody else, after a
+ * manager without the host permission wrote the command for a plain one).
+ */
+export function reviewCode(facts: Pick<StartFacts, "savedRunsIn" | "currentRunsIn" | "reachesHost" | "hostApproved">): SkipCode | null {
+  if (facts.savedRunsIn !== facts.currentRunsIn) return "context-changed";
+  if (facts.reachesHost && !facts.hostApproved) return "host-review";
+  return null;
+}
+
+/**
+ * Until when a run the panel lost track of may still be running.
+ *
+ * A run cut off by a panel restart is recorded as interrupted, but its process
+ * may well be alive: an orderly exit sends it TERM, a crash sends nothing. Its
+ * backstop — `timeout` on the host, the watchdog in a container — ends it by
+ * its start plus its limit plus the backstop's margin at the latest, and
+ * until then a new run of the same task could land beside it. So until then
+ * a new run waits, and says why.
+ */
+export function orphanDeadline(run: { status: string; error: string | null; startedAt: string } | null, timeoutSec: number, backstopSec: number): number | null {
+  if (!run || run.status !== "interrupted" || run.error !== INTERRUPTED_MESSAGE) return null;
+  const started = Date.parse(run.startedAt);
+  return Number.isFinite(started) ? started + (timeoutSec + backstopSec) * 1000 : null;
+}
 
 /**
  * The checks that need nothing but memory, in the order that gives the most
@@ -166,10 +246,12 @@ export function decideStart(facts: StartFacts): StartDecision {
   const skip = (code: SkipCode, reason = SKIP_REASONS[code]): StartDecision => ({ start: false, code, reason });
 
   if (facts.alreadyRunning) return skip("running");
+  if (facts.orphanUntil && (facts.now ?? Date.now()) < facts.orphanUntil) return skip("orphan");
   if (facts.panelClosing) return skip("panel-closing");
   if (facts.lockHolder === "deploy" || facts.projectStatus === "deploying") return skip("deploying");
   if (facts.lockHolder) return skip("busy", facts.busyMessage?.trim() ? trimSentence(facts.busyMessage) : SKIP_REASONS.busy);
-  if (facts.savedRunsIn !== facts.currentRunsIn) return skip("context-changed");
+  const review = reviewCode(facts);
+  if (review) return skip(review);
   return { start: true };
 }
 
@@ -234,16 +316,28 @@ export function afterRun(
   return { streak: { consecutiveFailures: failures, failureNotifiedAt: previous.failureNotifiedAt }, notice: null };
 }
 
+// --- What the store can hold -------------------------------------------------------
+
 /**
- * The exit code in an error from `services/builders/run-shell.ts`.
- *
- * Read from its message because that module reports an ending as a rejection
- * and nothing else; `tasks-unit` runs the real thing against this function,
- * so a change of wording there fails a test here rather than every run.
+ * Text as both drivers accept it. Postgres refuses a NUL character in `text`
+ * outright, and output is whatever the command printed — a binary blob on
+ * stdout would otherwise lose the whole record of the run.
  */
-export function exitCodeFromShellError(message: string): number | null {
-  const match = /exited with code (-?\d+)\s*$/.exec(message);
-  return match ? Number(match[1]) : null;
+export function storableText(text: string): string {
+  return text.includes("\u0000") ? text.replace(/\u0000/g, "�") : text;
+}
+
+/**
+ * A number as an `integer` column holds it. A Windows exit code is an
+ * unsigned 32-bit NTSTATUS (0xC0000005 is 3221225477), which overflows a
+ * signed column: it is stored as the signed value Windows tools print
+ * (-1073741819). Anything else out of range is clamped.
+ */
+export function storableInt(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  const whole = Math.trunc(value);
+  if (whole > 2147483647 && whole <= 4294967295) return whole - 4294967296;
+  return Math.min(2147483647, Math.max(-2147483648, whole));
 }
 
 // --- Words -----------------------------------------------------------------------
@@ -429,8 +523,9 @@ export interface TaskView {
   timeoutSec: number;
   service: string | null;
   runsIn: TaskRunsIn;
-  /** The project no longer runs where this command was saved for: it waits to be saved again. */
+  /** It waits, skipped, to be saved again: `reviewReason` says why. */
   needsReview: boolean;
+  reviewReason: string | null;
   nextRunAt: string | null;
   consecutiveFailures: number;
   lastRun: TaskRunSummary | null;

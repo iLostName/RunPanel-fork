@@ -5,7 +5,9 @@ import { cronSentence } from "@/lib/schedule";
 import { getSetting } from "@/lib/settings";
 import {
   INTERRUPTED_MESSAGE,
+  reviewCode,
   RUNS_KEPT_PER_TASK,
+  SKIP_REASONS,
   type TaskRunDetail,
   type TaskRunSummary,
   type TaskRunsIn,
@@ -32,21 +34,29 @@ export function zoneOf(task: Pick<ProjectTasksTable, "timezone">, panelZone: str
 }
 
 /**
- * The next due instant for a schedule, computed when it is saved.
+ * The next due instant for a schedule, and the zone it was computed in,
+ * worked out when the schedule is saved.
  *
  * Here and not left to the tick: the page shows it as soon as the task is
  * saved, and the tick treats a task with no `next_run_at` as one to schedule,
  * never as one to run — saving a schedule must not fire it.
  */
-export async function nextRunFor(
+export async function scheduleFor(
   task: Pick<ProjectTasksTable, "cron" | "timezone" | "enabled">,
   now = new Date()
-): Promise<string | null> {
-  if (!task.enabled || !task.cron) return null;
+): Promise<Pick<ProjectTasksTable, "next_run_at" | "schedule_zone">> {
+  if (!task.enabled || !task.cron) return { next_run_at: null, schedule_zone: null };
   const parsed = parseCron(task.cron);
-  if (!parsed.ok) return null;
-  const next = nextAfter(parsed.spec, now, zoneOf(task, await panelTimeZone()));
-  return next ? next.toISOString() : null;
+  if (!parsed.ok) return { next_run_at: null, schedule_zone: null };
+  const zone = zoneOf(task, await panelTimeZone());
+  const next = nextAfter(parsed.spec, now, zone);
+  return { next_run_at: next ? next.toISOString() : null, schedule_zone: zone };
+}
+
+/** What a view needs to know about the project: where it runs now, and whether it reaches the host. */
+export interface TaskContext {
+  runsIn: TaskRunsIn;
+  reachesHost: boolean;
 }
 
 // --- Views ---------------------------------------------------------------------------
@@ -87,7 +97,13 @@ export function scheduleWords(cron: string): string {
   return cron ? cronSentence(cron, describeCron(cron)) : cronSentence("");
 }
 
-export function taskView(row: ProjectTasksTable, lastRun: ProjectTaskRunsTable | null, currentRunsIn: TaskRunsIn): TaskView {
+export function taskView(row: ProjectTasksTable, lastRun: ProjectTaskRunsTable | null, ctx: TaskContext): TaskView {
+  const review = reviewCode({
+    savedRunsIn: row.runs_in,
+    currentRunsIn: ctx.runsIn,
+    reachesHost: ctx.reachesHost,
+    hostApproved: row.host_approved === 1,
+  });
   return {
     id: row.id,
     name: row.name,
@@ -99,7 +115,8 @@ export function taskView(row: ProjectTasksTable, lastRun: ProjectTaskRunsTable |
     timeoutSec: row.timeout_sec,
     service: row.service,
     runsIn: row.runs_in,
-    needsReview: row.runs_in !== currentRunsIn,
+    needsReview: review !== null,
+    reviewReason: review ? SKIP_REASONS[review] : null,
     nextRunAt: row.next_run_at,
     consecutiveFailures: row.consecutive_failures,
     lastRun: lastRun ? runSummary(lastRun) : null,
@@ -109,7 +126,7 @@ export function taskView(row: ProjectTasksTable, lastRun: ProjectTaskRunsTable |
 }
 
 /** A project's tasks, oldest first — the order they were added in. */
-export async function listTasks(projectId: string, currentRunsIn: TaskRunsIn): Promise<TaskView[]> {
+export async function listTasks(projectId: string, ctx: TaskContext): Promise<TaskView[]> {
   const db = await getDb();
   const rows = await db
     .selectFrom("project_tasks")
@@ -124,7 +141,7 @@ export async function listTasks(projectId: string, currentRunsIn: TaskRunsIn): P
     : [];
   const byId = new Map(lastRuns.map((run) => [run.id, run]));
 
-  return rows.map((row) => taskView(row, row.last_run_id ? byId.get(row.last_run_id) ?? null : null, currentRunsIn));
+  return rows.map((row) => taskView(row, row.last_run_id ? byId.get(row.last_run_id) ?? null : null, ctx));
 }
 
 export async function getTask(projectId: string, taskId: string): Promise<ProjectTasksTable | null> {
@@ -138,12 +155,26 @@ export async function getTask(projectId: string, taskId: string): Promise<Projec
   return row ?? null;
 }
 
-export async function taskViewOf(task: ProjectTasksTable, currentRunsIn: TaskRunsIn): Promise<TaskView> {
+export async function taskViewOf(task: ProjectTasksTable, ctx: TaskContext): Promise<TaskView> {
   const db = await getDb();
   const last = task.last_run_id
     ? await db.selectFrom("project_task_runs").selectAll().where("id", "=", task.last_run_id).executeTakeFirst()
     : undefined;
-  return taskView(task, last ?? null, currentRunsIn);
+  return taskView(task, last ?? null, ctx);
+}
+
+/** The newest run of a task, whatever it was: what the orphan rule looks at. */
+export async function newestRun(taskId: string): Promise<ProjectTaskRunsTable | null> {
+  const db = await getDb();
+  const row = await db
+    .selectFrom("project_task_runs")
+    .selectAll()
+    .where("task_id", "=", taskId)
+    .where("status", "!=", "skipped")
+    .orderBy("started_at", "desc")
+    .limit(1)
+    .executeTakeFirst();
+  return row ?? null;
 }
 
 export async function countTasks(projectId: string): Promise<number> {

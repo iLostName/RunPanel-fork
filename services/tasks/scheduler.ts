@@ -1,7 +1,7 @@
 import { nextAfter, parseCron } from "@/lib/cron";
 import { getDb, rowCount } from "@/lib/db";
 import type { ProjectTasksTable } from "@/lib/db/schema";
-import { dueVerdict, MAX_PARALLEL_SCHEDULED_RUNS, SKIP_REASONS } from "@/lib/tasks-rules";
+import { MAX_PARALLEL_SCHEDULED_RUNS, planTick, SKIP_REASONS } from "@/lib/tasks-rules";
 import { isTaskRunning, scheduledRunsInFlight, startRun } from "./runner";
 import { panelTimeZone, recordSkip, zoneOf } from "./store";
 
@@ -16,14 +16,17 @@ import { panelTimeZone, recordSkip, zoneOf } from "./store";
  *
  * Never a pile-up. An occurrence is claimed before anything is decided about
  * it, and a claimed occurrence is either run or written down as skipped —
- * never kept for later. One that comes due while the panel was down runs once,
- * late, within the grace `lateGraceMs` allows; past that it is recorded as
- * missed and the schedule carries on from now, however many were missed.
+ * never kept for later. What a tick does with a due task is `planTick` in
+ * `lib/tasks-rules.ts`, the same function the unit suite replays: on time or
+ * late within the grace, it runs; past that, one missed record, and the newest
+ * occurrence that is still within its grace runs instead, however many were
+ * missed in between.
  *
- * The zone is re-read on every tick, which is also what keeps a task that
- * follows the panel's zone honest when that zone changes: a not-yet-due
- * `next_run_at` that no longer matches the schedule is recomputed here, with
- * no hook needed in the settings route.
+ * Cheap for a task that is not due: no cron arithmetic at all, which for a
+ * minute schedule late in the day costs tens of milliseconds a call. The one
+ * thing such a task is checked for is the zone it was scheduled in — the
+ * panel's zone can change under a task that follows it, and the stored
+ * instant then belongs to a clock that is no longer the task's.
  */
 
 const TICK_MS = 30_000;
@@ -101,33 +104,34 @@ async function consider(task: ProjectTasksTable, now: Date, panelZone: string, r
     return;
   }
   const zone = zoneOf(task, panelZone);
-  const upcoming = nextAfter(parsed.spec, now, zone);
+  const next = (fromMs: number): number | null => nextAfter(parsed.spec, new Date(fromMs), zone)?.getTime() ?? null;
 
-  // Never scheduled (written by hand, or by a route that could not compute
-  // it): a next occurrence and nothing else.
-  if (!task.next_run_at) {
-    if (upcoming) await setNext(task, upcoming);
+  // Never scheduled, scheduled in another zone, or a value nobody can read:
+  // a next occurrence from now, and nothing else — rescheduling never runs.
+  const dueMs = task.next_run_at ? Date.parse(task.next_run_at) : NaN;
+  if (!Number.isFinite(dueMs) || task.schedule_zone !== zone) {
+    const upcoming = next(now.getTime());
+    // An expression that can never fire (a 30th of February) stays as it is.
+    if (upcoming === null && task.next_run_at === null && task.schedule_zone === zone) return;
+    if (await setNext(task, upcoming, zone)) result.rescheduled++;
     return;
   }
 
-  const due = Date.parse(task.next_run_at);
-  const following = Number.isFinite(due) ? nextAfter(parsed.spec, new Date(due), zone) : null;
-  const spacing = following ? following.getTime() - due : null;
-  const verdict = dueVerdict(task.next_run_at, now.getTime(), spacing);
-
-  if (verdict === "not-due") {
-    // For a schedule that has not changed, the next occurrence after now IS
-    // the stored one. When they differ the zone or the expression moved under
-    // it, and the stored instant belongs to a schedule that no longer exists.
-    const expected = upcoming ? upcoming.toISOString() : null;
-    if (expected !== task.next_run_at && (await setNext(task, upcoming))) result.rescheduled++;
-    return;
-  }
-
+  const plan = planTick(dueMs, now.getTime(), next);
+  if (plan.kind === "wait") return;
   result.due++;
 
-  if (verdict === "missed") {
-    if (!(await claim(task, upcoming))) return;
+  // Not claimed when the panel is at its limit: still due at the next tick,
+  // and missed only if it stays this busy for longer than the grace.
+  const wantsRun = plan.kind === "run" || plan.catchUp !== null;
+  if (wantsRun && scheduledRunsInFlight() >= MAX_PARALLEL_SCHEDULED_RUNS) {
+    result.deferred++;
+    return;
+  }
+
+  if (!(await claim(task, plan.next))) return;
+
+  if (plan.kind === "missed") {
     await recordSkip(task, {
       trigger: "schedule",
       reason: SKIP_REASONS.missed,
@@ -136,20 +140,26 @@ async function consider(task: ProjectTasksTable, now: Date, panelZone: string, r
     });
     console.log(`[tasks] "${task.name}": esecuzione delle ${task.next_run_at} persa, registrata come saltata`);
     result.missed++;
-    return;
+    if (plan.catchUp === null) return;
   }
 
-  // Not claimed: still due at the next tick, and missed only if the panel
-  // stays this busy for longer than the grace.
-  if (scheduledRunsInFlight() >= MAX_PARALLEL_SCHEDULED_RUNS) {
-    result.deferred++;
-    return;
+  const scheduledFor = new Date(plan.kind === "run" ? plan.scheduledFor : (plan.catchUp as number)).toISOString();
+  try {
+    const outcome = await startRun(task.id, { trigger: "schedule", scheduledFor });
+    if (outcome.status === "started") result.started++;
+    else result.skipped++;
+  } catch (err) {
+    // The occurrence is claimed: whatever went wrong, it leaves a record.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[tasks] "${task.name}": avvio non riuscito:`, message);
+    await recordSkip(task, {
+      trigger: "schedule",
+      reason: `non è partita per un errore del pannello: ${message.slice(0, 200)}`,
+      scheduledFor,
+      keepLast: isTaskRunning(task.id),
+    }).catch(() => {});
+    result.skipped++;
   }
-
-  if (!(await claim(task, upcoming))) return;
-  const outcome = await startRun(task.id, { trigger: "schedule", scheduledFor: task.next_run_at });
-  if (outcome.status === "started") result.started++;
-  else result.skipped++;
 }
 
 /**
@@ -157,12 +167,12 @@ async function consider(task: ProjectTasksTable, now: Date, panelZone: string, r
  * value read. One conditional UPDATE on both drivers; the row count says
  * whether we won.
  */
-async function claim(task: ProjectTasksTable, next: Date | null): Promise<boolean> {
+async function claim(task: ProjectTasksTable, next: number | null): Promise<boolean> {
   if (!task.next_run_at) return false;
   const db = await getDb();
   const result = await db
     .updateTable("project_tasks")
-    .set({ next_run_at: next ? next.toISOString() : null })
+    .set({ next_run_at: next === null ? null : new Date(next).toISOString() })
     .where("id", "=", task.id)
     .where("next_run_at", "=", task.next_run_at)
     .executeTakeFirst();
@@ -170,11 +180,11 @@ async function claim(task: ProjectTasksTable, next: Date | null): Promise<boolea
 }
 
 /** The same conditional write, for a reschedule that runs nothing. */
-async function setNext(task: ProjectTasksTable, next: Date | null): Promise<boolean> {
+async function setNext(task: ProjectTasksTable, next: number | null, zone: string): Promise<boolean> {
   const db = await getDb();
   let query = db
     .updateTable("project_tasks")
-    .set({ next_run_at: next ? next.toISOString() : null })
+    .set({ next_run_at: next === null ? null : new Date(next).toISOString(), schedule_zone: zone })
     .where("id", "=", task.id);
   query = task.next_run_at === null ? query.where("next_run_at", "is", null) : query.where("next_run_at", "=", task.next_run_at);
   return rowCount(await query.executeTakeFirst()) === 1;

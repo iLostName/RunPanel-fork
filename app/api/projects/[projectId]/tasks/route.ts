@@ -3,12 +3,13 @@ import { isDenied, requireProject } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import type { ProjectTasksTable } from "@/lib/db/schema";
+import { hasPermission } from "@/lib/authz";
 import { requireHostIfReaching } from "@/lib/host-guard";
-import { MAX_TASKS_PER_PROJECT, runsInFor, TASK_TIMEOUT_DEFAULT_SEC, type TasksResponse } from "@/lib/tasks-rules";
+import { MAX_TASKS_PER_PROJECT, TASK_TIMEOUT_DEFAULT_SEC, type TasksResponse } from "@/lib/tasks-rules";
 import { generateId } from "@/lib/utils";
 import { taskSchema } from "@/lib/validation";
-import { HOST_WHAT, loadTaskProject, notFound, readJson, serviceProblem, taskRights } from "@/services/tasks/access";
-import { countTasks, listTasks, nextRunFor, panelTimeZone, taskViewOf } from "@/services/tasks/store";
+import { HOST_WHAT, loadTaskProject, notFound, readJson, serviceProblem, taskContext, taskRights } from "@/services/tasks/access";
+import { countTasks, listTasks, panelTimeZone, scheduleFor, taskViewOf } from "@/services/tasks/store";
 import { composeServiceNames } from "@/services/tasks/target";
 
 type Params = { params: Promise<{ projectId: string }> };
@@ -29,11 +30,11 @@ export async function GET(request: NextRequest, { params }: Params) {
   const project = await loadTaskProject(projectId);
   if (!project) return notFound("Progetto");
 
-  const runsIn = runsInFor(project.runtime_type);
+  const ctx = taskContext(project);
   const body: TasksResponse = {
-    tasks: await listTasks(projectId, runsIn),
+    tasks: await listTasks(projectId, ctx),
     panelTimeZone: await panelTimeZone(),
-    runsIn,
+    runsIn: ctx.runsIn,
     runtimeType: project.runtime_type,
     ...taskRights(denied.principal, denied.access, project),
   };
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     const now = nowIso();
+    const ctx = taskContext(project);
     const row: ProjectTasksTable = {
       id: generateId(),
       project_id: projectId,
@@ -88,8 +90,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       enabled: data.enabled === false ? 0 : 1,
       timeout_sec: data.timeoutSec ?? TASK_TIMEOUT_DEFAULT_SEC,
       service: project.runtime_type === "compose" ? (data.service ?? null) : null,
-      runs_in: runsInFor(project.runtime_type),
+      runs_in: ctx.runsIn,
+      // Who wrote the command decides where it may run later: see `reviewCode`.
+      host_approved: hasPermission(denied.principal, "host") ? 1 : 0,
       next_run_at: null,
+      schedule_zone: null,
       last_run_id: null,
       consecutive_failures: 0,
       failure_notified_at: null,
@@ -97,11 +102,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       created_at: now,
       updated_at: now,
     };
-    row.next_run_at = await nextRunFor(row);
+    Object.assign(row, await scheduleFor(row));
 
     const db = await getDb();
     await db.insertInto("project_tasks").values(row).execute();
 
-    return NextResponse.json({ task: await taskViewOf(row, row.runs_in) }, { status: 201 });
+    return NextResponse.json({ task: await taskViewOf(row, ctx) }, { status: 201 });
   });
 }

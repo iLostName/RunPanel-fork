@@ -48,6 +48,7 @@ export async function run({ base, dataDir }) {
   for (const [what, body, message] of [
     ["a task without a name", { name: " ", command: "true", cron: "" }, "Dai un nome all'attività"],
     ["a task without a command", { name: "x", command: "  ", cron: "" }, "Scrivi il comando da eseguire"],
+    ["a command that is only comments", { name: "x", command: "# niente\n# da fare", cron: "" }, null],
     ["a broken schedule", { name: "x", command: "true", cron: "61 * * * *" }, null],
     ["a limit under ten seconds", { name: "x", command: "true", cron: "", timeoutSec: 5 }, null],
     ["a Compose service on a native project", { name: "x", command: "true", cron: "", service: "web" }, null],
@@ -75,7 +76,8 @@ export async function run({ base, dataDir }) {
   res = await api.call(`${url}/${nightly.id}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) });
   r.check("switched on again it has one", res.status === 200 && Boolean(res.body.task.nextRunAt), JSON.stringify(res.body));
 
-  res = await post({ name: "Prova", command: `${node} -e "console.log('ciao'); process.exit(3)"`, cron: "" });
+  // A comment line between the two: it must not swallow the line after it.
+  res = await post({ name: "Prova", command: `# prima riga\n${node} -e "console.log('ciao'); process.exit(3)"`, cron: "" });
   const failing = res.body.task;
   r.check("a task only on request has no next run", res.status === 201 && failing.nextRunAt === null, JSON.stringify(res.body));
 

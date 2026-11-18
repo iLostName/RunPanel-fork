@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireProject } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
+import { hasPermission } from "@/lib/authz";
 import { getDb, nowIso } from "@/lib/db";
 import type { ProjectTasksTable } from "@/lib/db/schema";
 import { requireHostIfReaching } from "@/lib/host-guard";
-import { runsInFor } from "@/lib/tasks-rules";
 import { taskUpdateSchema } from "@/lib/validation";
-import { HOST_WHAT, loadTaskProject, notFound, readJson, serviceProblem } from "@/services/tasks/access";
+import { HOST_WHAT, loadTaskProject, notFound, readJson, serviceProblem, taskContext } from "@/services/tasks/access";
 import { stopForDelete } from "@/services/tasks/runner";
-import { getTask, nextRunFor, runHistory, taskViewOf } from "@/services/tasks/store";
+import { getTask, runHistory, scheduleFor, taskViewOf } from "@/services/tasks/store";
 
 type Params = { params: Promise<{ projectId: string; taskId: string }> };
 
@@ -24,27 +24,31 @@ export async function GET(_request: NextRequest, { params }: Params) {
   if (!task) return notFound("Attività");
 
   return NextResponse.json(
-    { task: await taskViewOf(task, runsInFor(project.runtime_type)), runs: await runHistory(task.id) },
+    { task: await taskViewOf(task, taskContext(project)), runs: await runHistory(task.id) },
     { headers: { "Cache-Control": "no-store" } }
   );
 }
 
 /**
- * Change a task. Every field is optional.
+ * Change a task. Every field is optional, and only what is sent is written:
+ * a field written back as it was read could undo what the scheduler did in
+ * between — `next_run_at` above all, whose claim would be reverted and the
+ * occurrence run twice.
  *
- * Sending the command — the editor always does — is what confirms where it
- * runs: a task saved for a container on a project that has since moved to the
- * host waits, skipped, until somebody with the right to put a command on the
- * host saves it again. Only a change to what runs needs that right: renaming a
- * task, moving its schedule or switching it off is the project's managers'.
- *
- * A run already going keeps the command it started with.
+ * Sending the command — the editor always does — is what confirms it: where it
+ * runs (a task saved for a container on a project since moved to the host
+ * waits, skipped, until it is saved again) and who vouched for it (saved by
+ * someone with the host permission, it may go on running if the project later
+ * starts reaching the host). A run already going keeps the command it started
+ * with.
  */
 export async function PATCH(request: NextRequest, { params }: Params) {
   return withAudit(request, { category: "config", action: "project.task.update", scope: "project", scopeId: async () => (await params).projectId }, async () => {
     const { projectId, taskId } = await params;
     const denied = await requireProject(projectId, "settings");
     if (isDenied(denied)) return denied;
+    const noHost = await requireHostIfReaching(denied.principal, projectId, HOST_WHAT);
+    if (noHost) return noHost;
 
     const read = await readJson(request);
     if (!read.ok) return read.response;
@@ -61,56 +65,37 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (!project) return notFound("Progetto");
     const task = await getTask(projectId, taskId);
     if (!task) return notFound("Attività");
+    const ctx = taskContext(project);
 
-    const touchesCommand = data.command !== undefined || data.service !== undefined;
-    if (touchesCommand) {
-      const noHost = await requireHostIfReaching(denied.principal, projectId, HOST_WHAT);
-      if (noHost) return noHost;
+    const patch: Partial<ProjectTasksTable> = { updated_at: nowIso() };
+    if (data.name !== undefined) patch.name = data.name;
+    if (data.timeoutSec !== undefined) patch.timeout_sec = data.timeoutSec;
+    if (data.command !== undefined) {
+      patch.command = data.command;
+      patch.runs_in = ctx.runsIn;
+      patch.host_approved = hasPermission(denied.principal, "host") ? 1 : 0;
+    }
+    if (data.service !== undefined || data.command !== undefined) {
+      const service = project.runtime_type === "compose" ? (data.service !== undefined ? data.service : task.service) : null;
+      const problem = serviceProblem(project.runtime_type, service);
+      if (problem) return NextResponse.json({ error: problem }, { status: 400 });
+      patch.service = service;
     }
 
-    const merged: ProjectTasksTable = {
-      ...task,
-      name: data.name ?? task.name,
-      command: data.command ?? task.command,
+    const schedule = {
       cron: data.cron ?? task.cron,
       timezone: data.timezone !== undefined ? data.timezone : task.timezone,
       enabled: data.enabled === undefined ? task.enabled : data.enabled ? 1 : 0,
-      timeout_sec: data.timeoutSec ?? task.timeout_sec,
-      service: project.runtime_type === "compose" ? (data.service !== undefined ? data.service : task.service) : null,
-      runs_in: data.command !== undefined ? runsInFor(project.runtime_type) : task.runs_in,
-      updated_at: nowIso(),
     };
-
-    // Asked only when the save is meant to make the task runnable here.
-    if (data.command !== undefined || data.service !== undefined) {
-      const problem = serviceProblem(project.runtime_type, merged.service);
-      if (problem) return NextResponse.json({ error: problem }, { status: 400 });
+    if (schedule.cron !== task.cron || schedule.timezone !== task.timezone || schedule.enabled !== task.enabled) {
+      Object.assign(patch, schedule, await scheduleFor(schedule));
     }
 
-    const scheduleMoved =
-      merged.cron !== task.cron || merged.timezone !== task.timezone || merged.enabled !== task.enabled;
-    if (scheduleMoved) merged.next_run_at = await nextRunFor(merged);
-
     const db = await getDb();
-    await db
-      .updateTable("project_tasks")
-      .set({
-        name: merged.name,
-        command: merged.command,
-        cron: merged.cron,
-        timezone: merged.timezone,
-        enabled: merged.enabled,
-        timeout_sec: merged.timeout_sec,
-        service: merged.service,
-        runs_in: merged.runs_in,
-        next_run_at: merged.next_run_at,
-        updated_at: merged.updated_at,
-      })
-      .where("id", "=", task.id)
-      .execute();
+    await db.updateTable("project_tasks").set(patch).where("id", "=", task.id).execute();
 
-    const fresh = (await getTask(projectId, taskId)) ?? merged;
-    return NextResponse.json({ task: await taskViewOf(fresh, runsInFor(project.runtime_type)) });
+    const fresh = (await getTask(projectId, taskId)) ?? { ...task, ...patch };
+    return NextResponse.json({ task: await taskViewOf(fresh, ctx) });
   });
 }
 
@@ -120,6 +105,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     const { projectId, taskId } = await params;
     const denied = await requireProject(projectId, "settings");
     if (isDenied(denied)) return denied;
+    const noHost = await requireHostIfReaching(denied.principal, projectId, HOST_WHAT);
+    if (noHost) return noHost;
 
     const task = await getTask(projectId, taskId);
     if (!task) return notFound("Attività");

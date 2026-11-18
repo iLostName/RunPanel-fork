@@ -22,6 +22,7 @@ import {
   TASK_TIMEOUT_MAX_SEC,
   TASK_TIMEOUT_MIN_SEC,
 } from "./tasks-rules";
+import { hasRunnableLine } from "./tasks-shell";
 
 
 
@@ -913,13 +914,23 @@ export const cronPreviewSchema = z.object({
  */
 const TIMEOUT_RANGE = `Il tempo massimo va da ${TASK_TIMEOUT_MIN_SEC} secondi a 24 ore`;
 
+const NO_NUL = (value: string) => !value.includes("\u0000");
+
 export const taskSchema = z.object({
-  name: z.string().trim().min(1, "Dai un nome all'attività").max(TASK_NAME_MAX, `Il nome può avere al massimo ${TASK_NAME_MAX} caratteri`),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Dai un nome all'attività")
+    .max(TASK_NAME_MAX, `Il nome può avere al massimo ${TASK_NAME_MAX} caratteri`)
+    .refine(NO_NUL, "Il nome contiene un carattere non valido"),
   command: z
     .string()
     .trim()
     .min(1, "Scrivi il comando da eseguire")
-    .max(TASK_COMMAND_MAX, `Il comando può avere al massimo ${TASK_COMMAND_MAX} caratteri`),
+    .max(TASK_COMMAND_MAX, `Il comando può avere al massimo ${TASK_COMMAND_MAX} caratteri`)
+    .refine(NO_NUL, "Il comando contiene un carattere non valido")
+    // Only comments would run nothing, and the run would "succeed".
+    .refine(hasRunnableLine, "Il comando contiene solo commenti: scrivi almeno una riga da eseguire"),
   /** '' = only when somebody presses "Esegui ora". */
   cron: z.union([z.literal(""), cronExpressionSchema]),
   timezone: timeZoneSchema.nullable().optional(),

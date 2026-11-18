@@ -1,12 +1,16 @@
 import { getDb } from "@/lib/db";
 import type { ProjectTasksTable, ProjectsTable } from "@/lib/db/schema";
+import { projectReachesHost } from "@/lib/host-guard";
 import {
   afterRun,
   decideStart,
   lastMeaningfulLine,
+  orphanDeadline,
   OutputCapture,
   outcomePhrase,
   runsInFor,
+  storableInt,
+  storableText,
   timeoutMessage,
   type SkipCode,
   type TaskRunStatus,
@@ -15,8 +19,8 @@ import {
 import { generateId } from "@/lib/utils";
 import { notify } from "../notify";
 import { busyMessage, isPanelClosing, lockHolder } from "../project-lock";
-import { execInContainer, execOnHost, type ExecOutcome } from "./exec";
-import { insertRunningRow, pruneRuns, recordSkip } from "./store";
+import { BACKSTOP_SEC, execInContainer, execOnHost, type ExecOutcome } from "./exec";
+import { insertRunningRow, newestRun, pruneRuns, recordSkip } from "./store";
 import { resolveTarget, type ExecTarget } from "./target";
 
 /**
@@ -36,15 +40,22 @@ import { resolveTarget, type ExecTarget } from "./target";
  * check and the status sweep look away, and a stop or a restart is refused. A
  * task that held it for an hour would blind both and leave the operator unable
  * to stop their own app. Instead a task never starts while anything holds the
- * project, and gives way the moment something takes it: every second a run
- * looks at the lock — a lookup in a Map — and a deploy, a restart, a stop or a
- * restore starting on the project stops the task first. In a container the
- * deploy is about to replace, or under a checkout it is about to rewrite, the
- * command was going to be cut short or to run against half a version anyway.
+ * project — looked at once more right before the process is spawned — and
+ * gives way the moment something takes it: twice a second a run looks at the
+ * lock, a lookup in a Map, and a deploy, a restart, a stop or a restore
+ * starting on the project stops the task first. In a container the deploy is
+ * about to replace, or under a checkout it is about to rewrite, the command
+ * was going to be cut short or to run against half a version anyway. The same
+ * look sees the panel closing for an update, and stops the run while there is
+ * still a panel to write down that it did.
+ *
+ * What this cannot do is make the deploy wait for the task to be gone: the
+ * lock has no hook for that, and a deploy that starts during a run overlaps
+ * its last moments — the poll and the TERM grace, a few seconds at most.
  */
 
-/** How often a run looks at the project's lock. */
-const LOCK_WATCH_MS = 1_000;
+/** How often a run looks at the project's lock and at the panel closing. */
+const LOCK_WATCH_MS = 500;
 
 interface RunHandle {
   runId: string;
@@ -163,16 +174,27 @@ export async function startRun(
     return { status: "skipped", code, reason };
   };
 
+  // A run a panel restart lost track of may still be going: see `orphanDeadline`.
+  const orphanUntil = orphanDeadline(
+    await newestRun(task.id).then((run) => run && { status: run.status, error: run.error, startedAt: run.started_at }),
+    task.timeout_sec,
+    BACKSTOP_SEC
+  );
+
   // From here to `set` nothing awaits: this is the check-and-reserve.
   const holder = lockHolder(project.id);
   const decision = decideStart({
     alreadyRunning: state.running.has(task.id),
+    orphanUntil,
+    now: Date.now(),
     lockHolder: holder,
     busyMessage: holder ? busyMessage(project.id) : null,
     projectStatus: project.status,
     panelClosing: isPanelClosing(),
     savedRunsIn: task.runs_in,
     currentRunsIn: runsInFor(project.runtime_type),
+    reachesHost: projectReachesHost(project),
+    hostApproved: task.host_approved === 1,
   });
   if (!decision.start) return refuse(decision.code, decision.reason);
 
@@ -230,13 +252,24 @@ export async function startRun(
   return { status: "started", runId: handle.runId };
 }
 
+/** Stop the run when something takes the project, or when the panel starts closing. */
+function giveWay(handle: RunHandle, projectId: string): void {
+  if (isPanelClosing()) {
+    stopHandle(handle, "cancelled", "Fermata: il pannello si stava riavviando");
+    return;
+  }
+  const busy = lockReason(projectId);
+  if (!busy) return;
+  stopHandle(handle, "cancelled", busy.code === "deploying" ? "Fermata: è partito un deploy del progetto" : `Fermata: ${busy.reason}`);
+}
+
 async function execute(handle: RunHandle, task: ProjectTasksTable, project: ProjectsTable, target: ExecTarget): Promise<void> {
   const timer = setTimeout(() => stopHandle(handle, "timed_out", timeoutMessage(task.timeout_sec)), task.timeout_sec * 1000);
-  const watch = setInterval(() => {
-    const busy = lockReason(project.id);
-    if (!busy) return;
-    stopHandle(handle, "cancelled", busy.code === "deploying" ? "Fermata: è partito un deploy del progetto" : `Fermata: ${busy.reason}`);
-  }, LOCK_WATCH_MS);
+  const watch = setInterval(() => giveWay(handle, project.id), LOCK_WATCH_MS);
+  // Once more right before the spawn: writing the run's row took a moment, and
+  // a deploy that took the project meanwhile must not find a command started
+  // under it. A stopped signal is never spawned.
+  giveWay(handle, project.id);
 
   const opts = {
     signal: handle.controller.signal,
@@ -267,6 +300,8 @@ async function execute(handle: RunHandle, task: ProjectTasksTable, project: Proj
  */
 function verdict(handle: RunHandle, outcome: ExecOutcome): { status: TaskRunStatus; error: string | null } {
   if (handle.stop) return { status: handle.stop.status, error: handle.stop.message };
+  // The container refused the exec: the command never ran, so it is not its failure.
+  if (outcome.notStarted) return { status: "skipped", error: outcome.error ?? "il container non ha accettato il comando" };
   if (outcome.exitCode === 0 && !outcome.error) return { status: "succeeded", error: null };
   return {
     status: "failed",
@@ -281,20 +316,28 @@ async function finish(handle: RunHandle, task: ProjectTasksTable, project: Proje
   const finishedAt = Date.now();
 
   // Conditional on still running: a row closed by a recovery, or gone with
-  // its project, is not written over.
-  await db
-    .updateTable("project_task_runs")
-    .set({
-      status,
-      finished_at: new Date(finishedAt).toISOString(),
-      exit_code: outcome.exitCode,
-      output: output || null,
-      output_dropped: handle.output.dropped,
-      error,
-    })
-    .where("id", "=", handle.runId)
-    .where("status", "=", "running")
-    .execute();
+  // its project, is not written over. Every value made storable first — a
+  // NUL in the output, a Windows exit code past 2^31 — and if the store still
+  // refuses the full record, the outcome alone: a row left `running` would be
+  // read later as a run the panel lost, and the streak would never move.
+  const closing = (full: boolean) =>
+    db
+      .updateTable("project_task_runs")
+      .set({
+        status,
+        finished_at: new Date(finishedAt).toISOString(),
+        exit_code: storableInt(outcome.exitCode),
+        output: full && output ? storableText(output) : null,
+        output_dropped: full ? (storableInt(handle.output.dropped) ?? 0) : 0,
+        error: error === null ? (full ? null : "L'output di questa esecuzione non si è potuto salvare") : storableText(error),
+      })
+      .where("id", "=", handle.runId)
+      .where("status", "=", "running")
+      .execute();
+  await closing(true).catch(async (err) => {
+    console.error(`[tasks] Esito completo non salvato per ${handle.runId}:`, err instanceof Error ? err.message : err);
+    await closing(false);
+  });
 
   // Read again rather than trusting the row the run started with: the task
   // may have been renamed meanwhile, or deleted along with its project.
@@ -327,7 +370,7 @@ async function finish(handle: RunHandle, task: ProjectTasksTable, project: Proje
       task: current.name,
       outcome: said.charAt(0).toLowerCase() + said.slice(1),
       exitCode: outcome.exitCode,
-      detail: notice === "failed" ? lastMeaningfulLine(output) : null,
+      detail: notice === "failed" ? lastMeaningfulLine(storableText(output)) : null,
       failures: notice === "recovered" ? previous.consecutiveFailures : streak.consecutiveFailures,
       durationMs: finishedAt - handle.startedAt,
       projectId: project.id,

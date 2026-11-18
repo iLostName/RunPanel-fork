@@ -4,23 +4,31 @@ import { getDb } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
 import { projectReachesHost } from "@/lib/host-guard";
 import { runsInFor } from "@/lib/tasks-rules";
+import type { TaskContext } from "./store";
 
 /**
- * Who may write a task's command, and the bits of the project every route reads.
+ * Who may change a project's tasks, and the bits of the project every route reads.
  *
- * Writing the command of a task is choosing a command the panel will run
- * unattended, so it follows `lib/host-guard.ts` exactly: `manage` on the
+ * A task is a command the panel runs unattended, so changing one follows
+ * `lib/host-guard.ts` the way the one-time commands do: `manage` on the
  * project, plus the `host` permission whenever the project reaches the host —
  * a native runtime runs it as the panel's own user, Compose and a container
  * with host networking, capabilities or bind mounts reach past their
- * container. A plain container stays fully its managers' to automate, the
- * way it stays theirs to configure and deploy. Running a task that exists is
- * `operate`, like a deploy: the command was approved by whoever wrote it.
+ * container. That covers every change, not only the command's text: when,
+ * how long, on or off, and deleting it are decisions about a command on the
+ * host too. A plain container stays fully its managers' to automate, the way
+ * it stays theirs to configure and deploy. Running and stopping a task that
+ * exists is `operate`, like a deploy: whoever saved it had the right.
  */
 
-export const HOST_WHAT = "scrivere i comandi pianificati di questo progetto";
+export const HOST_WHAT = "modificare le attività pianificate di questo progetto";
 
 export type TaskProject = Pick<ProjectsTable, "id" | "name" | "slug" | "runtime_type" | "builder_config">;
+
+/** Where the project's tasks run now, and whether that reaches the host: what a view and a start compare against. */
+export function taskContext(project: Pick<ProjectsTable, "runtime_type" | "builder_config">): TaskContext {
+  return { runsIn: runsInFor(project.runtime_type), reachesHost: projectReachesHost(project) };
+}
 
 export async function loadTaskProject(projectId: string): Promise<TaskProject | null> {
   const db = await getDb();

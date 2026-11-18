@@ -18,7 +18,12 @@ import { Kysely, sql } from "kysely";
  *   runs_in       'container' | 'host', where the command was approved to run.
  *                 A project that moves from a container to the host does not
  *                 take its tasks along silently: they wait to be saved again
+ *   host_approved 0 | 1, whether the command was saved by someone with the
+ *                 host permission. A plain container that later starts
+ *                 reaching the host waits for one of them to save it again
  *   next_run_at   the next due instant, and the scheduler's claim token
+ *   schedule_zone the zone `next_run_at` was computed in: a task that follows
+ *                 the panel's zone notices the zone changed by comparing it
  *   last_run_id   the newest run, whatever it did; no foreign key, the run
  *                 may have been pruned
  *   consecutive_failures, failure_notified_at
@@ -58,7 +63,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("timeout_sec", "integer", (col) => col.notNull().defaultTo(900))
     .addColumn("service", "text")
     .addColumn("runs_in", "text", (col) => col.notNull())
+    .addColumn("host_approved", "integer", (col) => col.notNull().defaultTo(0))
     .addColumn("next_run_at", "text")
+    .addColumn("schedule_zone", "text")
     .addColumn("last_run_id", "text")
     .addColumn("consecutive_failures", "integer", (col) => col.notNull().defaultTo(0))
     .addColumn("failure_notified_at", "text")

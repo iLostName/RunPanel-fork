@@ -870,8 +870,12 @@ export interface ProjectTasksTable {
   service: string | null;
   /** Where the command was saved to run; see `runsInFor` in lib/tasks-rules.ts. */
   runs_in: TaskRunsIn;
+  /** 0 | 1 — saved by someone with the host permission; see `reviewCode`. */
+  host_approved: number;
   /** The next due instant in UTC, and the scheduler's claim token. */
   next_run_at: string | null;
+  /** The zone `next_run_at` was computed in. */
+  schedule_zone: string | null;
   /** The newest run. No foreign key: runs are pruned. */
   last_run_id: string | null;
   consecutive_failures: number;
