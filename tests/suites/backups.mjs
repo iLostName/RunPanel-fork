@@ -111,6 +111,63 @@ export async function run({ base, dataDir }) {
     (listed.body?.destinations ?? []).every((row) => row.config === undefined)
   );
 
+  // --- editing a destination -------------------------------------------------
+  {
+    const id = publicTls.body?.id;
+    const renamed = await api.call(`/api/backups/destinations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: "s3-rinominata" }),
+    });
+    r.check("a destination can be renamed", renamed.status === 200, JSON.stringify(renamed.body));
+    const clash = await api.call(`/api/backups/destinations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: "s3-in-lan" }),
+    });
+    r.check("not onto another one's name", clash.status === 409, String(clash.status));
+
+    const keys = await api.call(`/api/backups/destinations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ config: { region: "eu-west-1", secretAccessKey: "" } }),
+    });
+    r.check("an edit with an empty secret is accepted", keys.status === 200, JSON.stringify(keys.body));
+    const detail = await api.call(`/api/backups/destinations/${id}`);
+    r.check("the edit kept the stored secret", detail.body?.config?.hasSecret === true, JSON.stringify(detail.body));
+    r.check("and never returns it", !JSON.stringify(detail.body).includes("segreto"));
+    r.check("the region changed", detail.body?.config?.region === "eu-west-1", String(detail.body?.config?.region));
+
+    const typeChange = await api.call(`/api/backups/destinations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ type: "local" }),
+    });
+    r.check("the type of a destination does not change", typeChange.status === 400, String(typeChange.status));
+
+    const list = await api.call("/api/backups/destinations");
+    const row = (list.body?.destinations ?? []).find((entry) => entry.id === id);
+    r.check("the list says where it writes", row?.target?.bucket === "archivi", JSON.stringify(row));
+    r.check("but not with which keys", !JSON.stringify(list.body).includes("chiave") && !JSON.stringify(list.body).includes("segreto"));
+
+    const check = await api.call("/api/backups/destinations/check", {
+      method: "POST",
+      body: JSON.stringify({ type: "local" }),
+    });
+    r.check("the local disk checks before saving", check.body?.ok === true, JSON.stringify(check.body));
+    const badCheck = await api.call("/api/backups/destinations/check", {
+      method: "POST",
+      body: JSON.stringify({ type: "s3", config: { ...complete, endpoint: "http://s3.amazonaws.com" } }),
+    });
+    r.check("a check refuses an invalid S3 configuration without storing it", badCheck.body?.ok === false, JSON.stringify(badCheck.body));
+
+    const madeDefault = await api.call(`/api/backups/destinations/${id}/default`, { method: "POST" });
+    r.check("the owner can make it the default", madeDefault.status === 200, JSON.stringify(madeDefault.body));
+    const afterDefault = await api.call("/api/backups/destinations");
+    r.check(
+      "and only one is the default",
+      (afterDefault.body?.destinations ?? []).filter((entry) => entry.isDefault).map((entry) => entry.id).join() === id,
+      JSON.stringify(afterDefault.body?.destinations?.map((entry) => [entry.name, entry.isDefault]))
+    );
+    await api.call(`/api/backups/destinations/${destination.id}/default`, { method: "POST" });
+  }
+
   for (const id of [publicTls.body?.id, lan.body?.id].filter(Boolean)) {
     await api.call(`/api/backups/destinations/${id}`, { method: "DELETE" });
   }
@@ -235,6 +292,110 @@ export async function run({ base, dataDir }) {
     const bytes = Buffer.from(await download.arrayBuffer());
     r.check("the body really is a zip", bytes.subarray(0, 2).toString() === "PK", bytes.subarray(0, 4).toString("hex"));
     r.check("the body is the whole archive", bytes.length === finished.archiveBytes, `${bytes.length}`);
+
+    // --- integrity ------------------------------------------------------------
+    // Read back in the background; on the local disk every member is opened.
+    const verifyStarted = await api.call(`/api/backups/runs/${runId}/verify`, { method: "POST" });
+    r.check("an integrity check starts", verifyStarted.status === 202, JSON.stringify(verifyStarted.body));
+    let verification = null;
+    const verifyDeadline = Date.now() + 60_000;
+    while (Date.now() < verifyDeadline) {
+      const { body } = await api.call(`/api/backups/runs/${runId}/verify`);
+      if (body?.verification && body.verification.status !== "running") {
+        verification = body.verification;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    r.check("a fresh archive is intact", verification?.status === "ok", JSON.stringify(verification));
+    r.check("on the local disk the check is complete", verification?.depth === "full", String(verification?.depth));
+    const runAfterCheck = await api.call(`/api/backups/runs/${runId}`);
+    r.check("the run remembers it", runAfterCheck.body?.verification?.status === "ok", JSON.stringify(runAfterCheck.body?.verification));
+
+    // --- restoring from an uploaded archive -------------------------------------
+    // The download above, sent back in pieces as the browser does.
+    const sendPieces = async (payload, { tamper = false } = {}) => {
+      const created = await api.call("/api/backups/uploads", {
+        method: "POST",
+        body: JSON.stringify({ fileName: "archivio.zip", bytes: payload.length }),
+      });
+      const id = created.body?.upload?.id;
+      const size = created.body?.chunkBytes ?? 8 * 1024 * 1024;
+      const data = Buffer.from(payload);
+      if (tamper) data[Math.floor(data.length / 2)] ^= 0xff;
+      const put = (offset, piece) =>
+        fetch(`${base}/api/backups/uploads/${id}/chunk?offset=${offset}&length=${piece.length}`, {
+          method: "PUT",
+          headers: { cookie: api.cookie, "content-type": "application/octet-stream" },
+          body: piece,
+        });
+      for (let offset = 0; offset < data.length; offset += size) {
+        const res = await put(offset, data.subarray(offset, offset + size));
+        if (!res.ok) return { id, created, failed: res.status };
+      }
+      return { id, created, put };
+    };
+
+    const sent = await sendPieces(bytes);
+    r.check("an upload is announced", sent.created.status === 201, JSON.stringify(sent.created.body).slice(0, 160));
+    r.check("every piece is accepted", !sent.failed, String(sent.failed));
+    if (sent.put) {
+      const again = await sent.put(0, bytes.subarray(0, Math.min(bytes.length, sent.created.body.chunkBytes)));
+      r.check("a piece sent twice is accepted and ignored", again.status === 200, String(again.status));
+      const beyond = await sent.put(bytes.length + 10, Buffer.from("x"));
+      r.check("a piece out of order is refused", beyond.status === 409 || beyond.status === 400, String(beyond.status));
+    }
+    const finishedUpload = await api.call(`/api/backups/uploads/${sent.id}`, { method: "POST" });
+    r.check("finishing starts the check", finishedUpload.status === 202, JSON.stringify(finishedUpload.body).slice(0, 160));
+
+    const waitForUpload = async (id) => {
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        const { body } = await api.call(`/api/backups/uploads/${id}`);
+        if (body?.upload && body.upload.status !== "checking") return body.upload;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      return null;
+    };
+    const ready = await waitForUpload(sent.id);
+    r.check("a whole archive passes the check", ready?.status === "ready", JSON.stringify(ready).slice(0, 240));
+    const storeItem = ready?.artifacts?.find((entry) => entry.kind === "panel-store");
+    r.check("its items are read from its own manifest", Boolean(storeItem), JSON.stringify(ready?.artifacts).slice(0, 200));
+
+    if (storeItem) {
+      const wrong = await api.call("/api/backups/restore", {
+        method: "POST",
+        body: JSON.stringify({
+          uploadId: sent.id,
+          confirm: "qualcos'altro",
+          targets: [{ artifactId: storeItem.id, action: "restore" }],
+        }),
+      });
+      r.check("an upload's restore wants the item's name typed too", wrong.status === 400, JSON.stringify(wrong.body));
+    }
+
+    const damaged = await sendPieces(bytes, { tamper: true });
+    await api.call(`/api/backups/uploads/${damaged.id}`, { method: "POST" });
+    const refused = await waitForUpload(damaged.id);
+    r.check("a damaged archive is refused by the check", refused?.status === "invalid", JSON.stringify(refused).slice(0, 240));
+    if (storeItem && refused) {
+      const fromDamaged = await api.call("/api/backups/restore", {
+        method: "POST",
+        body: JSON.stringify({
+          uploadId: damaged.id,
+          confirm: storeItem.refName,
+          targets: [{ artifactId: storeItem.id, action: "restore" }],
+        }),
+      });
+      r.check("and cannot be restored from", fromDamaged.status === 409, String(fromDamaged.status));
+    }
+
+    for (const id of [sent.id, damaged.id]) {
+      const gone = await api.call(`/api/backups/uploads/${id}`, { method: "DELETE" });
+      r.check("an upload can be deleted", gone.status === 200, String(gone.status));
+    }
+    const afterUploads = await api.call(`/api/backups/uploads/${sent.id}`);
+    r.check("and is gone", afterUploads.status === 404, String(afterUploads.status));
 
     // --- an id that is not an id -------------------------------------------
     for (const hostile of ["..", "../../etc/passwd", "%2e%2e%2fsecret", "notarealid"]) {
@@ -394,6 +555,10 @@ export async function run({ base, dataDir }) {
 
   const afterPolicyDelete = await api.call("/api/backups/policies");
   r.check("and it is gone", afterPolicyDelete.body?.policies?.length === 0);
+
+  // Every restore's safety copy needs somewhere to go.
+  const lastOne = await api.call(`/api/backups/destinations/${destination.id}`, { method: "DELETE" });
+  r.check("the last destination is not deleted", lastOne.status === 409, String(lastOne.status));
 
   if (canDumpStore) {
     // The runs outlive the policy on purpose: their archives are files, and a

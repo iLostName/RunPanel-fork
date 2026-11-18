@@ -107,7 +107,8 @@ export interface TargetCatalog {
  * server, whatever it is called, so it is named for what it is.
  */
 export function destinationPhrase(type: string | null | undefined, name: string | null | undefined): string {
-  if (!type || !name) return "destinazione non più configurata";
+  if (!name) return "destinazione non più configurata";
+  // A server on an older version sends the name without the type: say the name.
   return type === "local" ? "sul disco di questo server" : `su ${name}`;
 }
 
