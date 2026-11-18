@@ -110,6 +110,48 @@ Link other RunPanel installs to this one: the same accounts everywhere, every se
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+### 🧭 A new project in three steps
+Pick the repository or drop a ZIP: the panel recognises the app (Next.js, Vite, Docker, Python, Go…), proposes port, database and address, and puts it online while you follow the first deploy live. If something fails, nothing is left half-made.
+
+</td>
+<td valign="top">
+
+### 🧩 Ready-made apps
+n8n, WordPress, Uptime Kuma, Umami, Ghost, Vaultwarden, Gitea and MinIO in one click: only the questions that matter, generated passwords, database included, first deploy done.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 📈 Metrics, alerts and uptime
+CPU, memory, disk and network history with 1-hour, 24-hour and 7-day charts, alerts when something stays at its limit, and a check every minute that apps answer, with incidents and an uptime figure.
+
+</td>
+<td valign="top">
+
+### 🔔 Alerts where you read them
+Email, Telegram, Discord, Slack, ntfy or a signed webhook, each with its own events, plus a bell in the panel that updates by itself.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🔑 Two-step sign-in
+Authenticator apps with recovery codes, remembered devices and revocable sessions; the owner is recovered from the server's terminal.
+
+</td>
+<td valign="top">
+
+### 🔎 Look inside your databases
+Tables, rows, keys and documents, and read-only queries with row and time limits, from the database page.
+
+</td>
+</tr>
 </table>
 
 ## 📺 Live deploys
@@ -225,6 +267,8 @@ PM2 is **not** vendored: without it you keep to the Docker runtimes, and the Dia
 Everything lives in `.env` (see `.env.example` for the annotated version) and is checked at boot. Without one the panel runs with SQLite in `./data` on port 3000, and generates its encryption key in `data/.secret`: keep that file with your backups, because every stored secret depends on it. Variables, SQLite or Postgres, private registries and reverse proxies are in [Configuration](docs/en/configuration.md).
 
 ## 📚 Documentation
+
+> Already using RunPanel? **[What's new](docs/en/whats-new.md)**: where things moved and what was added.
 
 <table>
 <tr>

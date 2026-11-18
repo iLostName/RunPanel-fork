@@ -110,6 +110,48 @@ Collega altre installazioni di RunPanel a questa: stessi account ovunque, proget
 
 </td>
 </tr>
+<tr>
+<td valign="top">
+
+### 🧭 Nuovo progetto in tre passi
+Scegli il repository o trascina uno ZIP: il pannello riconosce l'app (Next.js, Vite, Docker, Python, Go…), propone porta, database e indirizzo, e la mette online seguendo il primo deploy dal vivo. Se qualcosa non va, non resta niente a metà.
+
+</td>
+<td valign="top">
+
+### 🧩 App pronte da installare
+n8n, WordPress, Uptime Kuma, Umami, Ghost, Vaultwarden, Gitea e MinIO a un clic: solo le domande che servono, password generate, database incluso, primo deploy fatto.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 📈 Metriche, allarmi e uptime
+Storico di CPU, memoria, disco e rete con grafici su 1 ora, 24 ore e 7 giorni, avvisi quando qualcosa resta al limite, e un controllo ogni minuto che le app rispondano, con incidenti e percentuale di uptime.
+
+</td>
+<td valign="top">
+
+### 🔔 Avvisi dove li leggi
+Email, Telegram, Discord, Slack, ntfy o un webhook firmato, ognuno con i suoi eventi, più una campanella nel pannello che si aggiorna da sola.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 🔑 Verifica in due passaggi
+App di autenticazione con codici di recupero, dispositivi ricordati e sessioni revocabili; il proprietario si recupera dal terminale del server.
+
+</td>
+<td valign="top">
+
+### 🔎 Guarda dentro i database
+Tabelle, righe, chiavi e documenti, e query in sola lettura con limiti di righe e di tempo, dalla pagina del database.
+
+</td>
+</tr>
 </table>
 
 ## 📺 Deploy in diretta
@@ -222,6 +264,8 @@ PM2 **non** è incluso: senza, resti sui runtime Docker, e la pagina Diagnostica
 Tutto sta in `.env` (vedi `.env.example` per la versione commentata) ed è controllato all'avvio. Senza, il pannello usa SQLite in `./data` sulla porta 3000 e genera la chiave di cifratura in `data/.secret`: salva quel file insieme ai backup, perché ogni segreto salvato dipende da lui. Variabili, SQLite o Postgres, registry privati e reverse proxy stanno in [Configurazione](docs/it/configuration.md).
 
 ## 📚 Documentazione
+
+> Usi già RunPanel? **[Cosa è cambiato](docs/it/novita.md)**: dove sono finite le cose e cosa c'è di nuovo.
 
 <table>
 <tr>
