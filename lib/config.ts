@@ -19,6 +19,15 @@ export const config = {
   get buildsDir() {
     return path.join(env().dataDir, "builds");
   },
+  /**
+   * One folder per deployed version of a native project, beside `repos/`
+   * rather than inside a checkout: git would see it, and a backup of the
+   * project folder would carry every version's `node_modules`. See
+   * `lib/releases.ts`.
+   */
+  get releasesDir() {
+    return path.join(env().dataDir, "releases");
+  },
   get uploadsDir() {
     return path.join(env().dataDir, "uploads");
   },
@@ -71,6 +80,7 @@ export function ensureDataDirs() {
   const dirs = [
     config.dataDir,
     config.reposDir,
+    config.releasesDir,
     config.buildsDir,
     config.uploadsDir,
     config.logsDir,
