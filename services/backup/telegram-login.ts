@@ -283,7 +283,8 @@ async function exportToken(login: PendingLogin): Promise<void> {
 }
 
 function settle(login: PendingLogin, err: unknown): void {
-  if (login.closed) return;
+  // A late failure of a renewal never undoes a login that already worked.
+  if (login.closed || login.step === "done") return;
   const kind = classifyTelegramError(err).kind;
   // A dropped connection or a slow answer: the next poll tries again.
   if (kind === "network" || kind === "timeout" || kind === "transient") {
@@ -337,7 +338,11 @@ export async function startTelegramLogin(input: {
       // authorization is then one more export away.
       link.client.addEventHandler((update: unknown) => {
         if (update instanceof A.UpdateLoginToken && login.step === "qr" && !login.closed) {
-          void serialize(login, () => exportToken(login)).catch((err) => settle(login, err));
+          // Checked again once its turn comes: a poll may have finished the
+          // login in the meantime, and exporting again then would undo it.
+          void serialize(login, async () => {
+            if (login.step === "qr" && !login.closed) await exportToken(login);
+          }).catch((err) => settle(login, err));
         }
       });
       await exportToken(login);
