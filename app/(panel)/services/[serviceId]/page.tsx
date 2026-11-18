@@ -25,6 +25,7 @@ import { ResourceHeader } from "@/components/resource/ResourceHeader";
 import { serviceLabel } from "@/lib/service-env";
 import { ConnectionPanel } from "./_components/ConnectionPanel";
 import { ConsolePanel } from "./_components/ConsolePanel";
+import { BrowsePanel, canBrowseData } from "./_components/BrowsePanel";
 import { DatabasesPanel } from "./_components/DatabasesPanel";
 import { ServiceOverview } from "./_components/ServiceOverview";
 import { ServiceSettings } from "./_components/ServiceSettings";
@@ -48,6 +49,7 @@ const TABS: readonly TabItem<ServiceTabId>[] = [
   { id: "overview", label: "Panoramica", icon: "solar:widget-2-linear" },
   { id: "connection", label: "Connessione", icon: "solar:link-circle-linear" },
   { id: "console", label: "Console", icon: "solar:monitor-linear" },
+  { id: "data", label: "Dati", icon: "solar:documents-minimalistic-linear" },
   { id: "databases", label: "Database interni", icon: "solar:database-linear" },
   { id: "backup", label: "Backup", icon: "solar:safe-square-linear" },
   { id: "settings", label: "Impostazioni", icon: "solar:settings-linear" },
@@ -97,6 +99,8 @@ export default function ServiceDetailPage() {
   const [fromChoice, setFromChoice] = useState<From | null>(null);
   const [stopOpen, setStopOpen] = useState(false);
   const [activeTab, setActiveTab] = useUrlTab(TAB_IDS, "overview");
+  /** The database the "Dati" tab shows; null is the primary one. */
+  const [browseDatabase, setBrowseDatabase] = useState<string | null>(null);
 
   // The project the service belongs to, if any: without one nothing is
   // injected anywhere, and that is worth saying.
@@ -372,10 +376,29 @@ export default function ServiceDetailPage() {
             onLocalEcho={echo}
           />
         </div>
+        <div {...shown("data")}>
+          <BrowsePanel
+            serviceId={serviceId}
+            type={service.type}
+            running={running}
+            permission={service.permission}
+            active={activeTab === "data"}
+            database={browseDatabase}
+            onDatabaseChange={setBrowseDatabase}
+          />
+        </div>
         <div {...shown("databases")}>
           <DatabasesPanel
             serviceId={service.id}
             type={service.type}
+            onBrowse={
+              canBrowseData(service.permission)
+                ? (name) => {
+                    setBrowseDatabase(name);
+                    setActiveTab("data");
+                  }
+                : undefined
+            }
             // The same host the paste-ready line uses, following the chosen viewpoint.
             host={from === "network" ? service.containerName : from === "container" ? "host.docker.internal" : "localhost"}
             port={from === "network" ? service.internalPort : service.port}

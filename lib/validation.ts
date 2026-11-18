@@ -354,6 +354,89 @@ export const serviceConsoleSchema = z.discriminatedUnion("action", [
 ]);
 
 /**
+ * What the data browser of a database may be asked (`/api/services/[id]/browse`).
+ *
+ * Names here reach the engine as quoted identifiers or hex literals
+ * (`lib/db-browser/sql-build.ts`), so they may contain anything a name can
+ * hold except a NUL. A database is stricter, because it is also an argument
+ * of the client: `psql -d` reads anything with `=` in it, or a URL, as a whole
+ * connection string pointing wherever it likes.
+ */
+const hasControlChar = (value: string) => [...value].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f);
+const browseNameSchema = z
+  .string()
+  .min(1, "Manca il nome")
+  .max(128, "Nome troppo lungo")
+  .refine((value) => !value.includes("\u0000"), "Il nome contiene un carattere non valido");
+const browseDatabaseSchema = z
+  .string()
+  .min(1, "Scegli un database")
+  .max(128, "Nome del database troppo lungo")
+  .refine((value) => !hasControlChar(value), "Il nome del database contiene un carattere non valido")
+  .refine((value) => !value.includes("=") && !value.startsWith("-") && !/^[a-z][a-z0-9+.-]*:\/\//i.test(value), "Nome del database non valido");
+const redisDatabaseSchema = z.string().regex(/^\d{1,3}$/, "Il database Redis è un numero, da 0 a 999");
+const browseOffsetSchema = z.number().int().min(0).max(10_000_000).default(0);
+
+export const browseRequestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("tables"), database: browseDatabaseSchema }),
+  z.object({
+    action: z.literal("rows"),
+    database: browseDatabaseSchema,
+    /** PostgreSQL only; MySQL has no schemas inside a database. */
+    schema: browseNameSchema.nullable().optional(),
+    table: browseNameSchema,
+    offset: browseOffsetSchema,
+  }),
+  z.object({
+    action: z.literal("cell"),
+    database: browseDatabaseSchema,
+    schema: browseNameSchema.nullable().optional(),
+    table: browseNameSchema,
+    column: browseNameSchema,
+    /** The row's handle from the page that showed it. */
+    row: z.string().min(1).max(16_384, "Riga non valida"),
+  }),
+  z.object({
+    action: z.literal("query"),
+    database: browseDatabaseSchema,
+    sql: z.string().min(1, "Scrivi una query").max(20_000, "La query è troppo lunga: al massimo 20.000 caratteri"),
+    offset: browseOffsetSchema,
+  }),
+  z.object({ action: z.literal("keyspace") }),
+  z.object({
+    action: z.literal("keys"),
+    database: redisDatabaseSchema,
+    pattern: z.string().max(512, "Il filtro è troppo lungo").default("*"),
+    cursor: z.string().regex(/^\d{1,20}$/, "Cursore non valido").default("0"),
+  }),
+  z.object({
+    action: z.literal("key"),
+    database: redisDatabaseSchema,
+    /** The key's bytes, base64, as the listing sent them. */
+    key: z.string().min(1).max(8_192, "Chiave troppo lunga"),
+    full: z.boolean().optional(),
+  }),
+  z.object({ action: z.literal("collections"), database: browseDatabaseSchema }),
+  z.object({
+    action: z.literal("documents"),
+    database: browseDatabaseSchema,
+    collection: browseNameSchema,
+    filter: z.string().max(10_000, "Il filtro è troppo lungo").default(""),
+    sort: z.enum(["natural", "newest"]).default("natural"),
+    offset: browseOffsetSchema,
+  }),
+  z.object({
+    action: z.literal("document"),
+    database: browseDatabaseSchema,
+    collection: browseNameSchema,
+    /** `_id` as canonical Extended JSON, from the listing. */
+    id: z.string().min(1).max(2_000, "Identificativo troppo lungo"),
+  }),
+]);
+
+export type BrowseRequest = z.infer<typeof browseRequestSchema>;
+
+/**
  * A directory **on the host** that RunPanel is willing to bind into a container.
  *
  * POSIX absolute, and deliberately nothing else. A Windows path cannot survive
