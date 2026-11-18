@@ -476,6 +476,56 @@ export async function run({ repoRoot }) {
       setEnv();
     }
 
+    // --- the real ssh, where there is one --------------------------------------------
+    //
+    // No server to log into, but enough to know that OpenSSH accepts every
+    // option the driver gives it (an unknown one would be "Bad configuration
+    // option", not the sentences below) and that its real words are recognised.
+    const { whichSync } = await loadTs(repoRoot, "services", "toolchain.ts");
+    if (whichSync("ssh")) {
+      const net = await import("node:net");
+      const tmpDir = fresh("real-ssh-tmp");
+      const listen = (handler) =>
+        new Promise((resolve) => {
+          const server = net
+            .createServer((socket) => {
+              // ssh hangs up abruptly once it has seen enough.
+              socket.on("error", () => {});
+              handler(socket);
+            })
+            .listen(0, "127.0.0.1", () => resolve(server));
+        });
+      const closedPort = await new Promise((resolve) => {
+        const probe = net.createServer().listen(0, "127.0.0.1", () => {
+          const { port } = probe.address();
+          probe.close(() => resolve(port));
+        });
+      });
+      const realDestination = (port) =>
+        sftpDestination({ id: "real", name: "NAS", type: "sftp" }, { host: "127.0.0.1", port, username: "backup", folder: "x", privateKey: pair.privateKey, hostKey: null }, { tmpDir });
+
+      const refused = await realDestination(closedPort).test();
+      r.check("real ssh: every option is accepted, and a closed port is explained", refused.ok === false && refused.code === "REFUSED", JSON.stringify(refused));
+
+      const http = await listen((socket) => socket.end("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"));
+      const notSsh = await realDestination(http.address().port).test();
+      r.check("real ssh: a web server on that port is not taken for SSH", notSsh.ok === false && ["NOT_SSH", "CLOSED"].includes(notSsh.code), JSON.stringify(notSsh));
+      http.close();
+
+      const silent = await listen(() => {});
+      const started = Date.now();
+      const quiet = await sftpDestination(
+        { id: "real", name: "NAS", type: "sftp" },
+        { host: "127.0.0.1", port: silent.address().port, username: "backup", folder: "x", privateKey: pair.privateKey },
+        { tmpDir, connectTimeoutSec: 3 }
+      ).test();
+      r.check("real ssh: a server that never speaks is given up on", quiet.ok === false && ["TIMEOUT", "CLOSED"].includes(quiet.code), `${JSON.stringify(quiet)} after ${Date.now() - started} ms`);
+      silent.close();
+      r.check("real ssh: no key folder left behind", fs.readdirSync(tmpDir).filter((name) => name.startsWith(transport.SSH_FOLDER_PREFIX)).length === 0, fs.readdirSync(tmpDir).join(","));
+    } else {
+      r.note("ssh non installato: le opzioni non sono provate con OpenSSH");
+    }
+
     transport.removeStaleSshFolders(join(scratch, "nothing-here"));
     const staleTmp = fresh("stale");
     fs.mkdirSync(join(staleTmp, `${transport.SSH_FOLDER_PREFIX}left`));
