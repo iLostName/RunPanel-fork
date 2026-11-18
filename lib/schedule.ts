@@ -247,14 +247,15 @@ function weekdayPhrase(days: number[]): string {
 }
 
 /**
- * One sentence, capitalised, for lists and the editor's summary:
- * "Ogni giorno alle 03:00", "Dal lunedì al venerdì alle 02:30".
+ * The schedule as the rest of a sentence, lower case: "ogni giorno alle
+ * 03:00", "dal lunedì al venerdì alle 02:30". What the API returns — the
+ * policy list and the cron preview say it with the same words.
  *
  * `custom` falls back to `fallback` — the server's `describeCron` — or to the
  * expression itself, because a wrong sentence is worse than raw cron.
  */
-export function describeSchedule(schedule: Schedule, fallback?: string): string {
-  const sentence = (() => {
+export function scheduleSentence(schedule: Schedule, fallback?: string): string {
+  return (() => {
     switch (schedule.kind) {
       case "manual":
         return "solo su richiesta";
@@ -276,10 +277,23 @@ export function describeSchedule(schedule: Schedule, fallback?: string): string 
         return fallback?.trim() || schedule.cron;
     }
   })();
-  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
 
-/** The expression in words, through the friendly shapes when it is one of them. */
+export function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** The same sentence, capitalised, to open a line: "Ogni giorno alle 03:00". */
+export function describeSchedule(schedule: Schedule, fallback?: string): string {
+  return capitalize(scheduleSentence(schedule, fallback));
+}
+
+/** An expression as the rest of a sentence, through the friendly shapes when it is one of them. */
+export function cronSentence(expression: string, fallback?: string): string {
+  return scheduleSentence(cronToSchedule(expression), fallback);
+}
+
+/** An expression in words, capitalised. */
 export function describeCronFriendly(expression: string, fallback?: string): string {
   return describeSchedule(cronToSchedule(expression), fallback);
 }

@@ -137,6 +137,10 @@ export async function run({ repoRoot }) {
   r.check("every six hours", say("0 */6 * * *") === "Ogni 6 ore, a partire dalle 00:00", say("0 */6 * * *"));
   r.check("custom uses the fallback", s.describeCronFriendly("0 3,15 * * *", "ogni giorno alle 03:00, 15:00") === "Ogni giorno alle 03:00, 15:00");
   r.check("custom without a fallback shows the expression", say("0 3,15 * * *") === "0 3,15 * * *");
+  // What the API returns, policy list and cron preview alike: the rest of a sentence.
+  r.check("the API wording is lower case", s.cronSentence("0 3 * * *") === "ogni giorno alle 03:00", s.cronSentence("0 3 * * *"));
+  r.check("and manual is the phrase the list always used", s.cronSentence("") === "solo su richiesta");
+  r.check("capitalised only to open a line", s.capitalize(s.cronSentence("0 3 * * 1-5")) === "Dal lunedì al venerdì alle 03:00");
 
   // --- time zones ------------------------------------------------------------
   const zones = s.timeZoneOptions(["Europe/Rome", "America/New_York", "UTC"], ["Europe/Kyiv", null, "Europe/Rome"]);
