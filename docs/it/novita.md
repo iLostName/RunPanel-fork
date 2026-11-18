@@ -41,7 +41,15 @@ Storico di CPU, memoria, disco e rete per il server, i progetti e i database, co
 
 ## Backup
 
-Il backup notturno con un clic include i volumi dei progetti e usa la destinazione predefinita; le destinazioni S3 hanno i provider già pronti (AWS, Cloudflare R2, Backblaze B2, Hetzner, Wasabi, MinIO) e vengono verificate appena salvate.
+- Il backup notturno con un clic include i volumi dei progetti e usa la destinazione predefinita.
+- L'orario si sceglie a parole («ogni giorno alle 03:00», «ogni settimana il lunedì»…), con il cron grezzo in «Avanzate», e il fuso orario da un elenco.
+- Le destinazioni S3 hanno i provider già pronti (AWS, Cloudflare R2, Backblaze B2, Hetzner, Wasabi, MinIO), vengono provate prima di salvarle, si modificano e si eliminano; gli errori di S3 sono spiegati in italiano.
+- **Verifica integrità** su ogni archivio, e il ripristino controlla l'archivio prima di toccare qualcosa. Si può ripristinare anche da un archivio caricato dal computer.
+- La pagina di ogni database mostra i suoi backup, con «Esegui backup ora» e il ripristino.
+
+## Notifiche
+
+Avvisi via email, Telegram, Discord, Slack, ntfy o webhook firmato: per ogni canale si scelgono gli eventi (o «solo quando qualcosa va storto») e c'è «Invia una prova». Nel pannello, la campanella in alto mostra gli avvisi non letti e si aggiorna da sola; **Notifiche** li elenca tutti. Il vecchio bot Telegram diventa il primo canale. Vedi [Notifiche](notifications.md).
 
 ## Account e sicurezza
 

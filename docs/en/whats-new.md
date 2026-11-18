@@ -41,7 +41,15 @@ History of CPU, memory, disk and network for the server, projects and databases,
 
 ## Backups
 
-The one-click nightly backup includes project volumes and uses the default destination; S3 destinations come with ready-made providers (AWS, Cloudflare R2, Backblaze B2, Hetzner, Wasabi, MinIO) and are tested as soon as they are saved.
+- The one-click nightly backup includes project volumes and uses the default destination.
+- The schedule is picked in words ("every day at 03:00", "every Monday"…), with the raw cron under "Avanzate", and the time zone from a list.
+- S3 destinations come with ready-made providers (AWS, Cloudflare R2, Backblaze B2, Hetzner, Wasabi, MinIO), are tested before being saved, can be edited and deleted; S3 errors are explained in Italian.
+- **Verifica integrità** (integrity check) on every archive, and a restore checks the archive before touching anything. An archive uploaded from your computer can be restored too.
+- Each database's page shows its backups, with "Esegui backup ora" (back up now) and restore.
+
+## Notifications
+
+Alerts by email, Telegram, Discord, Slack, ntfy or a signed webhook: each channel picks its events (or "only when something goes wrong") and has "Invia una prova" (send a test). In the panel, the bell at the top shows unread alerts and updates by itself; **Notifiche** lists them all. The old Telegram bot becomes the first channel. See [Notifications](notifications.md).
 
 ## Account and security
 
