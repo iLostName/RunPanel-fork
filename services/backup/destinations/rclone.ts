@@ -113,13 +113,13 @@ export function rcloneEnvironment(remoteEnv: Record<string, string>, base: NodeJ
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
   ];
-  const env: NodeJS.ProcessEnv = {};
+  const env: Record<string, string | undefined> = {};
   for (const key of keep) if (base[key] !== undefined) env[key] = base[key];
   env.PATH = toolchainPath(base.PATH ?? base.Path ?? "");
   env.LC_ALL = "C";
   env.LANG = "C";
   env.RCLONE_CONFIG = process.platform === "win32" ? "NUL" : "/dev/null";
-  return { ...env, ...remoteEnv };
+  return { ...env, ...remoteEnv } as NodeJS.ProcessEnv;
 }
 
 /** `[subcommand, flags…, "--", positional…]`: a positional that starts with `-` stays a positional. */

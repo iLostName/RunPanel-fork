@@ -10,6 +10,7 @@ import type {
 import { generateId } from "@/lib/utils";
 import { formatBytes, formatWhen } from "@/lib/format";
 import { S3Failure } from "@/lib/s3-errors";
+import { DestinationFailure } from "./destinations/problem";
 import { panelVersion } from "@/lib/version";
 import { opsEvents } from "../events";
 import { notify } from "../notify";
@@ -317,7 +318,7 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
     } catch (err) {
       // The sentence a person acts on goes into the run; the provider's own
       // code and words, for whoever reads the log, go there.
-      if (err instanceof S3Failure && err.problem.detail) emit(`  dettaglio: ${err.problem.detail}`);
+      if ((err instanceof S3Failure || err instanceof DestinationFailure) && err.problem.detail) emit(`  dettaglio: ${err.problem.detail}`);
       throw new Error(
         `Salvataggio su «${destination.name}» non riuscito: ${err instanceof Error ? err.message : String(err)}`
       );

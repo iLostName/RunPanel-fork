@@ -52,6 +52,11 @@ export async function register() {
   // And env files a crash left behind: they hold a project's variables in the clear.
   const { removeStaleEnvFiles } = await import("./services/docker/env-file");
   removeStaleEnvFiles();
+  // And the folders an SFTP session keeps its private key in until ssh has
+  // authenticated: a crash in between leaves one behind.
+  const { removeStaleSshFolders } = await import("./services/backup/destinations/ssh-transport");
+  const { config: panelConfig } = await import("./lib/config");
+  removeStaleSshFolders(panelConfig.tmpDir);
 
   const { sealStoredBuildEnv } = await import("./services/build-env");
   await sealStoredBuildEnv().catch((err) => {

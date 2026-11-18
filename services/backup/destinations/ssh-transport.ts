@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { whichSync } from "../../toolchain";
 import { SftpClient, SftpProtocolError, SftpStatusError } from "./sftp-client";
 import { HOST_KEY_ALIAS, knownHostsFor, learnedHostKey } from "./ssh-keys";
 import { describeProtocol, describeSftpStatus, describeSshExit, type SshContext } from "./ssh-errors";
@@ -63,8 +64,38 @@ export interface SessionOptions {
 
 export const SSH_FOLDER_PREFIX = "rp-ssh-";
 
-/** The default when nothing says otherwise: the `ssh` on the PATH. */
-const DEFAULT_COMMAND: SshCommand = { file: "ssh", args: [] };
+/**
+ * The default when nothing says otherwise: the `ssh` on the panel's PATH, as
+ * the toolchain module rebuilds it — a panel started by systemd gets a narrow
+ * one.
+ */
+function defaultCommand(): SshCommand {
+  return { file: whichSync("ssh") ?? "ssh", args: [] };
+}
+
+let cachedSsh: { at: number; tool: { installed: boolean; path: string | null; version: string | null } } | null = null;
+
+/** Whether `ssh` is installed and which, for the form; remembered for a minute. */
+export async function detectSsh(): Promise<{ installed: boolean; path: string | null; version: string | null }> {
+  if (cachedSsh && Date.now() - cachedSsh.at < 60_000) return cachedSsh.tool;
+  const file = whichSync("ssh");
+  let tool: { installed: boolean; path: string | null; version: string | null } = { installed: false, path: null, version: null };
+  if (file) {
+    // `ssh -V` prints to stderr: "OpenSSH_9.6p1 Ubuntu-3ubuntu13.5, OpenSSL 3.0.13 30 Jan 2024".
+    const version = await new Promise<string | null>((resolve) => {
+      let out = "";
+      const child = spawn(file, ["-V"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true, env: sshEnvironment() });
+      child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString("utf8")));
+      child.stderr.on("data", (chunk: Buffer) => (out += chunk.toString("utf8")));
+      child.on("error", () => resolve(null));
+      child.on("close", () => resolve(/OpenSSH_[^\s,]+/.exec(out)?.[0] ?? (out.trim().split("\n")[0] || null)));
+      setTimeout(() => child.kill(), 10_000).unref();
+    });
+    tool = { installed: version !== null, path: file, version };
+  }
+  cachedSsh = { at: Date.now(), tool };
+  return tool;
+}
 
 /** stderr kept for the explanation: the end of it is where ssh says why. */
 const STDERR_LIMIT = 16 * 1024;
@@ -154,17 +185,27 @@ export function sshEnvironment(base: NodeJS.ProcessEnv = process.env): NodeJS.Pr
   return env;
 }
 
-/** At boot, where no session can be running: key folders a killed process never removed. */
+/**
+ * At boot, where no session of this panel can be running: key folders a killed
+ * process never removed. In the system's temporary folder — used only when the
+ * data directory's path cannot be given to ssh — another panel may share it,
+ * so only folders older than an hour go: a session's folder lives seconds.
+ */
 export function removeStaleSshFolders(tmpDir: string): void {
-  for (const base of [tmpDir, os.tmpdir()]) {
+  const sweep = (base: string, olderThanMs: number) => {
     try {
       for (const name of fs.readdirSync(base)) {
-        if (name.startsWith(SSH_FOLDER_PREFIX)) fs.rmSync(path.join(base, name), { recursive: true, force: true });
+        if (!name.startsWith(SSH_FOLDER_PREFIX)) continue;
+        const full = path.join(base, name);
+        if (olderThanMs > 0 && Date.now() - fs.statSync(full).mtimeMs < olderThanMs) continue;
+        fs.rmSync(full, { recursive: true, force: true });
       }
     } catch {
       /* no folder yet */
     }
-  }
+  };
+  sweep(tmpDir, 0);
+  if (path.resolve(tmpDir) !== path.resolve(os.tmpdir())) sweep(os.tmpdir(), 60 * 60 * 1000);
 }
 
 export interface SftpSession {
@@ -227,7 +268,7 @@ export async function openSftpSession(endpoint: SshEndpoint, opts: SessionOption
     fs.chmodSync(dir, 0o700);
     fs.writeFileSync(identity, opts.privateKey.endsWith("\n") ? opts.privateKey : `${opts.privateKey}\n`, { mode: 0o600, flag: "wx" });
     fs.writeFileSync(knownHosts, opts.hostKey ? knownHostsFor(opts.hostKey) : "", { mode: 0o600, flag: "wx" });
-    const command = opts.command ?? DEFAULT_COMMAND;
+    const command = opts.command ?? defaultCommand();
     child = spawn(
       command.file,
       [...command.args, ...sshArguments(endpoint, { identity, knownHosts }, { pinned: Boolean(opts.hostKey), connectTimeoutSec })],

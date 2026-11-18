@@ -1,27 +1,63 @@
+import { config as panelConfig } from "@/lib/config";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { getDb, nowIso } from "@/lib/db";
 import type { BackupDestinationsTable } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
+import { isRemoteType, remoteTarget } from "./kinds";
 import { localDestination } from "./local";
+import { rcloneDestination } from "./rclone";
 import { s3Destination } from "./s3";
+import { sftpDestination } from "./sftp";
+import { webdavDestination } from "./webdav";
 import type { Destination } from "../types";
 
 /**
  * Which transports exist, and how a stored row becomes one.
  *
- * `local` and any S3-compatible object store — S3 itself, R2, B2, MinIO. The
- * row's `config` has been encrypted since the very first migration, which is
- * why adding a transport that needs a secret key changed nothing about storage:
- * a column that is sometimes ciphertext and sometimes not is a column nobody
- * can reason about.
+ * `local`, any S3-compatible object store — S3 itself, R2, B2, MinIO — and the
+ * remote types: an SFTP server or NAS, a WebDAV folder, and every service
+ * rclone speaks. The row's `config` has been encrypted since the very first
+ * migration, which is why adding a transport that needs a secret key changed
+ * nothing about storage: a column that is sometimes ciphertext and sometimes
+ * not is a column nobody can reason about.
  */
 
 type Factory = (row: BackupDestinationsTable, config: Record<string, unknown>) => Destination;
 
+/** The id of the row a check of an unsaved form is built on. */
+const TRANSIENT_ID = "check";
+
 const FACTORIES: Record<string, Factory> = {
   local: (row) => localDestination(row),
   s3: (row, config) => s3Destination(row, config),
+  sftp: (row, config) =>
+    sftpDestination(row, config, {
+      tmpDir: panelConfig.tmpDir,
+      // A check of an unsaved form has no row to pin a host key to.
+      pinHostKey: row.id === TRANSIENT_ID ? undefined : (key) => pinHostKey(row.id, key),
+    }),
+  webdav: (row, config) => webdavDestination(row, config),
+  rclone: (row, config) => rcloneDestination(row, config, { tmpDir: panelConfig.tmpDir }),
 };
+
+/**
+ * Trust on first use, made permanent: the host key an SFTP server proved it
+ * holds, written into the destination's stored config. Never over a key that
+ * is already pinned — a different one is exactly what must keep failing until
+ * a person decides otherwise.
+ */
+async function pinHostKey(id: string, key: string): Promise<void> {
+  const db = await getDb();
+  const row = await db.selectFrom("backup_destinations").selectAll().where("id", "=", id).executeTakeFirst();
+  if (!row) return;
+  const config = destinationConfig(row);
+  if (typeof config.hostKey === "string" && config.hostKey) return;
+  await db
+    .updateTable("backup_destinations")
+    .set({ config: encrypt(JSON.stringify({ ...config, hostKey: key })), updated_at: nowIso() })
+    .where("id", "=", id)
+    .execute();
+}
 
 export function destinationConfig(row: BackupDestinationsTable): Record<string, unknown> {
   try {
@@ -43,9 +79,10 @@ export function buildDestination(row: BackupDestinationsTable): Destination {
  * What may be shown about where a destination writes: never the keys.
  *
  * The access key id is left out too, although it is not the secret half: the
- * list is read by anyone holding `backup`, and only the owner edits.
+ * list is read by anyone holding `backup`, and only the owner edits. The same
+ * goes for the user names of the remote types (kinds.ts).
  */
-export interface DestinationTarget {
+export interface S3Target {
   endpoint: string;
   region: string;
   bucket: string;
@@ -53,7 +90,10 @@ export interface DestinationTarget {
   pathStyle: boolean;
 }
 
+export type DestinationTarget = S3Target | Record<string, unknown>;
+
 export function destinationTarget(row: BackupDestinationsTable): DestinationTarget | null {
+  if (isRemoteType(row.type)) return remoteTarget(row.type, destinationConfig(row));
   if (row.type !== "s3") return null;
   const config = destinationConfig(row);
   const text = (key: string) => (typeof config[key] === "string" ? (config[key] as string) : "");
@@ -108,7 +148,7 @@ export function transientDestination(type: string, config: Record<string, unknow
   if (!factory) throw new Error(`Destinazione di tipo "${type}" non supportata`);
   const now = new Date().toISOString();
   const row: BackupDestinationsTable = {
-    id: "check",
+    id: TRANSIENT_ID,
     name: "verifica",
     type: type as BackupDestinationsTable["type"],
     config: "",
