@@ -188,6 +188,35 @@
   --link: var(--accent);
 }
 
+/* ── Phone shell ─────────────────────────────────────────────────────────────
+ * The measures the fixed bars share with whatever has to keep clear of them.
+ *
+ * The insets are the notch, the rounded corners and the home indicator, which
+ * `viewport-fit=cover` (app/layout.tsx) hands to the page; outside a phone
+ * they are zero, so every rule written with them is a no-op on a desktop. The
+ * bar heights do not include them: whoever stacks on a bar adds the inset
+ * once, at the edge, instead of every bar carrying its own copy.
+ */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  --top-bar-height: 3rem;
+  --tab-bar-height: 3.5rem;
+
+  /* Where toasts sit. Sonner's own 24px on a desktop, as before; on a phone,
+     above the tab bar and the home indicator instead of underneath them. */
+  --toast-offset-bottom: 24px;
+}
+
+@media (width < 48rem) {
+  :root {
+    --toast-offset-bottom: calc(var(--tab-bar-height) + var(--safe-bottom) + 0.75rem);
+  }
+}
+
 /* ── Light theme ─────────────────────────────────────────────────────────────
  * Same variables, on `data-theme="light"` — set from the Chiaro/Scuro/Sistema
  * choice in Impostazioni (lib/theme-mode.ts). Declared after the dark block and
@@ -305,6 +334,42 @@
   :focus-visible {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
+  }
+
+  /* iOS enlarges text on its own when a phone turns sideways; the layout
+     already has a size for that. */
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  /*
+   * Installed, the page should not bounce past its ends: the bounce pulled the
+   * whole page away from under the status bar and showed what is behind it,
+   * which no app does. In a browser tab the bounce stays, because there it is
+   * also pull-to-refresh.
+   */
+  @media (display-mode: standalone) {
+    html,
+    body {
+      overscroll-behavior-y: none;
+    }
+  }
+
+  /*
+   * 16px in every field on a phone. iOS zooms into any field under 16px when it
+   * takes focus and does not zoom back out, so a 14px input left the page
+   * enlarged and sideways after every search. `!important` because the size
+   * usually comes from a utility on the field, and this has to win over all of
+   * them; scoped to touch screens so a narrow desktop window keeps the dense
+   * size.
+   */
+  @media (pointer: coarse) and (width < 48rem) {
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
+    textarea,
+    select {
+      font-size: max(1rem, 16px) !important;
+    }
   }
 }
 
@@ -443,6 +508,187 @@
 }
 
 /*
+ * Chrome that a finger presses: the tab bar, the top bar, the rows of a sheet.
+ *
+ * The grey flash iOS and Android draw on a tapped link reads as a web page;
+ * these controls draw their own pressed state instead. A long press on them
+ * should not open the link preview either — they are buttons that happen to be
+ * links. Only here: in the content, both stay, because there they are how you
+ * copy an address.
+ */
+@utility touch-chrome {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+@layer components {
+  /*
+   * At least 44×44 to a finger, without changing what anything looks like.
+   *
+   * A small button (36px on a phone) or an icon-only one is easy to miss with a
+   * thumb. Its pressable area grows instead of its drawing: an invisible
+   * layer, centred, never smaller than the button itself. Two neighbours
+   * closer than that share the overlap, which beats both being too small.
+   * Touch screens only — a mouse is precise and the desktop stays as it is.
+   */
+  @media (pointer: coarse) {
+    .button::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: max(100%, 44px);
+      height: max(100%, 44px);
+      transform: translate(-50%, -50%);
+    }
+  }
+
+  /*
+   * Dialogs become bottom sheets on a phone.
+   *
+   * Same components and same DOM as on a desktop, only drawn differently below
+   * `md`: a centred card that the keyboard covers and the thumb cannot reach
+   * becomes a sheet along the bottom edge, full width, its buttons under the
+   * thumb. CSS rather than a second component on purpose — a tablet turned
+   * from portrait to landscape crosses the breakpoint, and swapping components
+   * there would throw away what had been typed into the form.
+   *
+   * The palette (`data-placement="top"`) stays at the top, where its field
+   * is, and a full-screen modal stays full screen.
+   *
+   * HeroUI sizes the container to the visual viewport, so when the keyboard
+   * opens the sheet rises above it rather than under it. The strip of page
+   * left visible on top is what says "sheet", and a tap on it closes it.
+   */
+  @media (width < 48rem) {
+    .modal__container:not([data-placement="top"], .modal__container--full),
+    .alert-dialog__container {
+      width: 100%;
+      padding: calc(var(--safe-top) + 2.5rem) 0 0;
+    }
+
+    .modal__container:not([data-placement="top"], .modal__container--full) > .modal__dialog,
+    .alert-dialog__container > .alert-dialog__dialog {
+      width: 100%;
+      max-width: none;
+      max-height: 100%;
+      margin-top: auto;
+      margin-bottom: 0;
+      border-radius: 1rem 1rem 0 0;
+      padding: 0.25rem max(1.25rem, var(--safe-right)) calc(1rem + var(--safe-bottom)) max(1.25rem, var(--safe-left));
+    }
+
+    /* The title is a handle too (components/ui/SheetGrip.tsx): a drag that
+       starts on it must reach the page as pointer moves, not as a scroll. */
+    .modal__dialog:has(> [data-sheet-grip]) > .modal__header,
+    .alert-dialog__dialog:has(> [data-sheet-grip]) > .alert-dialog__header {
+      touch-action: none;
+    }
+
+    /* The buttons share the width and are tall enough for a thumb. */
+    .modal__container:not([data-placement="top"], .modal__container--full) .modal__footer > .button,
+    .alert-dialog__footer > .button {
+      flex: 1 1 0;
+      min-width: 0;
+      height: 2.75rem;
+    }
+
+    /* Sliding up from the edge, the way a sheet arrives; the shade fades on its
+       own, so the sheet itself is never see-through on the way. */
+    .modal__container[data-entering="true"]:not([data-placement="top"], .modal__container--full),
+    .alert-dialog__container[data-entering="true"] {
+      animation: sheet-in 380ms cubic-bezier(0.32, 0.72, 0, 1);
+    }
+
+    .modal__container[data-exiting="true"]:not([data-placement="top"], .modal__container--full),
+    .alert-dialog__container[data-exiting="true"] {
+      animation: sheet-out 240ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+    }
+
+    .modal__backdrop[data-entering="true"],
+    .alert-dialog__backdrop[data-entering="true"] {
+      animation: scrim-in 380ms ease-out;
+    }
+
+    .modal__backdrop[data-exiting="true"],
+    .alert-dialog__backdrop[data-exiting="true"] {
+      animation: scrim-out 240ms ease-in forwards;
+    }
+
+    /* The palette keeps its own entrance, below the notch. */
+    .modal__container[data-placement="top"] {
+      padding-top: calc(var(--safe-top) + 0.75rem);
+    }
+  }
+
+  /* HeroUI's own drawer (the "Altro" sheet, action sheets): clear of the home
+     indicator, and a scroll that ends inside it instead of moving the page. */
+  .drawer__dialog[data-placement="bottom"] {
+    padding-top: 0.5rem;
+    padding-bottom: calc(1rem + var(--safe-bottom));
+    padding-left: max(1.25rem, var(--safe-left));
+    padding-right: max(1.25rem, var(--safe-right));
+    border-start-start-radius: 1rem;
+    border-start-end-radius: 1rem;
+  }
+
+  /*
+   * A row of tabs wider than the screen: it scrolls sideways, settles on a tab
+   * rather than halfway through one, and fades at the edge that has more
+   * (`useTabStrip` sets the attributes). The swipe stays inside the strip — at
+   * its end it would otherwise become the browser's back gesture.
+   */
+  @media (width < 48rem) {
+    .tab-strip {
+      scroll-snap-type: x proximity;
+      scroll-padding-inline: 0.5rem;
+      overscroll-behavior-x: contain;
+      scrollbar-width: none;
+    }
+    .tab-strip::-webkit-scrollbar {
+      display: none;
+    }
+    .tab-strip > * {
+      scroll-snap-align: start;
+    }
+    .tab-strip[data-more-end] {
+      mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+    }
+    .tab-strip[data-more-start] {
+      mask-image: linear-gradient(to left, #000 calc(100% - 2.5rem), transparent);
+    }
+    .tab-strip[data-more-start][data-more-end] {
+      mask-image: linear-gradient(to right, transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
+    }
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes sheet-out {
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes scrim-in {
+  from {
+    background-color: transparent;
+  }
+}
+
+@keyframes scrim-out {
+  to {
+    background-color: transparent;
+  }
+}
+
+/*
  * Motion for whoever asked the system for less of it.
  *
  * The panel pulses status dots, slides drawers and fades toasts. None of that is
@@ -484,7 +730,8 @@
   .nav-progress {
     position: fixed;
     inset-inline: 0;
-    top: 0;
+    /* Under the status bar, not behind it, in the installed app. */
+    top: var(--safe-top);
     z-index: 70;
     height: 2px;
     pointer-events: none;
