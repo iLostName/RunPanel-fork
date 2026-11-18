@@ -127,6 +127,7 @@ Any 2xx is a success. A redirect is not followed (it counts as a failure: use th
 | **Spazio su disco in esaurimento** | See below |
 | **Un'app non risponde** | Two missed health checks in a row (one a minute, for every app with a port), and again once it has answered for a few minutes |
 | **CPU o memoria sopra il 90%** | The server or a project, for at least 5 minutes; again when it is back under 80% for 5 more |
+| **Un'attività pianificata non riesce** | A scheduled task that fails or hits its time limit, at most every 12 hours while it keeps failing, and again when it works ([scheduled tasks](automation.md#scheduled-tasks)) |
 
 What is notified is the moment a threshold is crossed, not the state.
 

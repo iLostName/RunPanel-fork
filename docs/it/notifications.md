@@ -127,6 +127,7 @@ Qualsiasi 2xx è un successo. Un reindirizzamento non viene seguito (conta come 
 | **Spazio su disco in esaurimento** | Vedi sotto |
 | **Un'app non risponde** | Due controlli di salute mancati di fila (uno al minuto, per ogni app con una porta), e di nuovo quando risponde da qualche minuto |
 | **CPU o memoria sopra il 90%** | Del server o di un progetto, per almeno 5 minuti; di nuovo quando torna sotto l'80% per altri 5 |
+| **Un'attività pianificata non riesce** | Un'attività a orario che fallisce o supera il tempo massimo, al massimo ogni 12 ore finché continua, e di nuovo quando torna a riuscire ([attività pianificate](automation.md#attività-pianificate)) |
 
 Viene notificato il momento in cui una soglia viene attraversata, non lo stato.
 
