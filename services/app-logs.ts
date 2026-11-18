@@ -633,6 +633,16 @@ export function startAppLogCollector(): void {
 
 // --- Reading the archive -------------------------------------------------------
 
+/** A read this recent is fresh enough for a request: a search typed key by key is not a docker call per key. */
+const FRESH_MS = 3_000;
+
+/** Read the project before answering, unless it was read a moment ago — and never wait long for it. */
+function freshen(project: ProjectRow): Promise<void> {
+  const known = state.known.get(project.id);
+  if (known && Date.now() - known.collectedAt < FRESH_MS) return Promise.resolve();
+  return withTimeout(collectProject(project), COLLECT_WAIT_MS);
+}
+
 function withTimeout(promise: Promise<unknown>, ms: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -681,7 +691,7 @@ export async function readAppLog(
   project: ProjectRow,
   opts: { limit: number; query?: string; stream?: LogStream }
 ): Promise<AppLogPage> {
-  await withTimeout(collectProject(project), COLLECT_WAIT_MS);
+  await freshen(project);
 
   const handles = await openArchive(project.id);
   const filter = makeLogFilter({ query: opts.query, stream: opts.stream });
@@ -749,7 +759,7 @@ async function firstStoredTime(file: fs.promises.FileHandle): Promise<string | n
  * moment ago and not with whatever the last tick happened to store.
  */
 export async function appLogDownload(project: ProjectRow & { name?: string }): Promise<ReadableStream<Uint8Array>> {
-  await withTimeout(collectProject(project), COLLECT_WAIT_MS);
+  await freshen(project);
 
   const handles = await openArchive(project.id);
   const encoder = new TextEncoder();
