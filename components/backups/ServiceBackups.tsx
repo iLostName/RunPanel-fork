@@ -76,7 +76,17 @@ export function ServiceBackups({ serviceId, className }: { serviceId: string; cl
   const [busy, setBusy] = useState<"now" | "schedule" | null>(null);
   const [restoring, setRestoring] = useState<ServiceBackupsView["runs"][number] | null>(null);
 
-  if (!canBackup) return null;
+  // A tab of its own on the database page: say why it is empty rather than show nothing.
+  if (!canBackup) {
+    return (
+      <Panel className={className}>
+        <PanelHeader title="Backup" description="Le copie di questo database, e come rimetterle." />
+        <p className="text-muted mt-3 text-sm">
+          I backup li vede e li gestisce chi ha il permesso «Backup»: chiedilo a chi amministra il pannello.
+        </p>
+      </Panel>
+    );
+  }
 
   async function backupNow() {
     if (!data) return;
