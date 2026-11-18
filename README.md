@@ -56,7 +56,7 @@ PostgreSQL, MySQL, Redis and MongoDB provisioned as labelled containers with the
 <td valign="top">
 
 ### 💾 Backups that restore
-Scheduled dumps of the databases, of the panel's own store, and of project configuration and volumes, into a single verifiable zip, copied to as many destinations as you list — local disks, S3-compatible buckets, Telegram through your own account (split into parts to fit) — each with its own retention, optionally encrypted with a password of your own.
+Scheduled dumps of the databases, of the panel's own store, and of project configuration and volumes, into a single verifiable zip, copied to as many destinations as you list — local disks, S3-compatible buckets, SFTP servers and NAS, WebDAV folders (Nextcloud and the like), Telegram through your own account (split into parts to fit), and through rclone Google Drive, OneDrive or Dropbox — each with its own retention, optionally encrypted with a password of your own.
 
 </td>
 <td valign="top">
@@ -240,6 +240,7 @@ System, Access and Settings group several pages as tabs, each with its own addre
 | **Node.js** | 20 or newer |
 | **Docker** | for container runtimes, provisioned databases and their backups |
 | **PM2** | for projects with a native runtime (`node`, `static`, `custom`): `npm i -g pm2` |
+| **OpenSSH client**, **rclone** | optional, for SFTP backup destinations and for Google Drive, OneDrive, Dropbox (rclone 1.60 or newer) |
 
 ```bash
 git clone https://github.com/AlessTRV/RunPanel.git

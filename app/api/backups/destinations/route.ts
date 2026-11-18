@@ -14,6 +14,7 @@ import {
   destinationUsage,
   telegramTarget,
 } from "@/services/backup/destinations";
+import { isRemoteType, prepareRemoteConfig } from "@/services/backup/destinations/kinds";
 import { localPathProblem } from "@/services/backup/destinations/local";
 import { TelegramFailure, type TelegramConfig } from "@/services/backup/destinations/telegram";
 import { linkedTelegramLogin, releaseTelegramLogin, suggestedChannelTitle } from "@/services/backup/telegram-login";
@@ -33,8 +34,8 @@ export async function GET() {
 
   // The config is never returned whole: it is ciphertext, and for anything
   // other than `local` it holds the keys. Where it writes is shown — bucket,
-  // region, endpoint — because "su quale bucket?" is the question the list
-  // exists to answer.
+  // region, endpoint; server, folder, host key fingerprint — because "dove
+  // finiscono?" is the question the list exists to answer.
   return NextResponse.json({
     destinations: rows.map((row) => {
       const used = usage.get(row.id);
@@ -150,6 +151,15 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: failure.message, code: failure.code }, { status: 502 });
       }
       loginId = choice.loginId;
+    }
+
+    // The remote types are completed on the way in — a generated key unsealed,
+    // a OneDrive drive looked up — and validated whole (kinds.ts). S3 keeps the
+    // check of its schema above.
+    if (isRemoteType(type)) {
+      const prepared = await prepareRemoteConfig(type, config ?? {}, null, { isOwner: denied.principal.isOwner });
+      if (!prepared.ok) return NextResponse.json({ error: prepared.error }, { status: prepared.status });
+      stored = prepared.config;
     }
 
     const id = generateId();

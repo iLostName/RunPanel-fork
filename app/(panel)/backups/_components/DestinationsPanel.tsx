@@ -23,20 +23,26 @@ import { formatBytes } from "@/lib/format";
 import type { Located } from "@/lib/cluster-merge";
 import { DestinationForm, type DestinationDetail } from "./DestinationForm";
 import { describeDestination } from "./providers";
-import type { DestinationView } from "@/components/backups/types";
+import { remoteIcon, remotePlace, remoteTechnical } from "./destinations/where";
+import type { DestinationView, S3TargetView } from "@/components/backups/types";
 
 type Row = Located<DestinationView>;
 
 /** Where a deleted destination's archives stay, for the sentence that says so. */
 function whereArchivesStay(destination: DestinationView): string {
   if (destination.type === "local") return destination.directory ? `in ${destination.directory}` : "sul disco di questo server";
-  if (destination.type === "s3") return `nel bucket «${destination.target?.bucket ?? ""}»`;
+  if (destination.type === "s3") return `nel bucket «${(destination.target as S3TargetView | null | undefined)?.bucket ?? ""}»`;
   if (destination.type === "telegram") {
     return destination.telegram?.chat === "channel"
       ? `su Telegram, nel canale «${destination.telegram.title ?? ""}»`
       : "su Telegram, nei Messaggi salvati";
   }
-  return `in «${destination.name}»`;
+  return remotePlace(destination) ?? `in «${destination.name}»`;
+}
+
+/** Region, endpoint and prefix: the line expert mode adds under an S3 destination. */
+function s3Technical(target: S3TargetView): string {
+  return ` · ${target.region} · ${target.endpoint}${target.prefix ? ` · /${target.prefix}` : ""}`;
 }
 
 const ICONS: Record<string, string> = {
@@ -277,7 +283,7 @@ export function DestinationsPanel({
         <EmptyState
           icon="solar:folder-linear"
           title="Nessuna destinazione"
-          description="Una destinazione è dove finiscono gli archivi: il disco di questo server, oppure un archivio S3 o Telegram fuori da qui."
+          description="Una destinazione è dove finiscono gli archivi: il disco di questo server, oppure fuori da qui — un archivio S3, Telegram, un NAS, Google Drive."
           className="py-8"
         />
       ) : (
@@ -285,7 +291,7 @@ export function DestinationsPanel({
           {destinations.map((row) => (
             <li key={`${row.memberId}:${row.id}`}>
               <ListRow
-                icon={ICONS[row.type] ?? "solar:cloud-storage-linear"}
+                icon={ICONS[row.type] ?? remoteIcon(row.type) ?? "solar:cloud-storage-linear"}
                 title={row.name}
                 badges={
                   <>
@@ -305,9 +311,9 @@ export function DestinationsPanel({
                         ? row.directory
                           ? ""
                           : " · data/backups/archives"
-                        : row.target
-                          ? ` · ${row.target.region} · ${row.target.endpoint}${row.target.prefix ? ` · /${row.target.prefix}` : ""}`
-                          : ""}
+                        : row.type === "s3" && row.target
+                          ? s3Technical(row.target as S3TargetView)
+                          : (remoteTechnical(row) ?? "")}
                     </Technical>
                   </>
                 }
@@ -371,6 +377,7 @@ export function DestinationsPanel({
           onSaved={onChanged}
           canSetDefault={me.isOwner}
           canChooseFolder={me.isOwner}
+          isOwner={me.isOwner}
         />
       )}
       {editing && (

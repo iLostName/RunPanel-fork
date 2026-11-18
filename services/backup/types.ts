@@ -123,10 +123,13 @@ export interface Destination {
    * The file at `localPath` must be left where it is: a policy with several
    * destinations hands the same staged archive to each of them in turn, and
    * the runner removes it once they have all finished.
+   *
+   * `options.signal` stops an upload in flight, and the same option on `open`
+   * a download: the remote drivers (SFTP, WebDAV, rclone) honour it.
    */
   put(localPath: string, fileName: string, options?: PutOptions): Promise<{ ref: string; bytes: number }>;
   remove(ref: string): Promise<void>;
-  open(ref: string): Promise<Readable>;
+  open(ref: string, options?: { signal?: AbortSignal }): Promise<Readable>;
   stat(ref: string): Promise<DestinationStat>;
   /** Behind the "Verifica" button, so a broken destination is found before the night it matters. */
   test(): Promise<DestinationCheck>;
@@ -176,4 +179,9 @@ export interface DestinationCheck {
   code?: string;
   /** The provider's own words. Never a secret. */
   detail?: string | null;
+  /**
+   * What the check learned that the destination keeps: an SFTP server's host
+   * key on first contact. A form being saved sends it back with the config.
+   */
+  learned?: Record<string, string>;
 }

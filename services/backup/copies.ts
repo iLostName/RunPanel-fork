@@ -11,6 +11,7 @@ import { opsEvents } from "../events";
 import { isPanelClosing, PANEL_CLOSING_MESSAGE } from "../project-lock";
 import { archiveForRestore } from "./archive-source";
 import { buildDestination, destinationFacts } from "./destinations";
+import { DestinationFailure } from "./destinations/problem";
 import { hashFile } from "./integrity";
 import { FREE_SPACE_RESERVE, archiveFileName, assertBackupId, backupLog, freeBytes } from "./paths";
 import type { Destination, DestinationStat } from "./types";
@@ -221,7 +222,7 @@ export async function sendCopies({ runId, file, fileName, bytes, emit, signal }:
     } catch (err) {
       // The sentence a person acts on goes into the copy; the provider's own
       // code and words, for whoever reads the log, go there.
-      if (err instanceof S3Failure && err.problem.detail) emit(`  dettaglio: ${err.problem.detail}`);
+      if ((err instanceof S3Failure || err instanceof DestinationFailure) && err.problem.detail) emit(`  dettaglio: ${err.problem.detail}`);
       const message = err instanceof Error ? err.message : String(err);
       await settle(runId, copy, { status: "failed", error_message: message, finished_at: nowIso() });
       // With one destination the run itself fails with this sentence, and says it.
@@ -503,7 +504,7 @@ async function retry(run: BackupRunsTable, copy: CopyRecord): Promise<void> {
     await syncRunArchive(run.id);
     emit(`  ✓ copia su «${copy.name}» salvata: ${formatBytes(stored.bytes)} — ${stored.ref}`);
   } catch (err) {
-    if (err instanceof S3Failure && err.problem.detail) emit(`  dettaglio: ${err.problem.detail}`);
+    if ((err instanceof S3Failure || err instanceof DestinationFailure) && err.problem.detail) emit(`  dettaglio: ${err.problem.detail}`);
     const message = err instanceof Error ? err.message : String(err);
     await settle(run.id, copy, { status: "failed", error_message: message, finished_at: nowIso() }).catch(() => {});
     emit(`  ✗ copia su «${copy.name}» non riuscita: ${message}`);

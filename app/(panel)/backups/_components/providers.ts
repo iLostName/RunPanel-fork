@@ -10,7 +10,8 @@
  * endpoint, and "Backblaze B2 · runpanel-backups" is what the list should say.
  */
 
-import { telegramWhere, type DestinationView } from "@/components/backups/types";
+import { telegramWhere, type DestinationView, type S3TargetView } from "@/components/backups/types";
+import { remoteWhere } from "./destinations/where";
 
 export type ProviderId = "aws" | "r2" | "b2" | "hetzner" | "wasabi" | "custom";
 
@@ -104,13 +105,14 @@ export function providerLabel(endpoint: string): string {
 /**
  * Where a destination writes, in a few words: "Disco di questo server",
  * "Cartella /mnt/usb, su questo server", "Backblaze B2 · bucket «runpanel»",
- * "Telegram · canale «RunPanel · backup di srv1»". A type this page does not
+ * "Telegram · canale «RunPanel · backup di srv1»", "Server SFTP nas.lan ·
+ * cartella «backup»" (destinations/where.ts). A type this page does not
  * know yet is named by its type, so a new kind of destination shows up in
  * every list without waiting for its own words.
  */
 export function describeDestination(destination: {
   type: string;
-  target?: { endpoint: string; bucket: string } | null;
+  target?: DestinationView["target"];
   directory?: string | null;
   telegram?: DestinationView["telegram"];
 }): string {
@@ -118,8 +120,11 @@ export function describeDestination(destination: {
     return destination.directory ? `Cartella ${destination.directory}, su questo server` : "Disco di questo server";
   }
   if (destination.type === "s3") {
-    return destination.target ? `${providerLabel(destination.target.endpoint)} · bucket «${destination.target.bucket}»` : "Archivio S3";
+    const target = destination.target as S3TargetView | null | undefined;
+    return target ? `${providerLabel(target.endpoint)} · bucket «${target.bucket}»` : "Archivio S3";
   }
   if (destination.type === "telegram") return telegramWhere(destination.telegram ?? null);
+  const remote = remoteWhere(destination);
+  if (remote) return remote;
   return destination.type.charAt(0).toUpperCase() + destination.type.slice(1);
 }

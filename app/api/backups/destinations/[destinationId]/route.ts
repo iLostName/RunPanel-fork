@@ -4,7 +4,7 @@ import { isDenied, requireOwner, requirePermission } from "@/lib/auth-guard";
 import { visiblePolicyIds } from "@/lib/backup-access";
 import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
-import { destinationUpdateSchema, s3ConfigSchema } from "@/lib/validation";
+import { destinationUpdateSchema, s3ConfigInput, s3ConfigSchema } from "@/lib/validation";
 import { syncRunArchive } from "@/services/backup/copies";
 import {
   buildDestination,
@@ -12,6 +12,7 @@ import {
   destinationDirectory,
   destinationUsage,
 } from "@/services/backup/destinations";
+import { isRemoteType, prepareRemoteConfig, remoteEditView } from "@/services/backup/destinations/kinds";
 import { TelegramFailure, readTelegramChat } from "@/services/backup/destinations/telegram";
 import { linkedTelegramLogin, releaseTelegramLogin } from "@/services/backup/telegram-login";
 import { logOutTelegram, relinkTelegramConfig } from "@/services/backup/telegram-setup";
@@ -74,7 +75,9 @@ export async function GET(_request: NextRequest, { params }: Params) {
             // Whether one is stored, never what it is.
             hasSecret: text("secretAccessKey") !== "",
           }
-        : null,
+        : isRemoteType(row.type)
+          ? remoteEditView(row.type, config)
+          : null,
     telegram: row.type === "telegram" ? telegramDetail(config) : null,
   });
 }
@@ -161,6 +164,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         { status: 400 }
       );
     }
+    if (config && row.type === "s3") {
+      // The fields S3 has, and only those: an unknown one is a 400, as it always was.
+      const shape = s3ConfigInput.safeParse(config);
+      if (!shape.success) return NextResponse.json({ error: "Dati non validi", details: shape.error.issues }, { status: 400 });
+    }
 
     const patch: { name?: string; config?: string; updated_at: string } = { updated_at: nowIso() };
 
@@ -178,7 +186,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     // Re-linking Telegram: a finished login replaces the account, and the chat
     // the archives are in stays — or the re-link is refused with the reason.
     let relinked: string | null = null;
-    if (config && row.type === "telegram" && config.loginId) {
+    if (config && isRemoteType(row.type)) {
+      // Merged over the stored config and validated whole; secrets left empty
+      // stay as they are, a host key follows the server it was learned on.
+      const prepared = await prepareRemoteConfig(row.type, config, destinationConfig(row), { isOwner: denied.principal.isOwner });
+      if (!prepared.ok) return NextResponse.json({ error: prepared.error }, { status: prepared.status });
+      patch.config = encrypt(JSON.stringify(prepared.config));
+    } else if (config && row.type === "telegram" && config.loginId) {
       const linked = linkedTelegramLogin(config.loginId, denied.principal.userId);
       if (!linked) {
         return NextResponse.json(
