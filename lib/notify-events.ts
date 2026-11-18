@@ -18,6 +18,8 @@ export const NOTIFY_EVENTS = [
   "backup.finished",
   "panel.update",
   "panel.restarted",
+  "uptime.down",
+  "metrics.high",
 ] as const;
 
 export type NotifyEventKey = (typeof NOTIFY_EVENTS)[number];
@@ -114,6 +116,25 @@ export const NOTIFY_GROUPS: NotifyEventGroup[] = [
       },
     ],
   },
+  {
+    id: "health",
+    label: "Salute delle app",
+    description: "Un'app che non risponde, un server sotto sforzo",
+    events: [
+      {
+        key: "uptime.down",
+        label: "Un'app non risponde",
+        description:
+          "Il pannello chiede ogni minuto la pagina del controllo di salute di ogni app che ha una porta. Ti avvisa dopo due risposte mancate di fila, e di nuovo quando l'app risponde da qualche minuto senza interruzioni.",
+      },
+      {
+        key: "metrics.high",
+        label: "CPU o memoria sopra il 90%",
+        description:
+          "Del server o di un progetto, per almeno 5 minuti di fila. Ti avvisa di nuovo quando torna sotto l'80% per altri 5 minuti, così un picco breve o un valore che oscilla sulla soglia non manda niente.",
+      },
+    ],
+  },
 ];
 
 /** The default selection for a panel that has just connected a bot. */
@@ -126,6 +147,8 @@ export const DEFAULT_NOTIFY_EVENTS: NotifyEventKey[] = [
   "deploy.finished",
   "backup.finished",
   "panel.update",
+  "uptime.down",
+  "metrics.high",
 ];
 
 export function isNotifyEventKey(value: unknown): value is NotifyEventKey {
