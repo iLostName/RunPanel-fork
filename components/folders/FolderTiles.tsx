@@ -202,7 +202,9 @@ function Tile({
         drag && !accepts && !selected && "opacity-50"
       )}
     >
-      <span className="flex min-w-0 items-center gap-3">
+      {/* Icon above the words on a phone, where a tile is too narrow for both
+          side by side without the count wrapping; beside them from `sm` up. */}
+      <span className="flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
         {tile.kind === "folder" ? (
           <FolderIcon hue={tile.hue} open={selected || dropping} />
         ) : (
@@ -216,7 +218,7 @@ function Tile({
             <Icon icon={tile.kind === "all" ? "solar:layers-linear" : "solar:inbox-linear"} width={18} />
           </span>
         )}
-        <span className="min-w-0">
+        <span className="max-w-full min-w-0">
           <span className="text-foreground block truncate text-sm font-medium" title={tile.label}>
             {tile.label}
           </span>
