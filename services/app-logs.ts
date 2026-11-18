@@ -79,8 +79,13 @@ interface ProjectRow {
 /** Ten seconds between reads of PM2's files; containers are read every third tick. */
 const TICK_MS = 10_000;
 const CONTAINER_EVERY_MS = 30_000;
-/** After boot, once Docker has had time to bring its containers back. */
-const FIRST_TICK_MS = 20_000;
+/**
+ * Soon after boot, and before the autostart pass (20 s): it restarts PM2 apps
+ * with `processManager.restart`, which empties their files without a
+ * `process:reset` — and what an app printed before the machine went down is
+ * the line somebody will come looking for.
+ */
+const FIRST_TICK_MS = 5_000;
 const PRUNE_EVERY_MS = 5 * 60_000;
 /** What a request waits for a fresh read before answering with what is stored. */
 const COLLECT_WAIT_MS = 4_000;
