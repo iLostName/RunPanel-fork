@@ -4,16 +4,18 @@ import type { BackupDestinationsTable } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
 import { localDestination } from "./local";
 import { s3Destination } from "./s3";
+import { readTelegramChat, telegramDestination } from "./telegram";
 import type { Destination } from "../types";
 
 /**
  * Which transports exist, and how a stored row becomes one.
  *
- * `local` and any S3-compatible object store — S3 itself, R2, B2, MinIO. The
- * row's `config` has been encrypted since the very first migration, which is
- * why adding a transport that needs a secret key changed nothing about storage:
- * a column that is sometimes ciphertext and sometimes not is a column nobody
- * can reason about.
+ * `local`, any S3-compatible object store — S3 itself, R2, B2, MinIO — and
+ * Telegram through the user's own account. The row's `config` has been
+ * encrypted since the very first migration, which is why adding a transport
+ * that needs a secret key, or a whole account session, changed nothing about
+ * storage: a column that is sometimes ciphertext and sometimes not is a column
+ * nobody can reason about.
  */
 
 type Factory = (row: BackupDestinationsTable, config: Record<string, unknown>) => Destination;
@@ -21,6 +23,7 @@ type Factory = (row: BackupDestinationsTable, config: Record<string, unknown>) =
 const FACTORIES: Record<string, Factory> = {
   local: (row) => localDestination(row),
   s3: (row, config) => s3Destination(row, config),
+  telegram: (row, config) => telegramDestination(row, config),
 };
 
 export function destinationConfig(row: BackupDestinationsTable): Record<string, unknown> {
@@ -63,6 +66,30 @@ export function destinationTarget(row: BackupDestinationsTable): DestinationTarg
     bucket: text("bucket"),
     prefix: text("prefix") || null,
     pathStyle: config.forcePathStyle === true,
+  };
+}
+
+/**
+ * Where a Telegram destination writes, for the list: the chat, never the
+ * session. Which account it is stays with the owner's edit form, like the S3
+ * access key id.
+ */
+export interface TelegramTarget {
+  chat: "channel" | "saved";
+  /** The channel's title; null for Saved Messages. */
+  title: string | null;
+  /** False when the config holds no session: created by hand, or unreadable. */
+  linked: boolean;
+}
+
+export function telegramTarget(row: BackupDestinationsTable): TelegramTarget | null {
+  if (row.type !== "telegram") return null;
+  const config = destinationConfig(row);
+  const chat = readTelegramChat(config.chat);
+  return {
+    chat: chat?.kind ?? "saved",
+    title: chat?.kind === "channel" ? chat.title || null : null,
+    linked: typeof config.session === "string" && config.session !== "",
   };
 }
 
