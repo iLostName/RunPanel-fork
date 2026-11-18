@@ -988,6 +988,15 @@ export const destinationUpdateSchema = z
   })
   .strict();
 
+/** Announcing an archive about to be uploaded in pieces. */
+export const backupUploadSchema = z
+  .object({
+    fileName: z.string().trim().min(1).max(255),
+    /** A terabyte: past that a typo, not a backup. Free space is checked too. */
+    bytes: z.number().int().positive().max(1024 ** 4),
+  })
+  .strict();
+
 export const destinationDefaultSchema = z
   .object({
     /** Point every existing policy at it too, not only the ones created from now on. */

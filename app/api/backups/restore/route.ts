@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db";
 import { restoreRequestSchema } from "@/lib/validation";
 import { RestoreBusyError, startRestore } from "@/services/backup/restore";
 import { activeBackupRunId } from "@/services/backup/runner";
+import { readUpload } from "@/services/backup/uploads";
 
 /**
  * Start a restore.
@@ -82,11 +83,38 @@ export async function POST(request: NextRequest) {
         );
       }
     } else if (data.uploadId) {
-      // An uploaded archive has no catalogue rows to name the target from, so
-      // the confirmation is the archive's own id. Still typed, still checked here.
-      if (data.confirm.trim() !== data.uploadId) {
+      // An uploaded archive is named by its own manifest, read and checked when
+      // it finished arriving: the same confirmation as a run of the catalogue,
+      // the name of the first thing that will be overwritten.
+      const upload = readUpload(data.uploadId);
+      if (!upload) return NextResponse.json({ error: "Archivio caricato non trovato" }, { status: 404 });
+      if (upload.status !== "ready") {
         return NextResponse.json(
-          { error: `Per confermare devi scrivere esattamente: ${data.uploadId}` },
+          {
+            error:
+              upload.status === "invalid"
+                ? `L'archivio caricato non ha superato il controllo: ${upload.message ?? "è danneggiato"}`
+                : "L'archivio caricato non è ancora stato controllato: attendi che il controllo finisca",
+          },
+          { status: 409 }
+        );
+      }
+      const chosen = data.targets.filter((target) => target.action === "restore");
+      const expected = upload.artifacts.find((artifact) => artifact.id === chosen[0]?.artifactId)?.refName;
+      if (!expected) {
+        return NextResponse.json({ error: "L'elemento selezionato non è in questo archivio" }, { status: 400 });
+      }
+      // Restored onto what exists here: an archive from another panel names
+      // projects and services this one has never heard of.
+      if (chosen.some((target) => !target.targetId && upload.artifacts.find((a) => a.id === target.artifactId)?.kind !== "panel-store")) {
+        return NextResponse.json(
+          { error: "Per un archivio caricato scegli, per ogni elemento, dove ripristinarlo" },
+          { status: 400 }
+        );
+      }
+      if (data.confirm.trim() !== expected) {
+        return NextResponse.json(
+          { error: `Per confermare devi scrivere esattamente: ${expected}` },
           { status: 400 }
         );
       }

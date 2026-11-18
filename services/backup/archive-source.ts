@@ -1,7 +1,8 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { Transform, type Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { Readable } from "node:stream";
 
 /**
  * Where a restore reads its archive from.
@@ -11,6 +12,9 @@ import type { Readable } from "node:stream";
  * restore's own staging folder first: extracting entries needs random access
  * to the file, which a network stream cannot give. The staging folder is
  * removed when the restore ends, so the copy goes with it.
+ *
+ * The copy is hashed on its way in, for free: the restore compares it with the
+ * sha256 recorded when the archive was written, before it touches anything.
  *
  * Only `node:` imports, so a standalone suite can load it.
  */
@@ -36,8 +40,8 @@ export async function archiveForRestore(
   ref: string,
   staging: string,
   opts: ArchiveSourceOptions
-): Promise<{ file: string; downloaded: boolean }> {
-  if (destination.type === "local") return { file: opts.localPath(ref), downloaded: false };
+): Promise<{ file: string; downloaded: boolean; sha256: string | null }> {
+  if (destination.type === "local") return { file: opts.localPath(ref), downloaded: false, sha256: null };
 
   if (opts.freeBytes !== null && opts.freeBytes - opts.bytes < opts.reserveBytes) {
     throw new Error("Spazio libero insufficiente per scaricare l'archivio prima del ripristino");
@@ -45,11 +49,18 @@ export async function archiveForRestore(
 
   fs.mkdirSync(staging, { recursive: true });
   const file = path.join(staging, "archive.zip");
+  const hash = crypto.createHash("sha256");
+  const tap = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      hash.update(chunk);
+      callback(null, chunk);
+    },
+  });
   try {
-    await pipeline(await destination.open(ref), fs.createWriteStream(file, { mode: 0o600 }));
+    await pipeline(await destination.open(ref), tap, fs.createWriteStream(file, { mode: 0o600 }));
   } catch (err) {
     fs.rmSync(file, { force: true });
     throw new Error(`Download dell'archivio non riuscito: ${err instanceof Error ? err.message : String(err)}`);
   }
-  return { file, downloaded: true };
+  return { file, downloaded: true, sha256: hash.digest("hex") };
 }

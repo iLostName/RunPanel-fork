@@ -33,6 +33,7 @@ import * as apiTokens from "./031-api-tokens";
 import * as metricSamples from "./033-metric-samples";
 import * as uptime from "./034-uptime";
 import * as twoFactor from "./035-two-factor";
+import * as backupVerifications from "./036-backup-verifications";
 import * as hostRedirect from "./037-host-redirect";
 
 /**
@@ -77,6 +78,7 @@ export const migrations: Record<string, Migration> = {
   "033-metric-samples": metricSamples,
   "034-uptime": uptime,
   "035-two-factor": twoFactor,
+  "036-backup-verifications": backupVerifications,
   "037-host-redirect": hostRedirect,
 };
 

@@ -43,6 +43,10 @@ export interface RunView {
   durationMs: number | null;
   hasArchive: boolean;
   errorMessage: string | null;
+  destinationName?: string | null;
+  destinationType?: string | null;
+  /** The last "Verifica integrità", if one was ever run. */
+  verification?: { status: "ok" | "failed"; checkedAt: string } | null;
 }
 
 export interface ArtifactView {

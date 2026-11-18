@@ -18,6 +18,8 @@ import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatTile } from "@/components/ui/StatTile";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useResource } from "@/lib/hooks/useResource";
+import { useMe } from "@/lib/hooks/useMe";
+import { capitalize } from "@/lib/schedule";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatBytes, formatDuration, formatRelative, formatWhen } from "@/lib/format";
 import { triggerLabel } from "./_components/format";
@@ -88,6 +90,7 @@ export default function BackupsPage() {
   const poll20000 = usePollInterval(20000);
   const poll5000 = usePollInterval(5000);
   const router = useRouter();
+  const me = useMe();
 
   // Solo mode reads this server's routes as always; a cluster reads every
   // server at once and narrows to `?server=` when the URL names one.
@@ -254,6 +257,12 @@ export default function BackupsPage() {
         actions={
           <>
             <ServerFilter />
+            {me.isOwner && (
+              <LinkButton href={href("/backups/upload")} variant="secondary">
+                <Icon icon="solar:upload-minimalistic-linear" width={16} aria-hidden />
+                Ripristina da un archivio
+              </LinkButton>
+            )}
             <LinkButton href={href("/backups/new")}>
               <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
               Nuova pianificazione
@@ -349,7 +358,7 @@ export default function BackupsPage() {
                     </div>
                     {/* When and where first, in a sentence; what, on its own line. */}
                     <p className="text-muted mt-0.5 truncate text-xs">
-                      {policy.schedule}
+                      {capitalize(policy.schedule)}
                       {policy.cron && policy.timezone ? ` (ora di ${policy.timezone})` : ""} ·{" "}
                       {destinationPhrase(policy.destinationType, policy.destinationName)}
                     </p>
@@ -455,11 +464,28 @@ export default function BackupsPage() {
                           <Icon icon="solar:pin-linear" width={14} aria-hidden />
                         </span>
                       )}
+                      {run.verification && (
+                        <span
+                          className={run.verification.status === "ok" ? "text-success" : "text-danger"}
+                          title={
+                            run.verification.status === "ok"
+                              ? `Integrità verificata ${formatWhen(run.verification.checkedAt)}`
+                              : `Verifica non superata ${formatWhen(run.verification.checkedAt)}: archivio danneggiato`
+                          }
+                        >
+                          <Icon
+                            icon={run.verification.status === "ok" ? "solar:shield-check-linear" : "solar:danger-circle-linear"}
+                            width={14}
+                            aria-label={run.verification.status === "ok" ? "Integrità verificata" : "Archivio danneggiato"}
+                          />
+                        </span>
+                      )}
                     </div>
                     <p className="text-muted mt-0.5 truncate text-xs">
                       {formatWhen(run.startedAt)} · {triggerLabel(run.trigger)} ·{" "}
                       {formatDuration(run.durationMs)}
                       {run.archiveBytes ? ` · ${formatBytes(run.archiveBytes)}` : ""}
+                      {run.hasArchive && run.destinationType ? ` · ${destinationPhrase(run.destinationType, run.destinationName)}` : ""}
                       {run.errorMessage ? ` · ${run.errorMessage}` : ""}
                     </p>
                   </div>
@@ -481,8 +507,11 @@ export default function BackupsPage() {
                       isDisabled={run.status === "running"}
                       confirm={{
                         title: "Eliminare questo backup?",
-                        description:
-                          "L'archivio viene cancellato dal disco. Se è l'ultimo riuscito, resti senza un punto di ripristino.",
+                        description: `L'archivio viene cancellato ${
+                          run.destinationType === "s3" && run.destinationName
+                            ? `anche da «${run.destinationName}»`
+                            : "dal disco di questo server"
+                        }. Se è l'ultimo riuscito, resti senza un punto di ripristino.`,
                       }}
                       onConfirm={() => removeRun(run.id, run.memberId)}
                     />
