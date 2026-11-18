@@ -3,6 +3,7 @@ import { promisify } from "util";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import { pathToFileURL } from "url";
 import {
   CURRENT_LINK,
   DEPENDENCY_FILES,
@@ -505,7 +506,15 @@ export async function createRelease(opts: CreateReleaseOptions): Promise<Created
   }
 
   try {
-    await git(root, ["clone", "--quiet", "--no-checkout", "--", opts.source, dir], 300_000);
+    /*
+      On one disk a local clone hard-links the objects, so a version's git costs
+      nothing. From a project folder moved to another disk it would copy all of
+      them, years of history included, into every version: there, one commit's
+      worth over the file transport, which is all a build ever asks git for.
+    */
+    const sameDisk = fs.statSync(opts.source).dev === fs.statSync(root).dev;
+    const from = sameDisk ? ["--", opts.source] : ["--depth", "1", "--", pathToFileURL(opts.source).href];
+    await git(root, ["clone", "--quiet", "--no-checkout", ...from, dir], 300_000);
     await git(dir, ["reset", "--quiet"]);
     const origin = (await git(opts.checkout, ["remote", "get-url", "origin"]).catch(() => "")).trim();
     if (origin) await git(dir, ["remote", "set-url", "origin", origin]);
