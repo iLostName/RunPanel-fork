@@ -45,6 +45,12 @@ export class PanelCallError extends Error {}
  * Off limits to tools: signing in and out, the endpoints only another member
  * of the cluster or GitHub calls, the browser's own forward and upload, the
  * token management (a token cannot manage tokens anyway) and this endpoint.
+ *
+ * And the data browser of a database. Its answers are the rows themselves,
+ * and through a tool they would land in an assistant's context, at its
+ * provider, as a side effect of a generic `api_request`. The console a tool
+ * may open answers on a stream no tool can read, so today no tool reads a
+ * table; letting one do so should be its own decision, with its own switch.
  */
 const BLOCKED = [
   /^\/api\/auth\//,
@@ -54,6 +60,7 @@ const BLOCKED = [
   /^\/api\/mcp$/,
   /^\/api\/api-tokens$/,
   /^\/api\/cluster\/(join|directory|leave|ping|secret|folders\/sync)$/,
+  /^\/api\/services\/[^/]+\/browse$/,
 ];
 
 const MAX_BODY_CHARS = 120_000;

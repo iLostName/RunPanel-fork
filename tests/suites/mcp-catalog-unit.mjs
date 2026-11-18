@@ -21,6 +21,8 @@ const INTERNAL = [
   /^mcp$/,
   /^api-tokens$/,
   /^cluster\/(join|directory|leave|ping|secret|folders\/sync)$/,
+  // The data browser: rows are not for an assistant's context (services/mcp/panel-api.ts).
+  /^services\/\[serviceId\]\/browse$/,
 ];
 
 const HANDLER = /export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(/g;
