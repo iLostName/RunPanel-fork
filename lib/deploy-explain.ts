@@ -18,6 +18,21 @@
 
 export type DeployPhase = "queued" | "source" | "build" | "start" | "health" | "done" | "failed";
 
+/**
+ * Whether a deployment row is one that worked.
+ *
+ * The table has no "success": a deploy that passed is `running` while it is
+ * the live version and `superseded` once a newer one replaced it.
+ */
+export function deploymentSucceeded(status: string): boolean {
+  return status === "running" || status === "superseded";
+}
+
+/** Whether a deployment row is still in progress. */
+export function deploymentActive(status: string): boolean {
+  return status === "pending" || status === "building";
+}
+
 /** The phases a deploy walks through, in order, with their plain names. */
 export const DEPLOY_PHASES: { id: Exclude<DeployPhase, "queued" | "done" | "failed">; label: string }[] = [
   { id: "source", label: "Scarico il codice" },

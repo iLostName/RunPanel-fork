@@ -13,7 +13,7 @@ export const meta = { name: "deploy-explain-unit", needsDocker: false, drivers: 
 
 export async function run({ repoRoot }) {
   const r = createReporter("deploy-explain-unit");
-  const { explainDeployError, deployPhase } = await import(pathToFileURL(join(repoRoot, "lib", "deploy-explain.ts")).href);
+  const { explainDeployError, deployPhase, deploymentSucceeded, deploymentActive } = await import(pathToFileURL(join(repoRoot, "lib", "deploy-explain.ts")).href);
   const code = (message, log) => explainDeployError(message, log).code;
 
   r.check("cancelled", code("Deploy interrotto dall'operatore") === "cancelled");
@@ -42,6 +42,9 @@ export async function run({ repoRoot }) {
   r.check("phase: health check", deployPhase("--- Fetching source ---\n--- Building ---\n--- Starting application ---\n--- Health check ---") === "health");
   r.check("phase: done", deployPhase("--- Health check ---\nok\n\n=== Deploy successful ===") === "done");
   r.check("phase: failed wins", deployPhase("--- Building ---\n\n=== Deploy FAILED: Build failed ===") === "failed");
+
+  r.check("a live or replaced deploy is one that worked", deploymentSucceeded("running") && deploymentSucceeded("superseded") && !deploymentSucceeded("failed") && !deploymentSucceeded("success"));
+  r.check("only pending and building are in progress", deploymentActive("pending") && deploymentActive("building") && !deploymentActive("running") && !deploymentActive("failed"));
 
   return r.result();
 }

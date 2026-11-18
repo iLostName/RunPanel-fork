@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import { useServerHref } from "@/lib/hooks/useNode";
 import { LAUNCH_STEP_LABEL } from "@/lib/new-project-plan";
-import type { DeployFix } from "@/lib/deploy-explain";
+import { deploymentSucceeded, type DeployFix } from "@/lib/deploy-explain";
 import type { LaunchProgress, StepState } from "./useLaunch";
 
 /**
@@ -146,7 +146,7 @@ export function LaunchView({
           <LiveDeploy
             key={progress.deploymentId}
             deploymentId={progress.deploymentId}
-            onSettled={(deployment) => setSettled({ id: deployment.id, ok: deployment.status === "success" })}
+            onSettled={(deployment) => setSettled({ id: deployment.id, ok: deploymentSucceeded(deployment.status) })}
             renderFixes={(explanation) => (
               <>
                 {explanation.fixes.map(fixButton)}

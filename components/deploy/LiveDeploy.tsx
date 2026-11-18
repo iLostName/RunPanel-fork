@@ -6,12 +6,13 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
 import { Advanced } from "@/components/ui/Technical";
 import { Hint } from "@/components/ui/Hint";
-import { statusMeta } from "@/lib/status";
 import { formatDurationBetween } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   DEPLOY_PHASES,
   deployPhase,
+  deploymentActive,
+  deploymentSucceeded,
   explainDeployError,
   type DeployErrorExplanation,
   type DeployPhase,
@@ -65,7 +66,7 @@ export function LiveDeploy({
     settledRef.current = onSettled;
   }, [onSettled]);
 
-  const active = view ? Boolean(statusMeta(view.status).active) : true;
+  const active = view ? deploymentActive(view.status) : true;
 
   useEffect(() => {
     let stopped = false;
@@ -80,8 +81,8 @@ export function LiveDeploy({
           if (stopped) return;
           setView(data);
           setConnection(null);
-          if (!statusMeta(data.status).active) {
-            const failed = data.status === "failed" || data.status === "error";
+          if (!deploymentActive(data.status)) {
+            const failed = data.status === "failed";
             settledRef.current?.(data, failed ? explainDeployError(data.error_message, data.build_log) : null);
             return;
           }
@@ -111,9 +112,9 @@ export function LiveDeploy({
   }, [active]);
 
   const phase: DeployPhase = view
-    ? view.status === "success"
+    ? deploymentSucceeded(view.status)
       ? "done"
-      : view.status === "failed" || view.status === "error"
+      : view.status === "failed"
         ? "failed"
         : deployPhase(view.build_log)
     : "queued";
