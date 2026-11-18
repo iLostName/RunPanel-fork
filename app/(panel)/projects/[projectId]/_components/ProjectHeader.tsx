@@ -1,87 +1,106 @@
 "use client";
 
-import { memo } from "react";
-import Link from "next/link";
-import { Button, Dropdown } from "@heroui/react";
+import { memo, useState } from "react";
+import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { StatusBadge } from "@/components/StatusBadge";
+import { ResourceHeader, type ResourceMenuItem } from "@/components/resource/ResourceHeader";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Technical } from "@/components/ui/Technical";
 import { phaseLabel } from "@/lib/deploy-phases";
+import { runtimeLabel } from "@/lib/labels";
 import { useServerHref } from "@/lib/hooks/useNode";
-import type { Project } from "./types";
+import { exportProjectConfig, projectHasSource } from "./project-facts";
+import type { Project, SettingsSectionId, TabId } from "./types";
 
 /**
  * Title, identity and the controls that act on the whole project.
  *
- * Which controls appear is derived from the project's status rather than shown
- * disabled: a Stop button on a stopped project is noise.
- *
- * Two buttons stay in sight — Deploy, and the one state change that fits the
- * status (Avvia or Riavvia) — and the rest sit under "Altro". Up to seven
- * buttons used to sit here, and on a phone they took two rows above a stats
- * strip that pushed the log below the fold.
+ * The primary action follows the project: "Deploy" once it has a source,
+ * "Scegli la sorgente" before. "Avvia" only appears once a deploy has worked,
+ * because starting means going back to the last version that did, and before
+ * the first one there is none. Stop asks first: it takes the app offline.
  */
 export const ProjectHeader = memo(function ProjectHeader({
   project,
   busy,
   onDeploy,
   onControl,
-  onOpenSettings,
+  onRename,
   onOpenVersions,
   onReleasePin,
+  onGoTo,
 }: {
   project: Project;
   busy: boolean;
   onDeploy: (mode: "deploy" | "rebuild") => void;
   onControl: (action: "start" | "stop" | "restart") => void;
-  onOpenSettings: () => void;
+  onRename: (name: string) => Promise<boolean>;
   onOpenVersions: () => void;
   onReleasePin: () => void;
+  onGoTo: (tab: TabId, section?: SettingsSectionId) => void;
 }) {
   const href = useServerHref();
+  const [stopOpen, setStopOpen] = useState(false);
+
   const deploying = project.status === "deploying";
   // Read-only accounts see the state, not the controls: the server refuses
   // them anyway, and a row of buttons that only error is worse than none.
   const canOperate = project.permission?.level !== "read";
-  const canStop = project.status === "running" || project.status === "error";
-  const canStart = project.status === "stopped" || project.status === "error";
+  const canManage = (project.permission?.level ?? "manage") === "manage";
+  const hasSource = projectHasSource(project);
+  const running = project.status === "running";
+  const canStop = running || project.status === "error";
+  const canStart = (project.status === "stopped" || project.status === "error") && Boolean(project.last_success_at);
   const canPickVersion = project.source_type === "github" && Boolean(project.source_url);
+  const address = project.hosts?.[0] ?? null;
 
   /*
     A queue nobody is reminded of is a queue that runs weeks later, on a
     deploy triggered by somebody who never put anything in it. So it is said
-    next to the button that will run it, and not only on the tab where it was
-    written.
+    next to the button that will run it, and not only where it was written.
   */
   const oneTime = project.oneTimeCommands ?? [];
   const oneTimePhases = [...new Set(oneTime.map((command) => command.phase))];
 
-  return (
-    <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-      <div className="flex min-w-0 items-start gap-3">
-        <Link
-          href={href("/projects")}
-          aria-label="Torna ai progetti"
-          className="text-muted hover:text-foreground hover:bg-surface-hover mt-0.5 rounded-[var(--radius)] p-1.5 transition-colors"
-        >
-          <Icon icon="solar:arrow-left-linear" width={18} />
-        </Link>
+  const menu: ResourceMenuItem[] = canOperate
+    ? [
+        ...(canPickVersion
+          ? [{ id: "versions", label: "Scegli la versione da distribuire", icon: "solar:branching-paths-up-linear", disabled: busy || deploying, onAction: onOpenVersions }]
+          : []),
+        ...(hasSource
+          ? [{ id: "rebuild", label: "Ricostruisci da zero", icon: "solar:refresh-circle-linear", disabled: busy || deploying, onAction: () => onDeploy("rebuild") }]
+          : []),
+        ...(project.pinned_sha
+          ? [{ id: "release", label: "Torna all'ultimo commit", icon: "solar:rewind-back-linear", disabled: busy || deploying, onAction: onReleasePin }]
+          : []),
+        ...(canStop && canStart
+          ? [{ id: "restart", label: "Riavvia", icon: "solar:refresh-linear", onAction: () => onControl("restart") }]
+          : []),
+        ...(canManage
+          ? [
+              { id: "export", label: "Esporta configurazione", icon: "solar:download-minimalistic-linear", onAction: () => exportProjectConfig(project) },
+              { id: "delete", label: "Elimina il progetto", icon: "solar:trash-bin-minimalistic-linear", danger: true, onAction: () => onGoTo("settings", "danger") },
+            ]
+          : []),
+      ]
+    : [];
 
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-foreground truncate text-2xl font-semibold tracking-tight">
-              {project.name}
-            </h1>
-            <StatusBadge status={project.status} />
+  return (
+    <>
+      <ResourceHeader
+        backHref={href("/projects")}
+        backLabel="Torna ai progetti"
+        name={project.name}
+        onRename={canManage ? onRename : undefined}
+        status={project.status}
+        badges={
+          <>
             {/* Next to the status because it qualifies it: the app is running,
                 but not from where the branch says. */}
             {project.pinned_sha && (
               <span
-                title={
-                  project.pinned_at
-                    ? `Fermo dal ${new Date(project.pinned_at).toLocaleString()}`
-                    : undefined
-                }
-                className="border-warning/35 text-warning inline-flex items-center gap-1 rounded-[var(--radius)] border px-1.5 py-0.5 text-meta"
+                title={project.pinned_at ? `Fermo dal ${new Date(project.pinned_at).toLocaleString()}` : undefined}
+                className="border-warning/35 text-warning text-meta inline-flex items-center gap-1 rounded-[var(--radius)] border px-1.5 py-0.5"
               >
                 <Icon icon="solar:pin-linear" width={12} aria-hidden />
                 Fermo su <span className="font-mono">{project.pinned_sha.slice(0, 7)}</span>
@@ -89,144 +108,108 @@ export const ProjectHeader = memo(function ProjectHeader({
             )}
             {oneTime.length > 0 && (
               <span
-                title={oneTimePhases.map(phaseLabel).join(', ')}
-                className="border-accent/35 text-accent inline-flex items-center gap-1 rounded-[var(--radius)] border px-1.5 py-0.5 text-meta"
+                title={oneTimePhases.map(phaseLabel).join(", ")}
+                className="border-accent/35 text-accent text-meta inline-flex items-center gap-1 rounded-[var(--radius)] border px-1.5 py-0.5"
               >
                 <Icon icon="solar:bolt-circle-linear" width={12} aria-hidden />
-                {oneTime.length === 1
-                  ? "1 comando una tantum"
-                  : `${oneTime.length} comandi una tantum`}
-                {oneTimePhases.length === 1
-                  ? ` · ${phaseLabel(oneTimePhases[0])}`
-                  : ` · ${oneTimePhases.length} passi`}
+                {oneTime.length === 1 ? "1 comando una tantum" : `${oneTime.length} comandi una tantum`}
               </span>
             )}
-            {(project.permission?.level ?? "manage") === "manage" && (
-              // It opens the rename dialog, so it says so: as a gear labelled
-              // "Impostazioni" it competed with the Impostazioni tab below.
-              <button
-                type="button"
-                onClick={onOpenSettings}
-                className="text-muted hover:text-foreground rounded-[var(--radius)] p-1 transition-colors"
-                aria-label="Rinomina il progetto"
-                title="Rinomina"
-              >
-                <Icon icon="solar:pen-linear" width={15} aria-hidden />
-              </button>
+          </>
+        }
+        meta={
+          <>
+            <span>{runtimeLabel(project.runtime_type)}</span>
+            <span aria-hidden>·</span>
+            {project.source_type === "github" && project.repo ? (
+              <span className="font-mono">
+                {project.repo}
+                <span className="text-muted"> @ {project.source_branch}</span>
+              </span>
+            ) : project.source_type === "github" ? (
+              <span>Sorgente da scegliere</span>
+            ) : (
+              <span>Da archivio ZIP</span>
             )}
-          </div>
-
-          <p className="text-muted mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-            <span className="font-mono">{project.runtime_type}</span>
-            <span aria-hidden>·</span>
-            <span className="font-mono">:{project.port ?? "auto"}</span>
-            <span aria-hidden>·</span>
-            <span className="font-mono">{project.source_branch}</span>
-            {/* Up here for every account, read-only included: opening the
-                app is the one thing everybody who sees the project wants. */}
-            {(project.hosts ?? []).map((host) => (
+            <Technical>
+              <span aria-hidden>·</span>
+              <span className="font-mono">:{project.port ?? "auto"}</span>
+            </Technical>
+            {/* Up here for every account, read-only included: opening the app
+                is the one thing everybody who sees the project wants. */}
+            {(project.hosts ?? []).slice(1).map((host) => (
               <span key={host.hostname} className="contents">
                 <span aria-hidden>·</span>
-                <a
-                  href={host.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={host.locked ? "Apri — chiede la password" : "Apri"}
-                  className="text-accent inline-flex items-center gap-1 font-mono hover:underline"
-                >
-                  <Icon icon={host.locked ? "solar:lock-keyhole-minimalistic-linear" : "solar:global-linear"} width={13} aria-hidden />
+                <a href={host.url} target="_blank" rel="noreferrer" className="text-accent font-mono hover:underline">
                   {host.hostname}
-                  <Icon icon="solar:square-arrow-right-up-linear" width={12} aria-hidden />
                 </a>
               </span>
             ))}
-          </p>
-        </div>
-      </div>
+          </>
+        }
+        actions={
+          <>
+            {canOperate &&
+              (hasSource ? (
+                <Button variant="primary" size="sm" isPending={busy} isDisabled={deploying} onPress={() => onDeploy("deploy")}>
+                  <Icon icon="solar:upload-linear" width={16} aria-hidden />
+                  Deploy
+                </Button>
+              ) : canManage ? (
+                <Button variant="primary" size="sm" onPress={() => onGoTo("settings", "source")}>
+                  <Icon icon="solar:code-linear" width={16} aria-hidden />
+                  Scegli la sorgente
+                </Button>
+              ) : null)}
+            {address && (
+              <a
+                href={address.url}
+                target="_blank"
+                rel="noreferrer"
+                title={address.locked ? "Chiede la password" : address.hostname}
+                className="border-border bg-surface hover:bg-surface-hover text-foreground inline-flex items-center gap-1.5 rounded-[var(--radius)] border px-3 py-1.5 text-sm transition-colors"
+              >
+                <Icon icon={address.locked ? "solar:lock-keyhole-minimalistic-linear" : "solar:global-linear"} width={16} aria-hidden />
+                Apri l&apos;app
+              </a>
+            )}
+            {canOperate && canStart && (
+              <Button variant="secondary" size="sm" onPress={() => onControl("start")}>
+                <Icon icon="solar:play-linear" width={16} aria-hidden />
+                Avvia
+              </Button>
+            )}
+            {canOperate && running && (
+              <Button variant="outline" size="sm" onPress={() => onControl("restart")}>
+                <Icon icon="solar:refresh-linear" width={16} aria-hidden />
+                Riavvia
+              </Button>
+            )}
+            {canOperate && canStop && (
+              <Button variant="outline" size="sm" onPress={() => setStopOpen(true)}>
+                <Icon icon="solar:stop-linear" width={16} aria-hidden />
+                Ferma
+              </Button>
+            )}
+          </>
+        }
+        menu={menu}
+        menuLabel="Altre azioni sul progetto"
+      />
 
-      {canOperate && (
-      <div className="flex flex-wrap gap-2">
-        <Button variant="primary" size="sm" isPending={busy} isDisabled={deploying} onPress={() => onDeploy("deploy")}>
-          <Icon icon="solar:upload-linear" width={16} aria-hidden />
-          Deploy
-        </Button>
-        {/* Deploy sends what the project points at; this is where you change
-            what that is. Icon-only and adjacent, so the pair reads as one
-            control rather than as two competing actions.
-
-            Absent for an uploaded ZIP: there is no timeline behind it, and a
-            button whose only outcome is an explanation of why it cannot work is
-            worse than no button. */}
-        {canPickVersion && (
-          <Button
-            variant="outline"
-            size="sm"
-            isIconOnly
-            isDisabled={busy || deploying}
-            aria-label="Scegli la versione da distribuire"
-            onPress={onOpenVersions}
-          >
-            <Icon icon="solar:branching-paths-up-linear" width={16} aria-hidden />
-          </Button>
-        )}
-        {canStart ? (
-          <Button variant="secondary" size="sm" onPress={() => onControl("start")}>
-            <Icon icon="solar:play-linear" width={16} aria-hidden />
-            Avvia
-          </Button>
-        ) : canStop ? (
-          <Button variant="outline" size="sm" onPress={() => onControl("restart")}>
-            <Icon icon="solar:refresh-linear" width={16} aria-hidden />
-            Riavvia
-          </Button>
-        ) : null}
-
-        <Dropdown>
-          <Button variant="outline" size="sm" aria-label="Altre azioni">
-            <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />
-            <span className="hidden sm:inline">Altro</span>
-          </Button>
-          <Dropdown.Popover placement="bottom end">
-            <Dropdown.Menu
-              aria-label="Altre azioni sul progetto"
-              disabledKeys={busy || deploying ? ["rebuild", "release"] : []}
-              onAction={(key) => {
-                if (key === "rebuild") onDeploy("rebuild");
-                else if (key === "release") onReleasePin();
-                else if (key === "restart") onControl("restart");
-                else if (key === "stop") onControl("stop");
-              }}
-            >
-              <Dropdown.Item id="rebuild" textValue="Re-build">
-                <Icon icon="solar:refresh-circle-linear" width={14} aria-hidden />
-                <span className="flex-1">Re-build da zero</span>
-              </Dropdown.Item>
-              {/* Only while pinned: an action that means nothing most of the time. */}
-              {project.pinned_sha ? (
-                <Dropdown.Item id="release" textValue="Torna all'ultimo commit">
-                  <Icon icon="solar:rewind-back-linear" width={14} aria-hidden />
-                  <span className="flex-1">Torna all&apos;ultimo commit</span>
-                </Dropdown.Item>
-              ) : null}
-              {/* Restart is already a button when the project is running;
-                  repeated here only for an errored one, which shows Avvia. */}
-              {canStop && canStart ? (
-                <Dropdown.Item id="restart" textValue="Riavvia">
-                  <Icon icon="solar:refresh-linear" width={14} aria-hidden />
-                  <span className="flex-1">Riavvia</span>
-                </Dropdown.Item>
-              ) : null}
-              {canStop ? (
-                <Dropdown.Item id="stop" textValue="Ferma" className="text-danger">
-                  <Icon icon="solar:stop-linear" width={14} aria-hidden />
-                  <span className="flex-1">Ferma</span>
-                </Dropdown.Item>
-              ) : null}
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
-      </div>
-      )}
-    </header>
+      <ConfirmDialog
+        isOpen={stopOpen}
+        onOpenChange={setStopOpen}
+        title={`Fermare ${project.name}?`}
+        description={
+          address
+            ? `L'app smette di rispondere su ${address.hostname} finché non la riavvii.`
+            : "L'app smette di rispondere finché non la riavvii."
+        }
+        confirmLabel="Ferma"
+        destructive
+        onConfirm={() => onControl("stop")}
+      />
+    </>
   );
 });

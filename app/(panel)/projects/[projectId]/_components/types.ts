@@ -41,8 +41,14 @@ export interface Project {
   status: string;
   port: number | null;
   auto_deploy: number;
+  /** Null reads as "webhook". */
+  deploy_trigger?: "webhook" | "poll" | null;
   deploy_count: number;
   last_deploy_at: string | null;
+  /** The newest deploy, whatever its outcome. */
+  last_deployment?: Deployment | null;
+  /** When a deploy last worked; null until one has. */
+  last_success_at?: string | null;
   webhook_secret: string;
   builder_config: string;
   /**
@@ -139,5 +145,19 @@ export interface EnvVar {
   value: string;
 }
 
-export type TabId = "logs" | "deployments" | "env" | "terminal" | "settings";
+export type TabId = "overview" | "deployments" | "logs" | "env" | "files" | "terminal" | "settings";
+
+/** The settings side menu, in order. */
+export type SettingsSectionId =
+  | "general"
+  | "source"
+  | "build"
+  | "addresses"
+  | "network"
+  | "resources"
+  | "automations"
+  | "backup"
+  | "advanced"
+  | "permissions"
+  | "danger";
 

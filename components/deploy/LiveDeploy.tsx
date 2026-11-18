@@ -48,9 +48,12 @@ export function LiveDeploy({
   deploymentId,
   onSettled,
   renderFixes,
+  showLog = true,
   className,
 }: {
   deploymentId: string;
+  /** Off for a summary (the project overview): phases and outcome only. */
+  showLog?: boolean;
   /** Called once, when the deploy stops being active. */
   onSettled?: (deployment: DeploymentView, explanation: DeployErrorExplanation | null) => void;
   /** Buttons for a failed deploy, given its explanation. */
@@ -124,11 +127,11 @@ export function LiveDeploy({
 
   const lines: LogLine[] = useMemo(
     () =>
-      (view?.build_log ?? "")
+      (showLog ? (view?.build_log ?? "") : "")
         .split(/\r?\n/)
         .filter((text, i, all) => text !== "" || i < all.length - 1)
         .map((text, id) => ({ id, text })),
-    [view?.build_log]
+    [view?.build_log, showLog]
   );
 
   const elapsed = view
@@ -186,12 +189,14 @@ export function LiveDeploy({
         </Hint>
       )}
 
-      <LogViewer
-        lines={lines}
-        ariaLabel="Log del deploy"
-        emptyMessage={view ? "Il deploy sta per cominciare…" : "Collegamento al deploy…"}
-        className="h-80"
-      />
+      {showLog && (
+        <LogViewer
+          lines={lines}
+          ariaLabel="Log del deploy"
+          emptyMessage={view ? "Il deploy sta per cominciare…" : "Collegamento al deploy…"}
+          className="h-80"
+        />
+      )}
     </div>
   );
 }

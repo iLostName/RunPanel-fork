@@ -12,9 +12,12 @@ import { useSearchParams } from "next/navigation";
  * so a tab change is not a navigation — no request, no loading state — and
  * leaves no entry for Back to walk through. The other params stay, `?server=`
  * in a cluster above all.
+ *
+ * `param` names another key for a second level, such as the project settings'
+ * `?section=` under `?tab=settings`.
  */
-export function useUrlTab<T extends string>(ids: readonly T[], fallback: T): [T, (next: T) => void] {
-  const raw = useSearchParams().get("tab");
+export function useUrlTab<T extends string>(ids: readonly T[], fallback: T, param = "tab"): [T, (next: T) => void] {
+  const raw = useSearchParams().get(param);
   const fromUrl = raw !== null && (ids as readonly string[]).includes(raw) ? (raw as T) : fallback;
 
   const [tab, setTab] = useState<T>(fromUrl);
@@ -30,12 +33,12 @@ export function useUrlTab<T extends string>(ids: readonly T[], fallback: T): [T,
     (next: T) => {
       setTab(next);
       const params = new URLSearchParams(window.location.search);
-      if (next === fallback) params.delete("tab");
-      else params.set("tab", next);
+      if (next === fallback) params.delete(param);
+      else params.set(param, next);
       const query = params.toString();
       window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
     },
-    [fallback]
+    [fallback, param]
   );
 
   return [tab, select];

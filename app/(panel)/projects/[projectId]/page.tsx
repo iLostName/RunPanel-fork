@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { Button } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
 import { useProjectStream } from "@/lib/hooks/useProjectStream";
@@ -11,14 +11,13 @@ import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
-import { FormDialog } from "@/components/ui/FormDialog";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import type { LogLine } from "@/components/ui/LogViewer";
 import { Tabs } from "@/components/ui/Tabs";
 import { parseContractJson } from "@/lib/deploy-contract";
 
 import { ProjectHeader } from "./_components/ProjectHeader";
-import { ProjectStats } from "./_components/ProjectStats";
+import { ProjectOverview } from "./_components/ProjectOverview";
 import { LogsTab } from "./_components/LogsTab";
 import { DeploymentsTab } from "./_components/DeploymentsTab";
 import { ProjectEnvTab } from "./_components/EnvTab";
@@ -27,8 +26,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { TerminalTab } from "./_components/TerminalTab";
 import { SettingsTab } from "./_components/SettingsTab";
 import { VersionDialog } from "./_components/VersionDialog";
-import { FileManager } from "./_components/FileManager";
-import type { Deployment, ProcessInfo, Project, TabId } from "./_components/types";
+import { FilesTab } from "./_components/FilesTab";
+import type { Deployment, ProcessInfo, Project, SettingsSectionId, TabId } from "./_components/types";
 import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { locateMember } from "@/lib/locate-member";
 import { projectControlText } from "@/lib/status";
@@ -37,13 +36,12 @@ import { projectControlText } from "@/lib/status";
  * Orchestrates the project view: it owns the single event stream and the shared
  * state, and hands each tab exactly what it needs.
  *
- * This file used to be 830 lines containing the header, five tabs, a file
- * manager, a deployment card and two modals, so every log line re-rendered all
- * of it.
+ * Tabs, in order: Panoramica (the default: how it is and what to do next),
+ * Deploy, Log, Variabili, File, Terminale (containers only), Impostazioni.
  */
 
 const MAX_LOG_LINES = 2000;
-const TAB_IDS: TabId[] = ["logs", "deployments", "env", "terminal", "settings"];
+const TAB_IDS: TabId[] = ["overview", "deployments", "logs", "env", "files", "terminal", "settings"];
 
 /** Monotonic ids so log rows keep a stable key when the buffer is trimmed. */
 let lineSeq = 0;
@@ -60,7 +58,7 @@ export default function ProjectDetailPage() {
   const router = useRouter();
   const projectId = params.projectId as string;
 
-  const [activeTab, setActiveTab] = useUrlTab(TAB_IDS, "logs");
+  const [activeTab, setActiveTab] = useUrlTab(TAB_IDS, "overview");
 
   const [project, setProject] = useState<Project | null>(null);
   useCrumbLabel(projectId, project?.name);
@@ -74,16 +72,10 @@ export default function ProjectDetailPage() {
   const termLines = useLineBuffer<LogLine>(MAX_LOG_LINES);
   const operationLog = useLineBuffer<LogLine>(MAX_LOG_LINES);
   const [shellActive, setShellActive] = useState(false);
-
-  // Opened by the gear, and only by it. It used to default to open whenever the
-  // URL carried `?tab=settings`, from when this dialog WAS the settings screen —
-  // so arriving at the settings tab greeted you with a rename prompt over the
-  // form you came for.
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [renameValue, setRenameValue] = useState("");
   const [versionsOpen, setVersionsOpen] = useState(false);
 
   const prevStatus = useRef<string | undefined>(undefined);
+  const refreshDeploymentsRef = useRef<(() => Promise<unknown>) | null>(null);
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const refreshProject = useCallback(
@@ -98,7 +90,6 @@ export default function ProjectDetailPage() {
             if (!isSolo) {
               const memberId = await locateMember("project", projectId);
               if (memberId && memberId !== selected) {
-                // Read at the moment of the redirect, so a tab change does not refetch.
                 const tabNow = new URLSearchParams(window.location.search).get("tab");
                 const tab = tabNow ? `?tab=${encodeURIComponent(tabNow)}` : "";
                 router.replace(href(`/projects/${projectId}${tab}`, memberId));
@@ -132,7 +123,7 @@ export default function ProjectDetailPage() {
   }, [refreshProject]);
 
   // One stream carries deploy progress, build output, process output and
-  // terminal output. Everything used to be polled separately.
+  // terminal output.
   const { connected } = useProjectStream(projectId, (event) => {
     switch (event.type) {
       case "deploy:log":
@@ -142,8 +133,7 @@ export default function ProjectDetailPage() {
         processLog.push(toLine(event.line, event.stream));
         break;
       case "process:reset":
-        // A new run starts from an empty log on the server; the buffer here has
-        // to follow, or the view keeps showing output the files no longer have.
+        // A new run starts from an empty log on the server; the buffer follows.
         processLog.reset();
         break;
       case "terminal:output":
@@ -160,7 +150,6 @@ export default function ProjectDetailPage() {
         operationLog.push(toLine(event.line));
         break;
       case "mount:phase":
-        // A move of the files or a mount apply changed the row on the server.
         void refreshProject();
         break;
       case "deploy:status": {
@@ -170,26 +159,23 @@ export default function ProjectDetailPage() {
         if (previous !== "running" && event.status === "running") toast.success("Deploy completato");
         if (event.status === "failed") toast.error(event.message ?? "Deploy fallito");
         void refreshProject();
+        void refreshDeploymentsRef.current?.();
         break;
       }
     }
   });
 
   // Process stats are a snapshot, not an event, so they still poll — but the
-  // hook stops while the tab is hidden. Derived rather than copied into state:
-  // mirroring fetched data into a useState is what turns one render into two.
+  // hook stops while the tab is hidden.
   const { data: statusData } = useResource<{ status?: string; process?: ProcessInfo | null }>(
     api(`/api/projects/${projectId}/status`),
     { intervalMs: poll5000 }
   );
   const processInfo = statusData?.process ?? null;
 
-  // The row changes without a deploy too: the sweep that notices a process
-  // died, a scheduled restart, autostart, a Stop pressed by someone else. Only
-  // deploys reach the stream, so the header kept the status it loaded with
-  // until a reload. The poll above already reads the column every few seconds;
-  // when it disagrees, the project is read again — the row, not just the
-  // status, since whatever moved it may have moved more.
+  // The row changes without a deploy too (a crash noticed by the sweep, a
+  // scheduled restart, someone else pressing Stop): when the polled status
+  // disagrees, the project is read again.
   const polledStatus = statusData?.status;
   const shownStatus = project?.status;
   useEffect(() => {
@@ -197,10 +183,7 @@ export default function ProjectDetailPage() {
   }, [polledStatus, shownStatus, refreshProject]);
 
   // Seed the process log from the tail; the stream carries it from there.
-  //
-  // Depends on `reset` rather than on the buffer: the buffer object is rebuilt
-  // every render, so listing it here would refetch the tail on every log line.
-  // `reset` is stable.
+  // Depends on `reset`, which is stable, rather than on the rebuilt buffer.
   const resetProcessLog = processLog.reset;
   useEffect(() => {
     if (activeTab !== "logs") return;
@@ -212,118 +195,90 @@ export default function ProjectDetailPage() {
     return () => controller.abort();
   }, [activeTab, projectId, resetProcessLog, api]);
 
-  // Tab data is fetched by the shared hook, which owns its own loading flag —
-  // so there is no effect here setting one synchronously. Passing `null` as the
-  // url is how a tab that is not open stays idle.
   const {
     data: deploymentsData,
     loading: deploymentsLoading,
     error: deploymentsError,
     refresh: refreshDeployments,
-  } = useResource<Deployment[]>(
-    activeTab === "deployments" ? api(`/api/projects/${projectId}/logs`) : null
-  );
-  const deployments = useMemo(
-    () => (Array.isArray(deploymentsData) ? deploymentsData : []),
-    [deploymentsData]
-  );
+  } = useResource<Deployment[]>(activeTab === "deployments" ? api(`/api/projects/${projectId}/logs`) : null);
+  // Read by the stream handler, which is registered once: a deploy that
+  // settles while the history is open refreshes it.
+  useEffect(() => {
+    refreshDeploymentsRef.current = activeTab === "deployments" ? refreshDeployments : null;
+  }, [activeTab, refreshDeployments]);
+  const deployments = useMemo(() => (Array.isArray(deploymentsData) ? deploymentsData : []), [deploymentsData]);
 
   // The env tab explains which prefixes reach the build, and the project can
   // have redefined them in its contract.
-  const buildEnvPrefixes = useMemo(
-    () => parseContractJson(project?.builder_config).buildEnvPrefixes,
-    [project?.builder_config]
-  );
+  const buildEnvPrefixes = useMemo(() => parseContractJson(project?.builder_config).buildEnvPrefixes, [project?.builder_config]);
 
   /**
    * Start a deploy, optionally of one specific commit.
    *
    * With a `commitSha` the route pins the project to it first, so from then on
    * Deploy rebuilds that commit and auto-deploy stays suspended until the pin is
-   * released. `branch` is persisted before the deploy when the version dialog
-   * picked a different one — the project tracks one branch everywhere else, and
-   * a deploy from a branch the header does not name would be a lie in four
-   * places at once.
+   * released. `branch` is persisted first when the version dialog picked a
+   * different one.
    */
   const sourceBranch = project?.source_branch;
-  const startDeploy = useCallback(async (
-    mode: "deploy" | "rebuild",
-    options: { commitSha?: string; branch?: string } = {}
-  ) => {
-    setDeploying(true);
-    try {
-      if (options.branch && options.branch !== sourceBranch) {
-        const patch = await fetch(api(`/api/projects/${projectId}`), {
-          method: "PATCH",
+  const startDeploy = useCallback(
+    async (mode: "deploy" | "rebuild", options: { commitSha?: string; branch?: string } = {}) => {
+      setDeploying(true);
+      try {
+        if (options.branch && options.branch !== sourceBranch) {
+          const patch = await fetch(api(`/api/projects/${projectId}`), {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sourceBranch: options.branch }),
+          });
+          if (!patch.ok) {
+            const data = await patch.json().catch(() => ({}));
+            toast.error(data.details?.[0]?.message ?? data.error ?? "Salvataggio non riuscito");
+            return;
+          }
+          setProject(await patch.json());
+        }
+
+        const res = await fetch(api(`/api/projects/${projectId}/deploy`), {
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sourceBranch: options.branch }),
+          body: JSON.stringify({ mode, ...(options.commitSha ? { commitSha: options.commitSha } : {}) }),
         });
-        if (!patch.ok) {
-          const data = await patch.json().catch(() => ({}));
-          toast.error(data.details?.[0]?.message ?? data.error ?? "Salvataggio non riuscito");
+        const data = await res.json();
+        if (!res.ok) {
+          toast.error(data.details?.[0]?.message ?? data.error ?? "Avvio non riuscito");
           return;
         }
-        setProject(await patch.json());
+        toast.success(
+          data.status === "queued"
+            ? "Messo in coda dopo il deploy in corso"
+            : options.commitSha
+              ? `Deploy di ${options.commitSha.slice(0, 7)} avviato`
+              : "Deploy avviato"
+        );
+        if (data.status !== "queued") setProject((p) => (p ? { ...p, status: "deploying" } : p));
+        // The pin and the new deployment live on the row: read it again.
+        void refreshProject();
+      } catch {
+        toast.error("Avvio non riuscito");
+      } finally {
+        setDeploying(false);
       }
-
-      const res = await fetch(api(`/api/projects/${projectId}/deploy`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, ...(options.commitSha ? { commitSha: options.commitSha } : {}) }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        // The validation detail names the field; the error says what happened.
-        toast.error(data.details?.[0]?.message ?? data.error ?? "Avvio non riuscito");
-        return;
-      }
-      toast.success(
-        data.status === "queued"
-          ? "Messo in coda dopo il deploy in corso"
-          : options.commitSha
-            ? `Deploy di ${options.commitSha.slice(0, 7)} avviato`
-            : "Deploy avviato"
-      );
-      if (data.status !== "queued") {
-        setProject((p) => (p ? { ...p, status: "deploying" } : p));
-      }
-      // The pin lives on the project row, so the header and the banner only
-      // learn about it by re-reading it.
-      if (options.commitSha) void refreshProject();
-    } catch {
-      toast.error("Avvio non riuscito");
-    } finally {
-      setDeploying(false);
-    }
-  }, [projectId, refreshProject, api, sourceBranch]);
-
-  // Stable, like everything else `ProjectHeader` receives: it is memo()'d so a
-  // log flush does not re-render it, and one inline arrow would undo that.
-  const handleDeploy = useCallback(
-    (mode: "deploy" | "rebuild") => {
-      void startDeploy(mode);
     },
-    [startDeploy]
+    [projectId, refreshProject, api, sourceBranch]
   );
 
-  // Not closed here: the dialog closes itself once this settles, which is what
-  // keeps its submit button pending while the request is in flight. Closing it
-  // first would unmount the pending state mid-request.
+  // Stable, like everything the memo()'d header and tabs receive: one inline
+  // arrow would re-render them on every log line.
+  const handleDeploy = useCallback((mode: "deploy" | "rebuild") => void startDeploy(mode), [startDeploy]);
+  const handleRestore = useCallback((commitSha: string) => void startDeploy("deploy", { commitSha }), [startDeploy]);
+
+  // Not closed here: the dialog closes itself once this settles.
   async function handleDeployCommit(commitSha: string, branch: string) {
     await startDeploy("deploy", { commitSha, branch });
   }
 
-  /**
-   * Release the pin and go back to the branch, in one request.
-   *
-   * Split into "unpin" then "deploy" the project would sit unpinned while still
-   * running the old commit, and a poller tick landing in that gap would be the
-   * panel deploying on its own.
-   *
-   * Wrapped, like `openVersions` below, because `DeploymentsTab` is memo()'d:
-   * an inline arrow here would hand it a new prop on every log line and undo
-   * the split this file exists for.
-   */
+  /** Release the pin and go back to the branch, in one request. */
   const handleReleasePin = useCallback(async () => {
     setDeploying(true);
     try {
@@ -347,66 +302,90 @@ export default function ProjectDetailPage() {
   }, [projectId, refreshProject, api]);
 
   const openVersions = useCallback(() => setVersionsOpen(true), []);
-  const openRename = useCallback(() => {
-    // Seeded on opening, not on every refresh of the project, which would
-    // overwrite what is being typed.
-    if (project) setRenameValue(project.name);
-    setRenameOpen(true);
-  }, [project]);
 
-  const handleControl = useCallback(async (action: "start" | "stop" | "restart") => {
-    try {
-      const res = await fetch(api(`/api/projects/${projectId}/control`), {
-        method: "POST",
+  const handleRename = useCallback(
+    async (name: string) => {
+      const res = await fetch(api(`/api/projects/${projectId}`), {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ name }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error ?? projectControlText(action).failed);
-        return;
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error ?? "Rinomina non riuscita");
+        return false;
       }
-      toast.success(projectControlText(action).done);
-      void refreshProject();
-    } catch {
-      toast.error(projectControlText(action).failed);
-    }
-  }, [projectId, refreshProject, api]);
+      const updated = await res.json();
+      setProject((p) => (p ? { ...p, name: updated.name } : p));
+      toast.success("Progetto rinominato");
+      return true;
+    },
+    [projectId, api]
+  );
 
+  const handleControl = useCallback(
+    async (action: "start" | "stop" | "restart") => {
+      try {
+        const res = await fetch(api(`/api/projects/${projectId}/control`), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          toast.error(data.error ?? projectControlText(action).failed);
+          return;
+        }
+        toast.success(projectControlText(action).done);
+        void refreshProject();
+      } catch {
+        toast.error(projectControlText(action).failed);
+      }
+    },
+    [projectId, refreshProject, api]
+  );
+  const handleCancelDeploy = useCallback(() => void handleControl("stop"), [handleControl]);
+
+  /** Open a tab, and in the settings a section of the side menu. */
+  const goTo = useCallback(
+    (tab: TabId, section?: SettingsSectionId) => {
+      if (section) {
+        const query = new URLSearchParams(window.location.search);
+        if (section === "general") query.delete("section");
+        else query.set("section", section);
+        window.history.replaceState(null, "", `${window.location.pathname}?${query.toString()}`);
+      }
+      setActiveTab(tab);
+    },
+    [setActiveTab]
+  );
+
+  const canManage = (project?.permission?.level ?? "manage") === "manage";
   const tabs = useMemo(() => {
     if (!project) return [];
     return [
-      { id: "logs" as TabId, label: "Log", icon: "solar:document-text-linear" },
+      { id: "overview" as TabId, label: "Panoramica", icon: "solar:widget-2-linear" },
       { id: "deployments" as TabId, label: "Deploy", icon: "solar:history-linear" },
+      { id: "logs" as TabId, label: "Log", icon: "solar:document-text-linear" },
       { id: "env" as TabId, label: "Variabili", icon: "solar:key-linear" },
-      // Only the tabs this account can use: the terminal needs the flag, the
-      // settings need `manage`. Missing `permission` means the owner's view.
+      // Files are part of managing the project; below that the API refuses them.
+      ...(canManage ? [{ id: "files" as TabId, label: "File", icon: "solar:folder-with-files-linear" }] : []),
       ...(project.runtime_type === "docker" && (project.permission?.terminal ?? true)
         ? [{ id: "terminal" as TabId, label: "Terminale", icon: "solar:monitor-linear" }]
         : []),
-      ...((project.permission?.level ?? "manage") === "manage"
-        ? [{ id: "settings" as TabId, label: "Impostazioni", icon: "solar:settings-linear" }]
-        : []),
+      ...(canManage ? [{ id: "settings" as TabId, label: "Impostazioni", icon: "solar:settings-linear" }] : []),
     ];
-  }, [project]);
+  }, [project, canManage]);
 
   // A failed first load says so; a failed refresh keeps the page it has.
   if (!project && loadError) {
-    return (
-      <LoadError what="il progetto" error={loadError} onRetry={() => void refreshProject()} className="p-4" />
-    );
+    return <LoadError what="il progetto" error={loadError} onRetry={() => void refreshProject()} className="p-4" />;
   }
   if (loading || !project) return <PageSkeleton />;
 
-  // A remembered tab this account does not have shows the logs instead.
-  const shownTab = tabs.some((tab) => tab.id === activeTab) ? activeTab : "logs";
-
-  // A project that has never been deployed has no process and no files: the
-  // log tab showed an empty console and, below it, the file manager's raw
-  // "no source yet" error. It says what to do next instead.
-  const neverDeployed =
-    !project.last_deploy_at && project.status !== "deploying" && deployLog.lines.length === 0;
-  const canManage = (project.permission?.level ?? "manage") === "manage";
+  // A remembered tab this account does not have shows the overview instead.
+  const shownTab = tabs.some((tab) => tab.id === activeTab) ? activeTab : "overview";
+  const neverDeployed = !project.last_deploy_at && project.status !== "deploying" && deployLog.lines.length === 0;
 
   return (
     <div>
@@ -415,70 +394,75 @@ export default function ProjectDetailPage() {
         busy={deploying}
         onDeploy={handleDeploy}
         onControl={handleControl}
-        onOpenSettings={openRename}
+        onRename={handleRename}
         onOpenVersions={openVersions}
         onReleasePin={handleReleasePin}
+        onGoTo={goTo}
       />
-
-      <ProjectStats info={processInfo} />
 
       <Tabs tabs={tabs} value={shownTab} onChange={setActiveTab} label="Sezioni del progetto" />
 
-      {/* Each tab is mounted only while selected. The file manager in
-          particular used to render on every page load regardless. */}
-      {shownTab === "logs" && neverDeployed && (
-        <EmptyState
-          icon="solar:rocket-2-linear"
-          title="Ancora nessun deploy"
-          description={
-            canManage
-              ? "Scegli la sorgente (repository GitHub o archivio ZIP) nelle impostazioni, poi premi Deploy: qui compariranno build e output del processo."
-              : "Quando qualcuno lo distribuirà, qui compariranno build e output del processo."
-          }
-          action={
-            canManage ? (
-              <Button size="sm" variant="secondary" onPress={() => setActiveTab("settings")}>
-                Apri le impostazioni
-              </Button>
-            ) : undefined
-          }
-          className="border-border rounded-[var(--radius)] border border-dashed"
+      {/* Each tab is mounted only while selected. */}
+      {shownTab === "overview" && (
+        <ProjectOverview
+          project={project}
+          processInfo={processInfo}
+          busy={deploying}
+          onDeploy={handleDeploy}
+          onControl={handleControl}
+          onGoTo={goTo}
         />
       )}
 
-      {shownTab === "logs" && !neverDeployed && (
-        <div className="space-y-6">
-          <LogsTab deployLog={deployLog.lines} processLog={processLog.lines} connected={connected} />
-          {/* Files are part of managing the project; below that the API refuses them. */}
-          {(project.permission?.level ?? "manage") === "manage" && (
-            <FileManager projectId={projectId} runtimeType={project.runtime_type} />
-          )}
-        </div>
-      )}
-
-      {activeTab === "deployments" && deploymentsError && !deploymentsData && (
+      {shownTab === "deployments" && deploymentsError && !deploymentsData && (
         <LoadError what="i deploy" error={deploymentsError} onRetry={() => void refreshDeployments()} />
       )}
-
-      {activeTab === "deployments" && !(deploymentsError && !deploymentsData) && (
+      {shownTab === "deployments" && !(deploymentsError && !deploymentsData) && (
         <DeploymentsTab
           project={project}
           deployments={deployments}
           loading={deploymentsLoading}
           onOpenVersions={openVersions}
           onReleasePin={handleReleasePin}
+          onRestore={handleRestore}
+          onCancel={handleCancelDeploy}
         />
       )}
 
+      {shownTab === "logs" && neverDeployed && (
+        <EmptyState
+          icon="solar:rocket-2-linear"
+          title="Ancora nessun deploy"
+          description={
+            canManage
+              ? "Quando l'app sarà online, qui comparirà quello che scrive mentre gira."
+              : "Quando qualcuno la distribuirà, qui comparirà quello che scrive mentre gira."
+          }
+          action={
+            canManage ? (
+              <Button size="sm" variant="secondary" onPress={() => goTo("overview")}>
+                Vai alla panoramica
+              </Button>
+            ) : undefined
+          }
+          className="border-border rounded-[var(--radius)] border border-dashed"
+        />
+      )}
+      {shownTab === "logs" && !neverDeployed && (
+        <LogsTab deployLog={deployLog.lines} processLog={processLog.lines} connected={connected} />
+      )}
+
       {/* Fetches its variables on every visit: see ProjectEnvTab. */}
-      {activeTab === "env" && (
+      {shownTab === "env" && (
         <ProjectEnvTab
           projectId={projectId}
           runtimeType={project.runtime_type}
           buildEnvPrefixes={buildEnvPrefixes}
-          readOnly={(project.permission?.level ?? "manage") !== "manage"}
+          readOnly={!canManage}
         />
       )}
+
+      {shownTab === "files" && <FilesTab projectId={projectId} runtimeType={project.runtime_type} />}
 
       {shownTab === "terminal" && (
         <TerminalTab
@@ -493,59 +477,14 @@ export default function ProjectDetailPage() {
       {shownTab === "settings" && (
         <SettingsTab
           project={project}
-          onProjectChange={(update) =>
-            setProject((prev) => (typeof update === "function" ? (prev ? update(prev) : prev) : update))
-          }
+          onProjectChange={(update) => setProject((prev) => (typeof update === "function" ? (prev ? update(prev) : prev) : update))}
           onRefresh={() => void refreshProject()}
+          onDeploy={() => void startDeploy("deploy")}
           operationLines={operationLog.lines}
         />
       )}
 
-      {/*
-        Rename the project itself, as opposed to its app.
-
-        This was a raw `fixed inset-0` div with a click-anywhere backdrop: no
-        `role="dialog"`, no `aria-modal`, no focus trap, no Escape — fifteen
-        lines above a `ConfirmDialog` used correctly. The delete button that
-        lived in its footer has moved to the page header, next to the rename
-        that opens this: an irreversible action does not belong behind a dialog
-        titled "Progetto", where it is found by someone looking to fix a typo.
-      */}
-      <FormDialog
-        isOpen={renameOpen}
-        onOpenChange={setRenameOpen}
-        title="Rinomina progetto"
-        submitLabel="Salva"
-        isSubmitDisabled={!renameValue.trim() || renameValue.trim() === project.name}
-        onSubmit={async () => {
-          const res = await fetch(api(`/api/projects/${projectId}`), {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: renameValue.trim() }),
-          });
-          if (res.ok) {
-            const updated = await res.json();
-            setProject((p) => (p ? { ...p, name: updated.name } : p));
-            toast.success("Progetto rinominato");
-          } else {
-            const data = await res.json().catch(() => ({}));
-            toast.error(data.error ?? "Rinomina non riuscita");
-            return false;
-          }
-        }}
-      >
-        <TextField value={renameValue} onChange={setRenameValue} autoFocus>
-          <Label>Nome</Label>
-          <Input />
-        </TextField>
-      </FormDialog>
-
-      {/*
-        Keyed on the open state so each opening starts from the project as it is
-        now — the branch it tracks, nothing selected. Seeding that with an effect
-        that copies props into state is the pattern this file avoids everywhere
-        else.
-      */}
+      {/* Keyed on the open state so each opening starts from the project as it is now. */}
       <VersionDialog
         key={versionsOpen ? "versions-open" : "versions-closed"}
         isOpen={versionsOpen}
