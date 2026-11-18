@@ -70,7 +70,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     }
 
     try {
-      const removed = peerHost().removeSource(memberId);
+      const removed = await peerHost().removeSource(memberId);
       // A server that is gone leaves nothing behind, its limit included.
       if (!source.linked) await setPeerQuota(memberId, null);
       return NextResponse.json({ ok: true, archives: removed.archives, bytes: removed.bytes });

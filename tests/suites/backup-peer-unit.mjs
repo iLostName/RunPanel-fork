@@ -267,9 +267,9 @@ export async function run({ repoRoot }) {
       const a = list.find((s) => s.id === A.id);
       r.check("each source is listed with what it holds", a?.archives === 1 && a.bytes === data.length && a.name === "server-a" && a.incoming.count === 0, JSON.stringify(a));
       const busy = await host.reserve(A, { fileName: "in-corso.zip", bytes: 10, sha256: sha("c") });
-      r.check("a source's copies are not deleted while it sends one", hostError(await rejects(Promise.resolve().then(() => host.removeSource(A.id))), 409, "UPLOADING"));
+      r.check("a source's copies are not deleted while it sends one", hostError(await rejects(host.removeSource(A.id)), 409, "UPLOADING"));
       await host.abort(A.id, busy.uploadId, busy.token);
-      const removed = host.removeSource(A.id);
+      const removed = await host.removeSource(A.id);
       r.check("otherwise they all go", removed.archives === 1 && removed.bytes === data.length && !fs.existsSync(join(root, A.id)) && !host.sources().some((s) => s.id === A.id));
     }
   } finally {

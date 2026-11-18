@@ -640,16 +640,22 @@ export function createPeerHost(options: PeerHostOptions) {
       return scan(memberId).archives;
     },
 
-    /** Every copy of one source, gone. Refused while one of its uploads is under way. */
-    removeSource(memberId: string): { archives: number; bytes: number } {
+    /**
+     * Every copy of one source, gone. Refused while one of its uploads is
+     * under way, and decided in turn with the reservations, so none lands in
+     * the folder while it is being removed.
+     */
+    removeSource(memberId: string): Promise<{ archives: number; bytes: number }> {
       const base = area(memberId);
-      if (!fs.existsSync(base)) return { archives: 0, bytes: 0 };
-      if (sweepArea(memberId).length > 0) {
-        throw new PeerHostError(409, "UPLOADING", "Quel server sta mandando una copia proprio ora: riprova quando ha finito");
-      }
-      const stored = scan(memberId);
-      fs.rmSync(base, { recursive: true, force: true });
-      return { archives: stored.archives.length, bytes: stored.bytes };
+      return serialized(async () => {
+        if (!fs.existsSync(base)) return { archives: 0, bytes: 0 };
+        if (sweepArea(memberId).length > 0) {
+          throw new PeerHostError(409, "UPLOADING", "Quel server sta mandando una copia proprio ora: riprova quando ha finito");
+        }
+        const stored = scan(memberId);
+        fs.rmSync(base, { recursive: true, force: true });
+        return { archives: stored.archives.length, bytes: stored.bytes };
+      });
     },
 
     /** Partial uploads nobody will finish, every source; how many went. */
