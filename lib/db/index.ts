@@ -147,7 +147,16 @@ async function runMigrations(db: Kysely<Database>): Promise<void> {
     console.log(`[RunPanel] Forgot ${forgotten} renamed migration record(s); they run again under their new names`);
   }
 
-  const migrator = new Migrator({ db, provider: new StaticMigrationProvider() });
+  /*
+    Unordered on purpose. Kysely refuses to start when a migration arrives
+    whose name sorts before one already run — and that is exactly what a fork
+    merging parallel work produces: a store that ran 037 meets 035 on the next
+    update, and the panel would not start at all. Every migration here is
+    written to be independent and idempotent (it checks before it creates),
+    so running a late one is safe, while refusing to boot is not. A recorded
+    migration that has disappeared still stops the migrator.
+  */
+  const migrator = new Migrator({ db, provider: new StaticMigrationProvider(), allowUnorderedMigrations: true });
   const { error, results } = await migrator.migrateToLatest();
 
   for (const result of results ?? []) {

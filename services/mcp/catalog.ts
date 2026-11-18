@@ -34,6 +34,7 @@ export const ROUTES: RouteEntry[] = [
 
   // --- audit ---
   { method: "GET", path: "/api/audit", summary: "Page of the activity log (needs audit.view); returns the filtered entries plus paging info.", query: "category ('security'|'deploy'|'config'|'terminal'|'backup'|'system'|'delete'), scope ('project'|'service'|'folder'|'user'|'permission'), scopeId, userId, action, from (ISO date), to (ISO date), before (ISO date, cursor), limit (1-200, default 50)", body: "", kind: "json" },
+  { method: "GET", path: "/api/audit/export", summary: "The activity log as a CSV file (text/csv, UTF-8 with BOM), same filters and visibility as GET /api/audit, newest first, up to 100000 rows; recorded in the log itself. Meant for people: over MCP read GET /api/audit instead.", query: "category, scope, scopeId, userId, action, from (ISO date), to (ISO date) — as GET /api/audit; separator ('comma' for RFC 4180, default ';')", body: "", kind: "binary" },
   { method: "GET", path: "/api/audit/settings", summary: "Owner only: which audit categories are recorded and the retention; returns { categories, retentionDays, alwaysOn }.", query: "", body: "", kind: "json" },
   { method: "PUT", path: "/api/audit/settings", summary: "Owner only: set recorded audit categories and/or retention (security is always on).", query: "", body: "{ categories?: ('security'|'deploy'|'config'|'terminal'|'backup'|'system'|'delete')[], retentionDays?: number /* int 1-3650 */ }", kind: "json" },
 
@@ -202,7 +203,7 @@ export const ROUTES: RouteEntry[] = [
 
   // --- sessions ---
   { method: "GET", path: "/api/sessions", summary: "Active login sessions of a user; returns { sessions: [{ ..., current }] }.", query: "userId (default: self; others need rights over that user)", body: "", kind: "json" },
-  { method: "DELETE", path: "/api/sessions", summary: "Revoke a login session; returns { success, sessions }.", query: "id (required, session id)", body: "", kind: "json" },
+  { method: "DELETE", path: "/api/sessions", summary: "Revoke a login session, or with others=1 every session of your own except the current one (browser sessions only); returns { success, sessions } (+ closed).", query: "id (session id) | others ('1')", body: "", kind: "json" },
 
   // --- settings ---
   { method: "GET", path: "/api/settings", summary: "Panel settings as a flat { key: string } map (github_token shows 'configured' or ''); includes timezone_effective.", query: "", body: "", kind: "json" },
@@ -221,6 +222,8 @@ export const ROUTES: RouteEntry[] = [
 
   // --- users ---
   { method: "POST", path: "/api/users/{userId}/invite", summary: "Issue a new invite/password-reset link for a user (needs users.manage); returns { kind: 'invite'|'reset', invitePath, expiresAt }.", query: "", body: "{ hours: number /* positive int, 1 hour to 30 days */ }", kind: "json" },
+  { method: "GET", path: "/api/users/{userId}/two-factor", summary: "Whether a user has two-step sign-in on (needs users.manage); returns { enabled, enabledAt }.", query: "", body: "", kind: "json" },
+  { method: "DELETE", path: "/api/users/{userId}/two-factor", summary: "Turn off another user's two-step sign-in, for a lost phone and lost recovery codes (needs users.manage and rights over that user; never the owner or yourself; refused with an API token, browser session only).", query: "", body: "", kind: "json" },
   { method: "GET", path: "/api/users/{userId}", summary: "One user with their permissions/grants; returns { user, access, editable }.", query: "", body: "", kind: "json" },
   { method: "PATCH", path: "/api/users/{userId}", summary: "Change a user's access (global permissions + grants) and/or disable/enable the account.", query: "", body: "{ access?: { permissions: ('projects.create'|'github'|'registries'|'monitor'|'storage'|'backup'|'restore'|'autostart'|'diagnostics'|'notifications'|'updates'|'users.manage'|'audit.view'|'host'|'nodes')[], grants: { scope: 'all'|'folder'|'project'|'service', scopeId: string|null /* null iff scope='all' */, level: 'read'|'operate'|'manage', terminal: boolean }[] /* max 500 */ }, disabled?: boolean }", kind: "json" },
   { method: "DELETE", path: "/api/users/{userId}", summary: "Delete a user account.", query: "", body: "", kind: "json" },

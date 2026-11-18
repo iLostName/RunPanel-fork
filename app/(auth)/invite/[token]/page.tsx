@@ -61,6 +61,13 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
         toast.error(data.error || "Non è stato possibile impostare la password");
         return;
       }
+      // With two-step sign-in on, a link sets the password but does not sign
+      // in: the code is still asked for, on the sign-in page.
+      if (data.signedIn === false) {
+        toast.success("Password impostata. Ora accedi con la nuova password e il codice dell'app.");
+        router.push("/login");
+        return;
+      }
       router.push("/home");
     } catch {
       toast.error("Impossibile raggiungere il pannello");

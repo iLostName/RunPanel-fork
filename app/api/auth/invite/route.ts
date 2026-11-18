@@ -6,6 +6,7 @@ import { consumeRateLimit } from "@/lib/rate-limit";
 import { readBodyCapped } from "@/lib/read-body";
 import { refuseCrossOrigin } from "@/lib/request-origin";
 import { inspectInvite, recordLogin, redeemInvite } from "@/lib/users";
+import { forgetTrustedDevices, isTwoFactorEnabled } from "@/lib/two-factor";
 
 /**
  * Invitation and reset links — public, like the login form.
@@ -68,11 +69,21 @@ export async function POST(request: NextRequest) {
   const userId = await redeemInvite(token, password);
   if (!userId) return invalid();
 
+  // A new password is a fresh start for the browsers that skipped the code.
+  // And a reset link does not stand in for the second factor: it travels by
+  // chat or email, which is exactly what the second factor does not trust. The
+  // account signs in with the new password and its code, like any other time.
+  await forgetTrustedDevices(userId);
+  if (await isTwoFactorEnabled(userId)) {
+    await audit({ userId, category: "security", action: "auth.invite.redeemed", scope: "user", scopeId: userId, request });
+    return NextResponse.json({ success: true, signedIn: false, twoFactorRequired: true });
+  }
+
   await createSession(userId, {
     userAgent: request.headers.get("user-agent") ?? undefined,
     ip: trustedClientIp(request) ?? undefined,
   });
   await recordLogin(userId);
   await audit({ userId, category: "security", action: "auth.invite.redeemed", scope: "user", scopeId: userId, request });
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, signedIn: true });
 }

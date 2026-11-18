@@ -18,7 +18,10 @@ import { DurationPicker, LinkResultDialog } from "@/components/users/LinkDialogs
 import { STATUS_LABEL } from "@/components/users/labels";
 import { useResource } from "@/lib/hooks/useResource";
 import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
-import { useMe } from "@/lib/hooks/useMe";
+import { useCan, useMe } from "@/lib/hooks/useMe";
+import { LinkButton } from "@/components/ui/LinkButton";
+import { Icon } from "@iconify/react";
+import { UserSecurity } from "./UserSecurity";
 import { formatRelative, formatWhen } from "@/lib/format";
 import type { GlobalPermission } from "@/lib/authz";
 
@@ -41,6 +44,7 @@ export default function UserPage({ params }: { params: Promise<{ userId: string 
   const { userId } = use(params);
   const router = useRouter();
   const me = useMe();
+  const canAudit = useCan("audit.view");
   const detail = useResource<Detail>(`/api/users/${userId}`);
   useCrumbLabel(userId, detail.data?.user.email);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -112,6 +116,14 @@ export default function UserPage({ params }: { params: Promise<{ userId: string 
             ? "Proprietario del pannello: ha sempre tutti i permessi"
             : `${status.label} · ${user.lastLoginAt ? `ultimo accesso ${formatRelative(user.lastLoginAt)}` : "mai entrato"}`
         }
+        actions={
+          canAudit && (
+            <LinkButton href={`/audit?userId=${encodeURIComponent(user.id)}`} variant="secondary">
+              <Icon icon="solar:history-linear" width={15} aria-hidden />
+              Vedi attività
+            </LinkButton>
+          )
+        }
       />
 
       <div className="max-w-3xl space-y-4 pb-20">
@@ -166,6 +178,8 @@ export default function UserPage({ params }: { params: Promise<{ userId: string 
             onSave={(access) => patch({ access }, "Accessi salvati")}
           />
         )}
+
+        {!user.isOwner && editable && <UserSecurity userId={user.id} email={user.email} />}
 
         {!user.isOwner && editable && (
           <DangerZone

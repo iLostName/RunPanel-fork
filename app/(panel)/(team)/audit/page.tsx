@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button, Input, Label, TextField } from "@heroui/react";
+import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
@@ -11,14 +12,16 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadError } from "@/components/ui/LoadError";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { FieldHint } from "@/components/ui/Hint";
-import { SelectField } from "@/components/ui/SelectField";
+import { LinkButton } from "@/components/ui/LinkButton";
+import { Technical } from "@/components/ui/Technical";
 import { useMe } from "@/lib/hooks/useMe";
 import { useResource } from "@/lib/hooks/useResource";
 import { formatWhen } from "@/lib/format";
 import { AUDIT_CATEGORIES, type AuditCategory } from "@/lib/audit-filter";
 import { useNode, useNodeApi } from "@/lib/hooks/useNode";
 import { ServerSelector } from "@/components/ServerSelector";
-import { ACTION_LABEL, SCOPE_LABEL } from "@/lib/audit-labels";
+import { ACTION_LABEL, CATEGORY_LABEL, SCOPE_LABEL } from "@/lib/audit-labels";
+import { AuditFilters, auditQuery, useAuditFilters } from "./_components/AuditFilters";
 
 interface Entry {
   id: string;
@@ -34,57 +37,48 @@ interface Entry {
   ip: string | null;
 }
 
-const CATEGORY_LABEL: Record<AuditCategory, { label: string; description: string }> = {
-  security: { label: "Sicurezza", description: "Accessi, inviti, utenti, permessi e sessioni. Sempre registrata." },
-  deploy: { label: "Deploy", description: "Deploy, avvio, stop e riavvio di progetti e servizi." },
-  config: { label: "Configurazione", description: "Variabili, impostazioni, mount, file, nuovi progetti." },
-  terminal: { label: "Terminale", description: "Apertura di terminali e console." },
-  backup: { label: "Backup", description: "Pianificazioni, esecuzioni e ripristini." },
-  system: { label: "Sistema", description: "Aggiornamenti, avvio automatico, storage, impostazioni globali." },
-  delete: { label: "Eliminazioni", description: "Progetti, servizi, cartelle e database eliminati." },
-};
-
-
 /** Who did what, filtered to what the reader may see. */
 export default function AuditPage() {
   const me = useMe();
   // Each server keeps its own log: say whose this is, and let it be switched here.
   const { isSolo, current } = useNode();
-  const [category, setCategory] = useState<string>("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const api = useNodeApi();
+  const [filters, setFilters] = useAuditFilters();
+  const query = auditQuery(filters).toString();
+  const exportHref = (separator?: "comma") => {
+    const sp = auditQuery(filters);
+    if (separator) sp.set("separator", separator);
+    const qs = sp.toString();
+    return api(`/api/audit/export${qs ? `?${qs}` : ""}`);
+  };
 
   return (
     <>
       <PageHeader
         title="Registro attività"
         description={isSolo ? "Chi ha fatto cosa, e quando" : `Chi ha fatto cosa, e quando, su ${current?.name ?? "questo server"}`}
-        actions={<ServerSelector className="sm:hidden" />}
+        actions={
+          <>
+            {/* What is on screen, as a file a spreadsheet opens: same filters, same visibility. */}
+            <LinkButton href={exportHref()} download variant="secondary" aria-label="Esporta in CSV le voci filtrate">
+              <Icon icon="solar:file-download-linear" width={15} aria-hidden />
+              Esporta CSV
+            </LinkButton>
+            <Technical>
+              <LinkButton href={exportHref("comma")} download aria-label="Esporta in CSV con la virgola come separatore">
+                CSV con virgola
+              </LinkButton>
+            </Technical>
+            <ServerSelector className="sm:hidden" />
+          </>
+        }
       />
 
       <div className="space-y-4">
-        <Panel className="grid gap-3 sm:grid-cols-3">
-          <SelectField
-            label="Categoria"
-            value={category}
-            onChange={setCategory}
-            options={[
-              { value: "", label: "Tutte" },
-              ...AUDIT_CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c].label })),
-            ]}
-          />
-          <TextField type="date" value={from} onChange={setFrom}>
-            <Label>Dal</Label>
-            <Input />
-          </TextField>
-          <TextField type="date" value={to} onChange={setTo}>
-            <Label>Al</Label>
-            <Input />
-          </TextField>
-        </Panel>
+        <AuditFilters filters={filters} onChange={setFilters} />
 
         {/* Remounted per filter, so a new search starts from a clean list. */}
-        <AuditList key={`${category}|${from}|${to}`} category={category} from={from} to={to} />
+        <AuditList key={query} query={query} />
 
         {me.isOwner && <AuditSettings />}
       </div>
@@ -92,7 +86,7 @@ export default function AuditPage() {
   );
 }
 
-function AuditList({ category, from, to }: { category: string; from: string; to: string }) {
+function AuditList({ query: filterQuery }: { query: string }) {
   const api = useNodeApi();
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
@@ -102,10 +96,8 @@ function AuditList({ category, from, to }: { category: string; from: string; to:
 
   const query = useCallback(
     (before?: string) => {
-      const sp = new URLSearchParams({ limit: "50" });
-      if (category) sp.set("category", category);
-      if (from) sp.set("from", new Date(`${from}T00:00:00`).toISOString());
-      if (to) sp.set("to", new Date(`${to}T23:59:59`).toISOString());
+      const sp = new URLSearchParams(filterQuery);
+      sp.set("limit", "50");
       if (before) sp.set("before", before);
       return fetch(api(`/api/audit?${sp}`)).then(async (res) => {
         const data = await res.json().catch(() => ({}));
@@ -113,7 +105,7 @@ function AuditList({ category, from, to }: { category: string; from: string; to:
         return data as { entries: Entry[]; nextBefore: string | null };
       });
     },
-    [category, from, to, api]
+    [filterQuery, api]
   );
 
   useEffect(() => {
@@ -171,7 +163,7 @@ function AuditList({ category, from, to }: { category: string; from: string; to:
                   </p>
                 </div>
                 <span className="text-meta shrink-0 text-xs">
-                  {CATEGORY_LABEL[e.category as AuditCategory]?.label ?? e.category}
+                  {CATEGORY_LABEL[e.category]?.label ?? e.category}
                 </span>
               </li>
             ))}

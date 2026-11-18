@@ -1,0 +1,77 @@
+# Lint, types and the test suites that need no Docker, on every push and pull
+# request of this repository.
+#
+# The suites that start a server run `next start` on the last build, so the
+# build comes before them. Docker suites are skipped by `test:quick`
+# (`--no-docker`); the PM2 ones skip themselves when PM2 is not installed, and
+# the Postgres pass runs only where RUNPANEL_TEST_PG_URL is set — neither is
+# here, on purpose: this job is the floor every change has to clear, not the
+# whole matrix.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      # The version the lockfile is written with: a newer one may rewrite it,
+      # and --frozen-lockfile would then fail for a reason unrelated to the change.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # Node runs the panel, the build and the test runner. 24 is what the
+      # suites need at least in practice: they load TypeScript files directly,
+      # which plain Node does without flags from 22.18 on.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      # The icon subset is generated from the names used in the code, and the
+      # generator fails on a name that does not exist. `prebuild` runs it too;
+      # spelled out so a missing icon is reported as such, before the build.
+      - name: Icons
+        run: bun run icons
+
+      # `next-env.d.ts` and the route types are generated, not committed; without
+      # them `tsc` cannot resolve image imports or typed routes.
+      - name: Generate Next types
+        run: npx next typegen
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Build
+        run: bun run build
+
+      - name: Tests (no Docker)
+        run: bun run test:quick

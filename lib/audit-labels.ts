@@ -10,6 +10,20 @@
 
 export const SCOPE_LABEL: Record<string, string> = { project: "progetto", service: "servizio", folder: "cartella", user: "utente" };
 
+/**
+ * The categories, as the log page's filter and settings and the CSV export
+ * name them. Keyed by `AUDIT_CATEGORIES` (lib/audit-filter.ts).
+ */
+export const CATEGORY_LABEL: Record<string, { label: string; description: string }> = {
+  security: { label: "Sicurezza", description: "Accessi, inviti, utenti, permessi e sessioni. Sempre registrata." },
+  deploy: { label: "Deploy", description: "Deploy, avvio, stop e riavvio di progetti e servizi." },
+  config: { label: "Configurazione", description: "Variabili, impostazioni, mount, file, nuovi progetti." },
+  terminal: { label: "Terminale", description: "Apertura di terminali e console." },
+  backup: { label: "Backup", description: "Pianificazioni, esecuzioni e ripristini." },
+  system: { label: "Sistema", description: "Aggiornamenti, avvio automatico, storage, impostazioni globali." },
+  delete: { label: "Eliminazioni", description: "Progetti, servizi, cartelle e database eliminati." },
+};
+
 /** Readable names for the actions the routes record. */
 export const ACTION_LABEL: Record<string, string> = {
   "auth.login": "Accesso",
@@ -22,7 +36,15 @@ export const ACTION_LABEL: Record<string, string> = {
   "user.disable": "Account disattivato",
   "user.enable": "Account riattivato",
   "user.delete": "Account eliminato",
+  "auth.two-factor.failed": "Codice di verifica errato",
+  "auth.owner-reset": "Proprietario ripristinato dal terminale",
+  "account.two-factor.enable": "Verifica in due passaggi attivata",
+  "account.two-factor.disable": "Verifica in due passaggi disattivata",
+  "account.two-factor.recovery-codes": "Nuovi codici di recupero",
+  "account.two-factor.devices": "Dispositivi ricordati dimenticati",
+  "user.two-factor.reset": "Verifica in due passaggi azzerata",
   "session.revoke": "Sessione chiusa",
+  "session.revoke-others": "Altri dispositivi disconnessi",
   "api-token.create": "Token API creato",
   "api-token.revoke": "Token API revocato",
   "api-tokens.enable": "Accesso via token attivato",
@@ -31,6 +53,7 @@ export const ACTION_LABEL: Record<string, string> = {
   "account.password": "Password cambiata",
   "account.password.failed": "Password attuale errata",
   "audit.settings": "Registro configurato",
+  "audit.export": "Registro esportato",
   "project.deploy": "Deploy",
   "project.control": "Avvio / stop / riavvio",
   "project.terminal": "Terminale aperto",

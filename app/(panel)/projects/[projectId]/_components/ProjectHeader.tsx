@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { ResourceHeader, type ResourceMenuItem } from "@/components/resource/ResourceHeader";
@@ -47,6 +48,8 @@ export const ProjectHeader = memo(function ProjectHeader({
   // The copy is a new project running the same code: both permissions, as the server checks.
   const canCreate = useCan("projects.create");
   const canHost = useCan("host");
+  const canAudit = useCan("audit.view");
+  const router = useRouter();
 
   const deploying = project.status === "deploying";
   // Read-only accounts see the state, not the controls: the server refuses
@@ -93,6 +96,15 @@ export const ProjectHeader = memo(function ProjectHeader({
           : []),
       ]
     : [];
+  // The project's history in the activity log, for whoever may read it, read-only accounts included.
+  if (canAudit) {
+    menu.push({
+      id: "activity",
+      label: "Vedi attività",
+      icon: "solar:history-linear",
+      onAction: () => router.push(href(`/audit?scope=project&scopeId=${encodeURIComponent(project.id)}`)),
+    });
+  }
 
   return (
     <>

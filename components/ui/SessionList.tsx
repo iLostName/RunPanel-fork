@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@heroui/react";
+import { Badge } from "@/components/ui/Badge";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LoadError } from "@/components/ui/LoadError";
 import { formatRelative } from "@/lib/format";
 import { Icon } from "@iconify/react";
@@ -15,6 +18,8 @@ interface Session {
   created_at: string;
   last_seen_at: string;
   expires_at: string;
+  /** The session this page is open in. */
+  current?: boolean;
 }
 
 /** A user agent string is unreadable; this is the part anyone cares about. */
@@ -42,15 +47,23 @@ function describeDevice(userAgent: string | null): string {
 }
 
 /**
- * Signed-in devices, with a way to revoke one.
+ * Signed-in devices, with a way to revoke one, or all but this one.
  *
  * Sessions became per-device but there was no way to see or end them
  * individually — the only lever was changing the password, which ends all of
- * them at once.
+ * them at once. The device this page is open on is marked and has no button:
+ * disconnecting it is "Esci", in the user menu.
+ *
+ * With `userId`, another account's devices, for whoever manages it (the API
+ * decides); "every other device" is only offered for one's own.
  */
-export function SessionList() {
-  const { data, loading, error: loadError, refresh } = useResource<{ sessions: Session[] }>("/api/sessions");
-  const sessions = data?.sessions ?? [];
+export function SessionList({ userId }: { userId?: string } = {}) {
+  const url = userId ? `/api/sessions?userId=${encodeURIComponent(userId)}` : "/api/sessions";
+  const { data, loading, error: loadError, refresh } = useResource<{ sessions: Session[] }>(url);
+  const [confirmOthers, setConfirmOthers] = useState(false);
+  // The current device first: it is the one the list is read from.
+  const sessions = [...(data?.sessions ?? [])].sort((a, b) => Number(Boolean(b.current)) - Number(Boolean(a.current)));
+  const others = sessions.filter((s) => !s.current).length;
 
   async function revoke(id: string) {
     try {
@@ -60,6 +73,23 @@ export function SessionList() {
       refresh();
     } catch {
       toast.error("Disconnessione non riuscita");
+    }
+  }
+
+  async function revokeOthers(): Promise<boolean> {
+    try {
+      const res = await fetch("/api/sessions?others=1", { method: "DELETE" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(body.error || "Disconnessione non riuscita");
+        return false;
+      }
+      toast.success(body.closed === 1 ? "1 dispositivo disconnesso" : `${body.closed ?? 0} dispositivi disconnessi`);
+      await refresh();
+      return true;
+    } catch {
+      toast.error("Disconnessione non riuscita");
+      return false;
     }
   }
 
@@ -82,28 +112,54 @@ export function SessionList() {
   }
 
   return (
-    <ul className="divide-border divide-y">
-      {sessions.map((session) => (
-        <li key={session.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-          <Icon icon="solar:monitor-linear" width={18} className="text-muted shrink-0" aria-hidden />
-          <div className="min-w-0 flex-1">
-            <p className="text-foreground truncate text-sm">{describeDevice(session.user_agent)}</p>
-            <p className="text-muted mt-0.5 truncate text-xs">
-              {session.ip ? <span className="font-mono">{session.ip}</span> : "IP sconosciuto"}
-              {" · attivo "}
-              {formatRelative(session.last_seen_at)}
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Disconnetti questo dispositivo"
-            onPress={() => revoke(session.id)}
-          >
-            Disconnetti
+    <div className="space-y-3">
+      <ul className="divide-border divide-y">
+        {sessions.map((session) => (
+          <li key={session.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+            <Icon icon="solar:monitor-linear" width={18} className="text-muted shrink-0" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="text-foreground flex min-w-0 items-center gap-2 text-sm">
+                <span className="truncate">{describeDevice(session.user_agent)}</span>
+                {session.current && <Badge tone="accent">Questo dispositivo</Badge>}
+              </p>
+              <p className="text-muted mt-0.5 truncate text-xs">
+                {session.ip ? <span className="font-mono">{session.ip}</span> : "IP sconosciuto"}
+                {" · attivo "}
+                {formatRelative(session.last_seen_at)}
+              </p>
+            </div>
+            {!session.current && (
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Disconnetti questo dispositivo"
+                onPress={() => revoke(session.id)}
+              >
+                Disconnetti
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {!userId && others > 0 && (
+        <div className="border-border border-t pt-3">
+          <Button variant="secondary" size="sm" onPress={() => setConfirmOthers(true)}>
+            <Icon icon="solar:logout-2-linear" width={15} aria-hidden />
+            Esci da tutti gli altri dispositivi
           </Button>
-        </li>
-      ))}
-    </ul>
+        </div>
+      )}
+
+      <ConfirmDialog
+        isOpen={confirmOthers}
+        onOpenChange={setConfirmOthers}
+        title="Uscire da tutti gli altri dispositivi?"
+        description={`${others === 1 ? "L'altro dispositivo viene disconnesso" : `Gli altri ${others} dispositivi vengono disconnessi`} subito: per rientrare serviranno di nuovo email e password. Questo resta collegato.`}
+        confirmLabel="Esci dagli altri"
+        destructive
+        onConfirm={revokeOthers}
+      />
+    </div>
   );
 }

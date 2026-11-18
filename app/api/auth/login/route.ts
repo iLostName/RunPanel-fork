@@ -13,6 +13,7 @@ import { refuseCrossOrigin } from "@/lib/request-origin";
 import { joinCluster } from "@/services/cluster/join";
 import { isNodeOnly } from "@/services/cluster/state";
 import { panelRelease } from "@/services/panel-update/release";
+import { isRememberedDevice, isTwoFactorEnabled, issueLoginChallenge } from "@/lib/two-factor";
 
 /** Per client address, once there is a client address worth counting. */
 const MAX_ATTEMPTS_PER_IP = 5;
@@ -217,8 +218,30 @@ export async function POST(request: NextRequest) {
   }
 
   await clearBuckets();
+
+  // Two-step sign-in: the password was right, and now a code decides — unless
+  // this browser was remembered for this account. No session yet: the page
+  // gets a short-lived token to send back with the code
+  // (`/api/auth/login/two-factor`). Only a right password ever reaches this
+  // answer, so it says nothing about which accounts exist.
+  let remembered = false;
+  if (await isTwoFactorEnabled(user.id)) {
+    remembered = await isRememberedDevice(user.id);
+    if (!remembered) {
+      return NextResponse.json({ twoFactorRequired: true, challenge: await issueLoginChallenge(user.id) });
+    }
+  }
+
   await createSession(user.id, sessionMeta);
   await recordLogin(user.id);
-  await audit({ userId: user.id, category: "security", action: "auth.login", scope: "user", scopeId: user.id, request });
+  await audit({
+    userId: user.id,
+    category: "security",
+    action: "auth.login",
+    scope: "user",
+    scopeId: user.id,
+    detail: remembered ? "dispositivo ricordato, senza codice" : null,
+    request,
+  });
   return NextResponse.json({ success: true, emailRequired: user.email === null });
 }

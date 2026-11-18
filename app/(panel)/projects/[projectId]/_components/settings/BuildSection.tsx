@@ -1,25 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { Button } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import { useResource } from "@/lib/hooks/useResource";
 import { useNodeApi } from "@/lib/hooks/useNode";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Segmented } from "@/components/ui/Segmented";
-import { SettingToggle } from "@/components/ui/SettingToggle";
 import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { CommandField } from "@/components/ui/CommandField";
 import { Field } from "@/components/ui/Field";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { Advanced } from "@/components/ui/Technical";
-import { HealthcheckHint } from "@/components/DeployHints";
 import type { RuntimeType } from "@/lib/validation";
 import { OneTimeCommandsSection } from "../OneTimeCommandsSection";
 import type { RegisterPendingSave } from "../pending-saves";
 import type { Project } from "../types";
 import type { DeployForm } from "./useDeployForm";
+import { HealthcheckPanel } from "./HealthcheckPanel";
 
 interface Preset {
   id: string;
@@ -235,66 +234,7 @@ export function BuildSection({
         onChanged={(queued) => (queued ? onProjectChange((prev) => ({ ...prev, oneTimeCommands: queued })) : onRefresh())}
       />
 
-      <Panel className="space-y-4">
-        <PanelHeader
-          title="Controllo di salute"
-          description={
-            contract.healthcheck.enabled
-              ? "Dopo ogni deploy il pannello aspetta che l'app risponda prima di darlo per riuscito"
-              : "Spento: il deploy riesce appena il processo parte"
-          }
-          actions={
-            <SettingToggle
-              label="Attivo"
-              isSelected={contract.healthcheck.enabled}
-              onChange={(v) => patchContract({ healthcheck: { ...contract.healthcheck, enabled: v } })}
-              className="w-auto"
-            />
-          }
-        />
-        {contract.healthcheck.enabled ? (
-          <>
-            <HealthcheckHint />
-            {isDocker ? (
-              <SettingToggle
-                label="Se non risponde, rimetti online la versione precedente"
-                description="La nuova versione resta come deploy fallito, da correggere; intanto l'app continua a funzionare con quella di prima."
-                isSelected={contract.rollback.enabled}
-                onChange={(enabled) => patchContract({ rollback: { enabled } })}
-              />
-            ) : (
-              <FieldHint>
-                Il ritorno automatico alla versione precedente, per ora, c&apos;è solo con il runtime Docker.
-              </FieldHint>
-            )}
-            <div className="grid gap-4 sm:grid-cols-3">
-              <TextField value={contract.healthcheck.path} onChange={(v) => patchContract({ healthcheck: { ...contract.healthcheck, path: v } })}>
-                <Label>Percorso</Label>
-                <Input placeholder="/" className="font-mono text-sm" />
-              </TextField>
-              <TextField
-                value={String(contract.healthcheck.startPeriodSec)}
-                onChange={(v) => patchContract({ healthcheck: { ...contract.healthcheck, startPeriodSec: Number.parseInt(v, 10) || 0 } })}
-              >
-                <Label>Attesa iniziale (s)</Label>
-                <Input type="number" />
-              </TextField>
-              <TextField
-                value={String(contract.healthcheck.timeoutSec)}
-                onChange={(v) => patchContract({ healthcheck: { ...contract.healthcheck, timeoutSec: Number.parseInt(v, 10) || 30 } })}
-              >
-                <Label>Tempo massimo (s)</Label>
-                <Input type="number" />
-              </TextField>
-            </div>
-          </>
-        ) : (
-          <p className="text-muted text-sm">
-            Giusto per bot e worker senza pagine web. Per un sito, senza controllo un&apos;app che parte e muore un secondo
-            dopo risulta comunque distribuita.
-          </p>
-        )}
-      </Panel>
+      <HealthcheckPanel form={form} />
     </div>
   );
 }

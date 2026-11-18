@@ -11,6 +11,7 @@ import { SelectField } from "@/components/ui/SelectField";
 import { SettingToggle } from "@/components/ui/SettingToggle";
 import { CopyField } from "@/components/ui/CopyField";
 import { CommandBlock } from "@/components/ui/CommandBlock";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Hint, FieldHint } from "@/components/ui/Hint";
 import { LoadError } from "@/components/ui/LoadError";
@@ -158,6 +159,19 @@ export default function McpPage() {
                 Endpoint MCP: <span className="font-mono">{endpoint}</span>. Ogni token agisce come te, con i tuoi
                 stessi permessi su progetti, servizi e server del cluster.
               </FieldHint>
+            </Panel>
+
+            <Panel>
+              <PanelHeader
+                title="Riferimento API"
+                description="Ogni endpoint che un token può chiamare, con un esempio curl da copiare"
+                actions={
+                  <LinkButton href="/mcp/api" variant="secondary">
+                    <Icon icon="solar:code-square-linear" width={15} aria-hidden />
+                    Apri
+                  </LinkButton>
+                }
+              />
             </Panel>
 
             {created && (

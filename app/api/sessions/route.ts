@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireUser } from "@/lib/auth-guard";
 import { audit } from "@/lib/audit";
-import { listSessions, revokeSession } from "@/lib/auth";
+import { destroyUserSessions, isClusterSession, listSessions, revokeSession } from "@/lib/auth";
 import { canEditUser, type Principal } from "@/lib/authz";
 import { getUserAccess } from "@/lib/users";
 import { getDb } from "@/lib/db";
@@ -29,10 +29,32 @@ export async function GET(request: NextRequest) {
   );
 }
 
-/** Revoke one device. */
+/**
+ * Revoke one device, or with `?others=1` every device of one's own but this
+ * one. The latter only from a browser session: "this one" has to be a session
+ * row, and a token or another panel calling here has none to keep.
+ */
 export async function DELETE(request: NextRequest) {
   const ctx = await requireUser({ allowMissingEmail: true });
   if (isDenied(ctx)) return ctx;
+
+  if (request.nextUrl.searchParams.get("others") === "1") {
+    if (ctx.session.apiToken || isClusterSession(ctx.session.sessionId)) {
+      return NextResponse.json({ error: "Si fa dal browser: serve una sessione da tenere" }, { status: 403 });
+    }
+    const userId = ctx.session.user.id;
+    const closed = await destroyUserSessions(userId, ctx.session.sessionId);
+    await audit({
+      userId,
+      category: "security",
+      action: "session.revoke-others",
+      scope: "user",
+      scopeId: userId,
+      detail: `${closed} sessioni`,
+      request,
+    });
+    return NextResponse.json({ success: true, closed, sessions: await listSessions(userId) });
+  }
 
   const id = request.nextUrl.searchParams.get("id");
   if (!id) {
