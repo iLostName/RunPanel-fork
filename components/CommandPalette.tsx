@@ -45,6 +45,8 @@ export function openCommandPalette(): void {
 interface Indexed {
   projects: { id: string; name: string; slug: string; memberId?: string; memberName?: string }[];
   services: { id: string; name: string; type: string; memberId?: string; memberName?: string }[];
+  /** The catalogue's apps, loaded with the rest so the layout's bundle does not carry it. */
+  apps: { id: string; name: string; description: string; keywords: readonly string[]; icon: string }[];
 }
 
 export function CommandPalette() {
@@ -56,6 +58,7 @@ export function CommandPalette() {
   const allowed = useAllowedNav();
   const PAGES = useMemo(() => NAV_PAGES.filter(allowed), [allowed]);
   const canCreate = useCan("projects.create");
+  const canHost = useCan("host");
   const canBackup = useCan("backup");
   const canAutostart = useCan("autostart");
   const { expert, setExpert } = useExpertMode();
@@ -63,7 +66,7 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  const [index, setIndex] = useState<Indexed>({ projects: [], services: [] });
+  const [index, setIndex] = useState<Indexed>({ projects: [], services: [], apps: [] });
   const inputRef = useRef<HTMLInputElement>(null);
   const chord = useRef<string | null>(null);
 
@@ -72,11 +75,15 @@ export function CommandPalette() {
       // In a cluster, every server's projects and services, each with its server.
       const read = (url: string) =>
         fetch(url).then((res) => (res.ok ? res.json() : null)).then((body) => (Array.isArray(body) ? body : (body?.items ?? [])));
-      const [projects, services] = await Promise.all([
+      const [projects, services, apps] = await Promise.all([
         read(isSolo ? api("/api/projects") : "/api/cluster/projects"),
         read(isSolo ? api("/api/services") : "/api/cluster/services"),
+        import("@/lib/app-catalog").then(
+          ({ CATALOG }) => CATALOG.map(({ id, name, description, keywords, icon }) => ({ id, name, description, keywords, icon })),
+          () => []
+        ),
       ]);
-      setIndex({ projects, services });
+      setIndex({ projects, services, apps });
     } catch {
       /* the static pages are still worth offering */
     }
@@ -209,6 +216,28 @@ export function CommandPalette() {
         run: () => router.push(href("/projects/new")),
       });
     }
+    // The catalogue, and each of its apps by name: typing "wordpress" should
+    // find the way to install it, not only the projects already called that.
+    if (canCreate && canHost) {
+      list.push({
+        id: "action:catalog",
+        label: "Installa un'app pronta",
+        hint: "azione",
+        also: "catalogo modello template app",
+        icon: "solar:widget-add-linear",
+        run: () => router.push(href("/projects/new/catalog")),
+      });
+      for (const app of index.apps) {
+        list.push({
+          id: `catalog:${app.id}`,
+          label: `Installa ${app.name}`,
+          hint: "app pronta",
+          also: `${app.description} ${app.keywords.join(" ")}`,
+          icon: app.icon,
+          run: () => router.push(href(`/projects/new/catalog/${app.id}`)),
+        });
+      }
+    }
     if (canBackup) {
       list.push({
         id: "action:new-backup",
@@ -243,7 +272,7 @@ export function CommandPalette() {
     }
 
     return list;
-  }, [index, router, PAGES, api, href, canCreate, canBackup, canAutostart, expert, setExpert, themeMode, setThemeMode]);
+  }, [index, router, PAGES, api, href, canCreate, canHost, canBackup, canAutostart, expert, setExpert, themeMode, setThemeMode]);
 
   // Keeps the highlighted row in view while the arrows walk past the fold.
   useEffect(() => {

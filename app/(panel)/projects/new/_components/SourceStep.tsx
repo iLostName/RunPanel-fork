@@ -1,11 +1,12 @@
 "use client";
 
 import { useRef, useState, type DragEvent } from "react";
+import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { useResource } from "@/lib/hooks/useResource";
 import { useCan } from "@/lib/hooks/useMe";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
@@ -35,6 +36,8 @@ export function SourceStep({
   onContinue: (source: PickedSource, githubConnected: boolean) => void;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
+  const router = useRouter();
   // Both: choosing a repository needs GitHub, and the server guards what code a
   // project runs behind the host permission (lib/host-guard.ts).
   const hasGithub = useCan("github");
@@ -110,7 +113,7 @@ export function SourceStep({
     <div className="max-w-2xl space-y-4">
       <ServerPicker description="Il progetto vivrà su questo server: build, file e processi stanno lì." />
 
-      <ChoiceGroup label="Da dove arriva il codice" className="sm:grid-cols-2">
+      <ChoiceGroup label="Da dove arriva il codice" className="sm:grid-cols-3">
         <ChoiceCard
           selected={kind === "github"}
           onSelect={() => setKind("github")}
@@ -129,6 +132,19 @@ export function SourceStep({
           icon="solar:archive-linear"
           title="Da un archivio ZIP"
           description="Carichi i file del progetto. Per aggiornarla, ricarichi lo ZIP."
+        />
+        {/* Not a third kind of source: the catalogue has its own page and its own install. */}
+        <ChoiceCard
+          selected={false}
+          onSelect={() => router.push(href("/projects/new/catalog"))}
+          isDisabled={!hasHost}
+          icon="solar:widget-add-linear"
+          title="Da un modello"
+          description={
+            hasHost
+              ? "Un'app pronta (n8n, WordPress, Uptime Kuma…): poche domande e va online."
+              : "Serve il permesso Accesso all'host: chiedilo a chi gestisce il pannello."
+          }
         />
       </ChoiceGroup>
 
