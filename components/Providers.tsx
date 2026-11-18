@@ -8,6 +8,7 @@ import { Toaster } from "sonner";
 import { ErrorDetailsDialog } from "@/components/ErrorDetailsDialog";
 import { solarSubset } from "@/lib/icons.generated";
 import { DEFAULT_ACCENT, type AccentPreset } from "@/lib/themes";
+import { expertCookie } from "@/lib/expert-mode";
 import {
   DEFAULT_THEME_MODE,
   THEME_COOKIE,
@@ -54,17 +55,41 @@ export function useThemeMode(): ThemeModeContextValue {
   return useContext(ThemeModeContext);
 }
 
+interface ExpertModeContextValue {
+  /** Technical details inline and "Avanzate" open by default: see lib/expert-mode.ts. */
+  expert: boolean;
+  setExpert: (enabled: boolean) => void;
+}
+
+const ExpertModeContext = createContext<ExpertModeContextValue>({
+  expert: false,
+  setExpert: () => {},
+});
+
+export function useExpertMode(): ExpertModeContextValue {
+  return useContext(ExpertModeContext);
+}
+
 export function Providers({
   children,
   accent: initialAccent,
   themeMode: initialThemeMode,
+  expert: initialExpert = false,
 }: {
   children: React.ReactNode;
   accent: AccentPreset;
   themeMode: ThemeMode;
+  expert?: boolean;
 }) {
   const router = useRouter();
   const [accent, setAccentState] = useState<AccentPreset>(initialAccent);
+
+  const [expert, setExpertState] = useState(initialExpert);
+  const setExpert = useCallback((enabled: boolean) => {
+    setExpertState(enabled);
+    document.cookie = expertCookie(enabled);
+    document.documentElement.setAttribute("data-expert", enabled ? "true" : "false");
+  }, []);
 
   const setAccent = useCallback((preset: AccentPreset) => {
     setAccentState(preset);
@@ -96,6 +121,7 @@ export function Providers({
 
   return (
     <ThemeModeContext.Provider value={{ mode: themeMode, setMode: setThemeMode }}>
+    <ExpertModeContext.Provider value={{ expert, setExpert }}>
     <AccentContext.Provider value={{ accent, setAccent }}>
       <RouterProvider navigate={router.push}>
         {children}
@@ -123,6 +149,7 @@ export function Providers({
         <ErrorDetailsDialog />
       </RouterProvider>
     </AccentContext.Provider>
+    </ExpertModeContext.Provider>
     </ThemeModeContext.Provider>
   );
 }

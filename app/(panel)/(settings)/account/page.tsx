@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
 import { ThemeModePicker } from "@/components/ui/ThemeModePicker";
+import { ExpertModeToggle } from "@/components/ui/ExpertModeToggle";
 import { SessionList } from "@/components/ui/SessionList";
 import { useMe } from "@/lib/hooks/useMe";
 
@@ -140,7 +141,7 @@ export default function AccountPage() {
           <SessionList />
         </Section>
 
-        <Section title="Aspetto" summary="Tema chiaro, scuro o quello del sistema" defaultExpanded>
+        <Section title="Aspetto" summary="Tema, e quanti dettagli tecnici vedere" defaultExpanded>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-foreground text-sm font-medium">Tema</p>
@@ -148,6 +149,7 @@ export default function AccountPage() {
             </div>
             <ThemeModePicker />
           </div>
+          <ExpertModeToggle />
         </Section>
       </div>
     </>

@@ -6,6 +6,7 @@ import { Background } from "@/components/Background";
 import { getSetting } from "@/lib/settings";
 import { ACCENT_SETTING_KEY, DEFAULT_ACCENT, resolveAccent } from "@/lib/themes";
 import { THEME_BOOT_SCRIPT, THEME_COOKIE, resolveThemeMode, serverPalette } from "@/lib/theme-mode";
+import { EXPERT_COOKIE, resolveExpertMode } from "@/lib/expert-mode";
 import "./globals.css";
 
 const sans = Geist({
@@ -53,8 +54,10 @@ export default async function RootLayout({
     /* first run, or the store is still starting up */
   }
 
-  const themeMode = resolveThemeMode((await cookies()).get(THEME_COOKIE)?.value);
+  const cookieStore = await cookies();
+  const themeMode = resolveThemeMode(cookieStore.get(THEME_COOKIE)?.value);
   const palette = serverPalette(themeMode);
+  const expert = resolveExpertMode(cookieStore.get(EXPERT_COOKIE)?.value);
 
   return (
     <html
@@ -63,6 +66,7 @@ export default async function RootLayout({
       data-accent={accent}
       data-theme={palette}
       data-theme-mode={themeMode}
+      data-expert={expert ? "true" : "false"}
       suppressHydrationWarning
     >
       <head>
@@ -72,7 +76,7 @@ export default async function RootLayout({
       </head>
       <body>
         <Background />
-        <Providers accent={accent} themeMode={themeMode}>
+        <Providers accent={accent} themeMode={themeMode} expert={expert}>
           {children}
         </Providers>
       </body>
