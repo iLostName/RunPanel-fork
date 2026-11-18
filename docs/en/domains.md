@@ -31,7 +31,7 @@ The setup adds one file to nginx's configuration, `/etc/nginx/conf.d/runpanel.co
 
 The systemd route is not a detour: RunPanel's unit sets `NoNewPrivileges=yes`, under which sudo cannot work — and that flag is worth keeping, because it also stops every native project below the panel from ever using sudo.
 
-Deleting `/etc/nginx/conf.d/runpanel.conf` and reloading takes every managed name down at once.
+Deleting `/etc/nginx/conf.d/runpanel.conf` and reloading takes every managed name down at once — the panel's own HTTPS name too, while the panel stays on its port.
 
 ## Giving a project an address
 
@@ -94,11 +94,42 @@ nginx forwards to the port the app really listens on, over loopback, with `Host`
 
 The addresses a project answers on are also shown under its title, so it opens with one click without going through Settings; a lock marks the ones behind a password.
 
+## The panel itself over HTTPS
+
+The panel can open on a name of yours, with the padlock — `https://panel.example.com` instead of `http://203.0.113.7:3000` — through the same nginx and certbot. Owner only, from **Impostazioni › Pannello › Metti il pannello su HTTPS**:
+
+1. With nginx and certbot ready (the section shows the same setup step as the **Domini** page), choose a name: a word under one of the panel's domains, or a name typed whole, for a domain managed elsewhere.
+2. The DNS record to create is shown and checked live, as for a project's address; the certificate is asked for once the record leads here.
+3. With the certificate, the name is tested twice. From the server: nginx on this machine is asked for the name over TLS, the certificate must be valid for it, the panel's block must answer and the panel must be behind it. From your browser: it must reach `https://<name>` and find this server's token there — DNS, the firewall on 443 and the certificate, as your network sees them.
+4. Only then the panel offers to make it its **public address** (**Impostazioni › Pannello › Indirizzo pubblico**): the GitHub webhooks connected from then on, the links in notifications, the address given to a server joining the cluster.
+
+**Nothing is taken away.** The panel keeps listening on its port and the address you use now keeps working: the name is a second way in. The webhooks already on GitHub stay on their old address until **Riallinea** in each project's Webhook section. **Disattiva** removes the block, then the certificate, and — if the name was the public address — puts back what that setting held before. Turned off from the name itself, the page then shows where the panel still is: its port, on the server's public addresses.
+
+**What the block does.** Port 80 answers Let's Encrypt and the routing check, and before the certificate tells anyone else it is on its way: the panel is never served over plain HTTP on the name. Port 443 proxies to the panel's port on loopback with buffering off both ways (the project page's live events, an upload streaming through), an hour between reads, WebSockets passed through and no body limit of nginx's own — each route of the panel enforces its own. The panel must answer on `127.0.0.1:<port>`: a panel started on one interface only is told so before anything is written.
+
+**Forwarded headers.** nginx sets `Host`, `X-Forwarded-Proto`, `X-Forwarded-Host` and `X-Forwarded-For`, replacing whatever the visitor sent — `X-Forwarded-For` is the peer's address, not appended to — so through the name nobody can hand the panel values of their choosing. The panel reads them as behind any proxy: `Origin` against `Host` or `X-Forwarded-Host` for the cross-origin check, `Origin` (or `X-Forwarded-Proto`) for the session cookie's `Secure` flag, both deciding only about the request that carries them. `X-Forwarded-For`, the visitor's address for the per-address sign-in limit, is read only with `RUNPANEL_TRUSTED_PROXY_HOPS=1` (see [Configuration](configuration.md#putting-it-on-the-internet)): leave it at `0` while the panel's port is reachable from outside, because there the header is whatever the client typed, and set it to `1` once only nginx can reach the port.
+
+**HSTS.** The panel's own header (two years, `includeSubDomains`) is not passed on: on a name like `example.com` it would pin every project of the domain to HTTPS, some of them still waiting for their certificate. nginx sends `max-age=63072000` without `includeSubDomains`, and only once the name is the public address, so trying it out and turning it off leaves every browser as it was. From then on, browsers that opened the name use HTTPS only for it, on any port: `http://panel.example.com:3000` no longer opens there, the server's IP still does.
+
+**Several servers.** Each server has its own name, set from its own settings (choose it with the server selector). The other servers keep reaching it at the address it was linked with: the name does not change that.
+
+## A test address without a domain
+
+A project with no address yet can get one at once, from **Impostazioni › Indirizzi › Non ho un dominio: indirizzo di prova**: `app.203-0-113-7.sslip.io`. [sslip.io](https://sslip.io) answers every such name with the address written in it, so there is no DNS record to create.
+
+It is served **over HTTP only**, and the dialog says so before it is created:
+
+- sslip.io — and nip.io, run by the same people — is not on the Public Suffix List, so Let's Encrypt counts every certificate for every name under it against a single weekly limit shared with everyone who uses it. The service has had it raised by hand, up to 250,000, and in 2026 it still ran out within days of an increase. A certificate that may or may not come is not one the panel promises, so none is asked for, for any name under those services.
+- The name shows the server's IP, the lookups for it are answered by sslip.io's servers, and it depends on a free service run by volunteers: if sslip.io stops answering, the address stops working. A certificate would also have published the name in the public Certificate Transparency logs, where scanners find new sites within minutes.
+
+For anything real, give the project a domain of its own. A test address is removed like any other; if the server's IP changes it keeps pointing at the old one, so remove it and create a new one. The server's domain row (`203-0-113-7.sslip.io`) shows on the **Domini** page with no record to create.
+
 ## What is refused
 
 - A name already served by another nginx block: nginx would keep only one of the two, and the managed one would win, so the panel leaves it out and says so under the address.
-- The panel's own address (**Impostazioni › Pannello › Indirizzo pubblico**), also as a `www` twin.
-- An address assigned twice, a project without a port (set it in the **Porta** field of the project's settings), a domain still in use, a `www` twin for any subdomain other than `www`.
+- The panel's own address (**Impostazioni › Pannello › Indirizzo pubblico**) and its HTTPS name, also as a `www` twin.
+- An address assigned twice, a project without a port (set it in the **Porta** field of the project's settings), a domain still in use — by a project or by the panel's name — a `www` twin for any subdomain other than `www`.
+- As the panel's name: a project's name, a local name, a name under sslip.io or nip.io.
 
 ## Limits
 
