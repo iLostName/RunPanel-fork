@@ -117,18 +117,19 @@ export function InstallForm({
         ? `Esiste già un progetto con il nome interno «${slug}»`
         : null;
 
+  // A port field emptied by hand is back to "choose one for me", not an error.
+  const isAuto = (value: string | null | undefined) => value === null || value === undefined || value.trim() === "";
   const suggestedPort = firstFreePort(template.web.defaultPort, used);
   const portText = portTyped ?? String(suggestedPort);
   const typedPort = /^\d{1,5}$/.test(portText.trim()) ? Number(portText.trim()) : Number.NaN;
   const port = Number.isInteger(typedPort) ? typedPort : suggestedPort;
-  const portProblem =
-    portTyped === null
-      ? null
-      : !Number.isInteger(typedPort) || typedPort < MIN_APP_PORT || typedPort > 65535
-        ? `Una porta tra ${MIN_APP_PORT} e 65535`
-        : used.has(typedPort)
-          ? `La usa già «${ownerOf(typedPort) ?? "il pannello"}»`
-          : null;
+  const portProblem = isAuto(portTyped)
+    ? null
+    : !Number.isInteger(typedPort) || typedPort < MIN_APP_PORT || typedPort > 65535
+      ? `Una porta tra ${MIN_APP_PORT} e 65535`
+      : used.has(typedPort)
+        ? `La usa già «${ownerOf(typedPort) ?? "il pannello"}»`
+        : null;
 
   const defaults = useMemo(() => defaultAnswers(template, { timezone: zone }), [template, zone]);
   const portSuggestions = useMemo(() => {
@@ -143,11 +144,15 @@ export function InstallForm({
     return out;
   }, [template, used, port]);
 
-  const valueOf = (question: CatalogQuestion) =>
+  /** What the field shows: what was typed, even nothing, or the suggestion. */
+  const fieldValue = (question: CatalogQuestion) =>
     typed[question.key] ?? (question.port ? portSuggestions[question.key] : defaults[question.key]) ?? "";
+  /** What the answer is: an emptied port field means the suggestion again. */
+  const valueOf = (question: CatalogQuestion) =>
+    question.port && isAuto(typed[question.key]) ? (portSuggestions[question.key] ?? "") : fieldValue(question);
   /** Null for a port question nobody typed in: the server chooses that one. */
   const problemOf = (question: CatalogQuestion): string | null => {
-    if (question.port && typed[question.key] === undefined) return null;
+    if (question.port && isAuto(typed[question.key])) return null;
     const raw = valueOf(question);
     const problem = answerProblem(question, question.type === "password" ? raw : raw.trim());
     if (problem || !question.port) return problem;
@@ -214,7 +219,7 @@ export function InstallForm({
     const sent: Record<string, string> = {};
     for (const question of template.questions) {
       // An untouched port is the server's to choose: it sees what is listening.
-      if (question.port && typed[question.key] === undefined) continue;
+      if (question.port && isAuto(typed[question.key])) continue;
       sent[question.key] = question.type === "password" ? valueOf(question) : valueOf(question).trim();
     }
 
@@ -225,7 +230,7 @@ export function InstallForm({
         body: JSON.stringify({
           templateId: template.id,
           name: name.trim(),
-          ...(portTyped !== null ? { port: typedPort } : {}),
+          ...(isAuto(portTyped) ? {} : { port: typedPort }),
           answers: sent,
           address: domain && label !== null ? { domainId: domain.id, subdomain: label } : null,
           publicHost,
@@ -263,7 +268,8 @@ export function InstallForm({
     <QuestionField
       key={question.key}
       question={question}
-      value={valueOf(question)}
+      value={fieldValue(question)}
+      placeholder={question.port ? portSuggestions[question.key] : undefined}
       onChange={(value) => {
         setTyped((t) => ({ ...t, [question.key]: value }));
         forget(`answers.${question.key}`);
@@ -322,7 +328,7 @@ export function InstallForm({
         <Field
           label="Porta sul server"
           hint={
-            portTyped === null
+            isAuto(portTyped)
               ? "Ne ho scelta una libera. Se al momento dell'installazione risulta occupata, ne prendo un'altra."
               : `Dentro il container l'app risponde sulla ${template.web.internalPort}: questa è la porta che lo stack pubblica sul server.`
           }
@@ -336,7 +342,7 @@ export function InstallForm({
             }}
             aria-label="Porta sul server"
           >
-            <Input inputMode="numeric" className="max-w-[10rem] font-mono text-sm" />
+            <Input inputMode="numeric" placeholder={String(suggestedPort)} className="max-w-[10rem] font-mono text-sm" />
           </TextField>
         </Field>
         {template.questions.filter((q) => q.advanced).map(renderQuestion)}

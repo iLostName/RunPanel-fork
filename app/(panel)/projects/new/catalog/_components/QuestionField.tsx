@@ -9,12 +9,15 @@ import type { CatalogQuestion } from "@/lib/app-catalog";
 export function QuestionField({
   question,
   value,
+  placeholder,
   onChange,
   error,
 }: {
   question: CatalogQuestion;
   /** As the variable will hold it: a boolean is its `on`/`off` value. */
   value: string;
+  /** Overrides the template's: the free port a cleared port field falls back to. */
+  placeholder?: string;
   onChange: (value: string) => void;
   error: string | null;
 }) {
@@ -43,7 +46,7 @@ export function QuestionField({
         <Input
           type={question.type === "password" ? "password" : question.type === "email" ? "email" : "text"}
           inputMode={question.type === "number" ? "numeric" : undefined}
-          placeholder={question.placeholder}
+          placeholder={placeholder ?? question.placeholder}
           className={question.type === "number" ? "max-w-[10rem] font-mono text-sm" : undefined}
         />
       </TextField>
