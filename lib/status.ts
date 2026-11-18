@@ -75,8 +75,18 @@ export function projectControlText(action: keyof typeof SERVICE_CONTROL): { done
   return { done: PROJECT_CONTROL_DONE[action], failed: SERVICE_CONTROL[action].failed };
 }
 
+/**
+ * What a status nothing here knows reads as.
+ *
+ * It used to fall back to "Fermo", which is a claim: a value from a newer
+ * server, or a state added to the API and forgotten here, showed a project as
+ * stopped when nobody knew that. Every status the store and the API produce has
+ * its own entry above, so this only ever covers the case it names.
+ */
+const UNKNOWN_STATUS: StatusMeta = { tone: "neutral", label: "Sconosciuto" };
+
 export function statusMeta(status: string): StatusMeta {
-  return STATUS_META[status as KnownStatus] ?? STATUS_META.stopped;
+  return Object.hasOwn(STATUS_META, status) ? STATUS_META[status as KnownStatus] : UNKNOWN_STATUS;
 }
 
 

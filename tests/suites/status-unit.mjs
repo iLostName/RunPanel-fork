@@ -25,6 +25,9 @@ export async function run({ repoRoot }) {
   // --- how it reads -----------------------------------------------------------
   r.check("a server that does not answer has its own label, not a stopped one", statusMeta("unreachable").label === "Non raggiungibile" && statusMeta("unreachable").tone === "danger");
   r.check("an unreachable row is never reconciled", isReconcilable("unreachable") === false);
+  r.check("a status nothing knows reads as unknown, not as stopped", statusMeta("chi lo sa").label === "Sconosciuto" && statusMeta("chi lo sa").tone === "neutral");
+  r.check("an inherited property name is not a status", statusMeta("toString").label === "Sconosciuto");
+  r.check("a known status keeps its label", statusMeta("stopped").label === "Fermo" && statusMeta("running").label === "In esecuzione");
   for (const action of ["start", "stop", "restart"]) {
     const text = serviceControlText(action);
     r.check(`the outcome of "${action}" does not show the API token`, !text.done.includes(action) && !text.failed.includes(action), JSON.stringify(text));
