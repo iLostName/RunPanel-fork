@@ -3,8 +3,9 @@ import { z } from "zod";
 import { isDenied, requireOwner, requirePermission } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { destinationTypes, destinationUpdateSchema, s3ConfigSchema } from "@/lib/validation";
+import { destinationTypes, destinationUpdateSchema, s3ConfigInput, s3ConfigSchema } from "@/lib/validation";
 import { destinationConfig, transientDestination } from "@/services/backup/destinations";
+import { isRemoteType, prepareRemoteConfig } from "@/services/backup/destinations/kinds";
 
 const checkSchema = z
   .object({
@@ -52,6 +53,23 @@ export async function POST(request: NextRequest) {
       if (row.type !== type) return NextResponse.json({ error: "Il tipo di una destinazione non cambia" }, { status: 400 });
       merged = destinationConfig(row);
     }
+
+    if (isRemoteType(type)) {
+      // The same preparation as saving, so what passes here is what gets
+      // stored: the generated key unsealed, the OneDrive drive looked up, an
+      // rclone section refused to anyone but the owner — it would run here.
+      const prepared = await prepareRemoteConfig(type, parsed.data.config ?? {}, destinationId ? merged : null, { isOwner: denied.principal.isOwner });
+      if (!prepared.ok) {
+        if (prepared.status === 403) return NextResponse.json({ error: prepared.error }, { status: 403 });
+        return NextResponse.json({ ok: false, message: prepared.error });
+      }
+      try {
+        return NextResponse.json(await transientDestination(type, prepared.config).test());
+      } catch (err) {
+        return NextResponse.json({ ok: false, message: err instanceof Error ? err.message : "Verifica fallita" });
+      }
+    }
+
     for (const [key, value] of Object.entries(parsed.data.config ?? {})) {
       if (value === undefined || (key === "secretAccessKey" && value === "")) continue;
       merged[key] = typeof value === "string" ? value.trim() : value;
@@ -59,6 +77,8 @@ export async function POST(request: NextRequest) {
     if (merged.prefix === "") delete merged.prefix;
 
     if (type === "s3") {
+      const shape = s3ConfigInput.safeParse(parsed.data.config ?? {});
+      if (!shape.success) return NextResponse.json({ error: "Dati non validi", details: shape.error.issues }, { status: 400 });
       const valid = s3ConfigSchema.safeParse(merged);
       if (!valid.success) {
         return NextResponse.json({

@@ -7,6 +7,7 @@ import { getDb, nowIso } from "@/lib/db";
 import { generateId } from "@/lib/utils";
 import { destinationSchema } from "@/lib/validation";
 import { destinationTarget, destinationUsage } from "@/services/backup/destinations";
+import { isRemoteType, prepareRemoteConfig } from "@/services/backup/destinations/kinds";
 
 export async function GET() {
   const denied = await requirePermission("backup");
@@ -21,8 +22,8 @@ export async function GET() {
 
   // The config is never returned whole: it is ciphertext, and for anything
   // other than `local` it holds the keys. Where it writes is shown — bucket,
-  // region, endpoint — because "su quale bucket?" is the question the list
-  // exists to answer.
+  // region, endpoint; server, folder, host key fingerprint — because "dove
+  // finiscono?" is the question the list exists to answer.
   return NextResponse.json({
     destinations: rows.map((row) => {
       const used = usage.get(row.id);
@@ -93,6 +94,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // The remote types are completed on the way in — a generated key unsealed,
+    // a OneDrive drive looked up — and validated whole (kinds.ts). S3 keeps the
+    // check of its schema above; the local disk has nothing to store.
+    let stored: Record<string, unknown> = config ?? {};
+    if (isRemoteType(type)) {
+      const prepared = await prepareRemoteConfig(type, config ?? {}, null, { isOwner: denied.principal.isOwner });
+      if (!prepared.ok) return NextResponse.json({ error: prepared.error }, { status: prepared.status });
+      stored = prepared.config;
+    }
+
     const id = generateId();
     const now = nowIso();
 
@@ -104,7 +115,7 @@ export async function POST(request: NextRequest) {
           id,
           name,
           type,
-          config: encrypt(JSON.stringify(config ?? {})),
+          config: encrypt(JSON.stringify(stored)),
           is_default: isDefault ? 1 : 0,
           created_at: now,
           updated_at: now,
