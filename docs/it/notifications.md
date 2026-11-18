@@ -32,7 +32,7 @@ In **Impostazioni › Generale › Notifiche**, per il proprietario e per chi ha
 | **Email** | Uno o più indirizzi, e il server di posta del pannello (vedi sotto) |
 | **Telegram** | Il token di un bot creato con `@BotFather` e la chat: scrivi al bot, poi **Rileva** elenca le chat che gli hanno scritto |
 | **Discord** | L'URL di un webhook del canale (impostazioni del canale › Integrazioni › Webhook) |
-| **Slack** | Un URL di *Incoming Webhooks* (`https://hooks.slack.com/…`) |
+| **Slack** | Un URL di *Incoming Webhooks* (`https://hooks.slack.com/services/…`) |
 | **ntfy** | Un argomento, a cui ti iscrivi dall'app ntfy; se vuoi, un tuo server e un token di accesso |
 | **Webhook** | Un indirizzo https (http solo verso un indirizzo privato) e un segreto per la firma |
 

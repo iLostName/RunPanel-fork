@@ -298,6 +298,10 @@ export async function run({ repoRoot }) {
     const slackUrl = "https://hooks.slack.com/services/T0000000/B0000000/XXXXXXXXXXXXXXXXXXXXXXXX";
     r.check("a Slack webhook passes", c.SLACK_WEBHOOK_PATTERN.test(slackUrl));
     r.check("another host does not", !c.SLACK_WEBHOOK_PATTERN.test(slackUrl.replace("hooks.slack.com", "hooks.example.com")));
+    r.check(
+      "a workflow URL is not an incoming webhook",
+      !c.SLACK_WEBHOOK_PATTERN.test("https://hooks.slack.com/workflows/T0000000/A0000000/123456789/abcdefghij")
+    );
 
     const discordHint = c.urlHint("discord", discordUrl);
     r.check("a Discord hint names the webhook", discordHint.includes("123456789012345678"), discordHint);

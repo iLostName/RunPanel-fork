@@ -127,7 +127,12 @@ export const TELEGRAM_CHAT_PATTERN = /^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$
 export const DISCORD_WEBHOOK_PATTERN =
   /^https:\/\/(?:(?:ptb|canary)\.)?discord(?:app)?\.com\/api(?:\/v\d{1,2})?\/webhooks\/\d{5,25}\/[A-Za-z0-9_-]{20,200}$/;
 
-export const SLACK_WEBHOOK_PATTERN = /^https:\/\/hooks\.slack\.com\/(?:services|workflows|triggers)\/[A-Za-z0-9_/-]{10,200}$/;
+/**
+ * An Incoming Webhook, `/services/…`. Workflow and trigger URLs on the same
+ * host take variables a workflow defines, not a message, and would refuse
+ * what the panel sends with an `invalid_payload` nobody could act on.
+ */
+export const SLACK_WEBHOOK_PATTERN = /^https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9_/-]{10,200}$/;
 
 /** What ntfy accepts as a topic name. */
 export const NTFY_TOPIC_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;

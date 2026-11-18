@@ -32,7 +32,7 @@ In **Impostazioni › Generale › Notifiche**, for the owner and whoever holds 
 | **Email** | One or more addresses, and the panel's mail server (see below) |
 | **Telegram** | A bot token from `@BotFather` and the chat: write to the bot, then **Rileva** lists the chats that wrote to it |
 | **Discord** | A channel webhook URL (channel settings › Integrations › Webhooks) |
-| **Slack** | An *Incoming Webhooks* URL (`https://hooks.slack.com/…`) |
+| **Slack** | An *Incoming Webhooks* URL (`https://hooks.slack.com/services/…`) |
 | **ntfy** | A topic, subscribed to in the ntfy app; optionally your own server and an access token |
 | **Webhook** | An https URL (http only towards a private address) and a signing secret |
 

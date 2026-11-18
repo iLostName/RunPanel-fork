@@ -128,7 +128,7 @@ const discordUrl = z
 const slackUrl = z
   .string()
   .trim()
-  .regex(SLACK_WEBHOOK_PATTERN, "Non sembra un webhook di Slack: deve iniziare con https://hooks.slack.com/");
+  .regex(SLACK_WEBHOOK_PATTERN, "Non sembra un Incoming Webhook di Slack: deve iniziare con https://hooks.slack.com/services/");
 const ntfyToken = z
   .string()
   .trim()

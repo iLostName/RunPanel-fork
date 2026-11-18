@@ -185,7 +185,7 @@ export function ChannelDialog({
         ? "Deve iniziare con https://discord.com/api/webhooks/"
         : null) ??
       (kind === "slack" && webhookUrl.trim() && !SLACK_WEBHOOK_PATTERN.test(webhookUrl.trim())
-        ? "Deve iniziare con https://hooks.slack.com/"
+        ? "Deve iniziare con https://hooks.slack.com/services/"
         : null),
     topic: kind === "ntfy" && topic.trim() && !NTFY_TOPIC_PATTERN.test(topic.trim()) ? "Solo lettere, numeri, - e _ (al massimo 64)" : null,
     ntfyServer: kind === "ntfy" && !isHttpUrl(ntfyServer) ? "Un indirizzo che inizia con https://" : null,
@@ -454,7 +454,7 @@ export function ChannelDialog({
               ) : (
                 <>
                   Su <Code>api.slack.com/apps</Code> crea un&apos;app, attiva <strong className="text-foreground">Incoming Webhooks</strong>{" "}
-                  e aggiungine uno per il canale che vuoi: copia l&apos;URL che inizia con <Code>https://hooks.slack.com/</Code>.
+                  e aggiungine uno per il canale che vuoi: copia l&apos;URL che inizia con <Code>https://hooks.slack.com/services/</Code>.
                 </>
               )}
             </Hint>
