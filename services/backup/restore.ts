@@ -285,7 +285,8 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
   try {
     const resolved = await resolveArchive(request, staging, emit);
     // The file and the opener that knows its password travel together: every
-    // read below goes through the decryption, and nothing in clear is written.
+    // read below goes through the decryption, and the archive is never written
+    // out in clear — only the members a step needs are extracted, as from a zip.
     const archive: ArchiveHandle = { file: resolved.file, open: resolved.open };
     emit(`Archivio: ${path.basename(archive.file)} (${formatBytes(fs.statSync(archive.file).size)})`);
     const sealed = await readSealedHead(archive.file).catch(() => null);

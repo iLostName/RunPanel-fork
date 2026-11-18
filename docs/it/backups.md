@@ -91,6 +91,8 @@ Con la cifratura attiva, ogni archivio esce dal server cifrato per intero con la
 
 > **Se perdi la password, perdi i backup che stanno fuori da questo server.** Nessuno, RunPanel compreso, può recuperarla. Tienila in un gestore di password, non sul server che protegge. Se l'hai cambiata, tieni anche quelle di prima finché esistono archivi cifrati con loro: la data della password è scritta in chiaro nell'archivio, e il pannello la mostra quando la chiede.
 
+Le password stanno nello store del pannello. Ripristinare lo store rimette quelle che c'erano il giorno di quel backup: gli archivi cifrati con una password impostata dopo, da lì in poi, la chiedono. Lo stesso vale per uno store portato su un server con un'altra chiave.
+
 ### Su un altro server
 
 **Ripristina da un archivio** accetta anche i `.zip.enc`. Uno cifrato da questo pannello si apre da solo. Uno di un altro server si ferma su **serve la password**: scrivi quella in uso il giorno del backup, il pannello la prova sull'archivio (se è sbagliata lo dice subito), poi lo controlla e lo ripristina come gli altri. La password resta con l'archivio caricato, cifrata con la chiave del pannello, e viene cancellata con lui. Lo stesso vale per un backup della lista cifrato con una password che il pannello non ha più, per esempio dopo aver ripristinato lo store di un altro pannello: il dialog del ripristino la chiede.
@@ -142,7 +144,7 @@ Il ripristino è un solo dialog. È tutto selezionato; ogni voce dice, in una ri
 Prima di fermare, copiare o sovrascrivere qualsiasi cosa:
 
 1. Un archivio su S3 viene scaricato nella cartella di lavoro del ripristino (serve lo spazio libero, più la riserva di 2 GB), con lo sha256 calcolato durante il download e confrontato con quello registrato quando è stato scritto; se non coincide il ripristino si ferma.
-2. I file che il ripristino userà — solo quelli — vengono controllati come fa **Verifica integrità**. Se uno è danneggiato, o la password di un archivio cifrato manca o è sbagliata, il ripristino si ferma senza aver toccato niente. Niente viene decifrato su disco: i file passano dalla decifratura direttamente al ripristino.
+2. I file che il ripristino userà — solo quelli — vengono controllati come fa **Verifica integrità**. Se uno è danneggiato, o la password di un archivio cifrato manca o è sbagliata, il ripristino si ferma senza aver toccato niente. Un archivio cifrato non viene mai decifrato per intero su disco: come per uno zip, il ripristino estrae solo i file che gli servono nella sua cartella di lavoro, che viene cancellata alla fine.
 3. Un **backup di sicurezza** delle destinazioni va sulla destinazione predefinita (etichetta "Sicurezza pre-ripristino", mai tolto dalla retention, si cancella a mano). Se fallisce il ripristino si ferma, a meno che tu non abbia spuntato **Procedi anche senza backup di sicurezza**.
 
 - **Volume**: il progetto si ferma; i suoi container rimasti accesi vengono fermati e riavviati alla fine, mentre un container di un altro progetto che usa il volume blocca il ripristino. I percorsi esclusi restano come sono. Un volume Compose che non esiste più si ricrea con un deploy, poi si ripete il ripristino.

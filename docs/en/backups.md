@@ -91,6 +91,8 @@ With encryption on, every archive leaves the server encrypted whole with the **b
 
 > **If you lose the password, you lose the backups that are outside this server.** Nobody, RunPanel included, can recover it. Keep it in a password manager, not on the server it protects. If you changed it, keep the earlier ones too while archives encrypted with them exist: the password's date is written in clear in the archive, and the panel shows it when it asks.
 
+The passwords live in the panel's store. Restoring the store brings back the ones there were on the day of that backup: from then on, archives encrypted with a password set later ask for it. The same goes for a store moved to a server with another key.
+
 ### On another server
 
 **Ripristina da un archivio** (restore from an archive) accepts `.zip.enc` files too. One encrypted by this panel opens by itself. One from another server stops at **serve la password** (password needed): type the one in use on the day of the backup, the panel tries it on the archive (a wrong one is refused at once), then checks and restores it like any other. The password stays with the uploaded archive, encrypted with the panel's key, and is deleted with it. The same goes for a run in the list encrypted with a password the panel no longer has, for instance after restoring another panel's store: the restore dialog asks for it.
@@ -142,7 +144,7 @@ Restoring is one dialog. Everything is selected; each item says, in a line, what
 Before anything is stopped, copied or overwritten:
 
 1. An archive on S3 is downloaded into the restore's working folder (free space is needed, plus the 2 GB reserve), hashed on the way in and compared with the sha256 recorded when it was written; a mismatch stops the restore.
-2. The members the restore will use — only those — are checked as **Verifica integrità** does. A damaged one, or a missing or wrong password for an encrypted archive, stops the restore with nothing touched. Nothing is decrypted to disk: members go from the decryption straight into the restore.
+2. The members the restore will use — only those — are checked as **Verifica integrità** does. A damaged one, or a missing or wrong password for an encrypted archive, stops the restore with nothing touched. An encrypted archive is never decrypted whole to disk: as with a zip, the restore extracts only the members it needs into its working folder, which is removed at the end.
 3. A **safety backup** of the targets goes to the default destination (labelled "Sicurezza pre-ripristino", never removed by retention, deleted by hand). If it fails the restore stops, unless you ticked **Procedi anche senza backup di sicurezza** (go on without a safety backup).
 
 - **Volume**: the project stops; its containers still running are stopped and restarted at the end, while a container of another project using the volume blocks the restore. Excluded paths are left as they are. A Compose volume that no longer exists is recreated by a deploy, then the restore is repeated.

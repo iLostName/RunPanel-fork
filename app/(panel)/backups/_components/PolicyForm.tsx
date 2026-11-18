@@ -524,6 +524,9 @@ export function PolicyForm({ policy }: Props) {
                   Con la chiave dentro, l&apos;archivio si decifra da solo: è quello che serve per
                   ripartire su una macchina nuova, ed è anche quello che lo rende un dump completo di
                   credenziali. Trattalo come tratteresti <Code>data/.secret</Code>.
+                  {encrypted
+                    ? " Con la cifratura degli archivi attiva, per aprirlo serve comunque la password dei backup."
+                    : " Con la cifratura degli archivi attiva, per aprirlo servirebbe anche la password dei backup."}
                 </Hint>
               )}
             </div>
