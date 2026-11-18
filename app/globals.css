@@ -622,6 +622,31 @@
     }
   }
 
+  /*
+   * The strip under the status bar of the installed app on iOS, in the light
+   * palette.
+   *
+   * There the status bar is `black-translucent` (app/layout.tsx): see-through,
+   * with white text, over the top bar. Dark, that is what makes it look like
+   * an app; light, the clock would be white on white. A panel set to "Chiaro"
+   * asks iOS for the plain bar instead, and this strip is then zero tall — it
+   * is for "Sistema" with the phone in light mode, and for a switch to
+   * "Chiaro" made inside the app, which iOS only reads at the next launch.
+   * Zero tall wherever there is no status bar over the page, which is
+   * everywhere but there.
+   */
+  .status-bar-scrim {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: var(--safe-top);
+    pointer-events: none;
+  }
+
+  [data-theme="light"] .status-bar-scrim {
+    background-color: oklch(21% 0.012 265);
+  }
+
   /* HeroUI's own drawer (the "Altro" sheet, action sheets): clear of the home
      indicator, and a scroll that ends inside it instead of moving the page. */
   .drawer__dialog[data-placement="bottom"] {

@@ -149,6 +149,8 @@ export function TopBar() {
       data-top-bar=""
       className="border-border bg-background/90 md:bg-background/70 sticky top-0 z-30 border-b pt-[var(--safe-top)] backdrop-blur-xl md:pt-0"
     >
+      {/* Behind the status bar of the installed app on iOS: see globals.css. */}
+      <div aria-hidden className="status-bar-scrim md:hidden" />
       <div className="flex h-[var(--top-bar-height)] items-center justify-between gap-3 pr-[max(0.5rem,var(--safe-right))] pl-[max(0.25rem,var(--safe-left))] md:h-14 md:px-6">
         {/* The phone's navigation bar. */}
         <div className="touch-chrome flex min-w-0 flex-1 items-center gap-1 md:hidden">

@@ -52,7 +52,9 @@ const LOGO =
  * What a page that could not be loaded shows instead.
  *
  * Self-contained, because by definition nothing else can be fetched. It takes
- * the theme from the panel's cookie, and tells apart a phone with no network
+ * the theme from the panel's cookie — with the same dark strip under the iOS
+ * status bar as the top bar has in the light palette (`.status-bar-scrim` in
+ * globals.css) — and tells apart a phone with no network
  * from a server that does not answer — after an update the panel restarts,
  * and "you are offline" would then be wrong. It reloads by itself as soon as
  * the server answers again.
@@ -75,6 +77,9 @@ h1{font-size:18px;font-weight:600;margin:20px 0 6px}
 p{color:var(--muted);margin:0;max-width:22rem}
 button{margin-top:24px;min-height:44px;padding:0 22px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-fg);font:inherit;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}
 button:active{opacity:.85}
+body::before{content:"";position:fixed;top:0;left:0;right:0;height:env(safe-area-inset-top);background:var(--scrim,transparent)}
+:root[data-theme=light]{--scrim:#16181e}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]){--scrim:#16181e}}
 </style>
 <script>(function(){try{var m=document.cookie.match(/(?:^|; )${THEME_COOKIE}=(light|dark)(?:;|$)/);if(m)document.documentElement.setAttribute("data-theme",m[1]);}catch(e){}})();</script>
 </head>
