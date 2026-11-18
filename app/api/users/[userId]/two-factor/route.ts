@@ -32,6 +32,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
 export async function DELETE(request: NextRequest, { params }: Params) {
   const denied = await requirePermission("users.manage");
   if (isDenied(denied)) return denied;
+  // From a browser only, like minting tokens: a leaked token of whoever manages
+  // users must not be a way to strip the second factor off the accounts it can reach.
+  if (denied.session.apiToken) {
+    return NextResponse.json({ error: "Si fa dal pannello, non con un token" }, { status: 403 });
+  }
   const { userId } = await params;
 
   const target = await getUser(userId);
