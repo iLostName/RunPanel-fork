@@ -1,10 +1,12 @@
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
+import { isInstantHostname } from "@/lib/proxy-names";
 import type { HostView } from "@/services/proxy";
 
 /**
  * How an address reads, next to its name: whether it is served at all, and
  * where its certificate stands — in the words of someone who wants the
- * padlock, not of certbot. The same on the Domains page and in a project.
+ * padlock, not of certbot. The same on the Domains page, in a project and for
+ * the panel's own name.
  */
 
 interface AddressStatus {
@@ -13,18 +15,30 @@ interface AddressStatus {
   icon: string;
 }
 
+/** What these read of a name: a project's, or the panel's own, which carries the same fields. */
+export type AddressLike = Pick<
+  HostView,
+  "hostname" | "status" | "certificate" | "certificateDaysLeft" | "applyError" | "explanation" | "lastError" | "dns"
+>;
+
 type Certificate = HostView["certificate"];
 
 /** A server running an older panel answers without `certificate`: read it from `status`. */
-function certificateOf(host: HostView): Certificate {
+function certificateOf(host: AddressLike): Certificate {
   if (host.certificate) return host.certificate;
   if (host.status === "active") return "active";
   if (host.status === "issuing" || host.status === "error") return host.status;
   return "missing";
 }
 
-export function addressStatus(host: HostView): AddressStatus {
+/** An instant address (`app.203-0-113-7.sslip.io`): served over HTTP only, by design. */
+function isInstant(host: AddressLike): boolean {
+  return isInstantHostname(host.hostname) && certificateOf(host) !== "active";
+}
+
+export function addressStatus(host: AddressLike): AddressStatus {
   if (host.applyError) return { label: "Non servito", tone: "danger", icon: "solar:danger-triangle-linear" };
+  if (isInstant(host)) return { label: "Solo HTTP", tone: "neutral", icon: "solar:lock-unlocked-linear" };
   switch (certificateOf(host)) {
     case "active":
       return { label: "HTTPS attivo", tone: "success", icon: "solar:shield-check-linear" };
@@ -50,8 +64,11 @@ export function addressStatus(host: HostView): AddressStatus {
 }
 
 /** The one plain sentence under the name: what is going on, and what — if anything — to do. */
-export function addressDetail(host: HostView, proxyServes: boolean): string {
+export function addressDetail(host: AddressLike, proxyServes: boolean): string {
   if (host.applyError) return host.applyError;
+  if (isInstant(host)) {
+    return "Indirizzo di prova: niente lucchetto, e il nome mostra l'IP del server. Per l'HTTPS usa un tuo dominio.";
+  }
   switch (certificateOf(host)) {
     case "active":
       return "Il certificato si rinnova da solo.";
@@ -71,12 +88,13 @@ export function addressDetail(host: HostView, proxyServes: boolean): string {
   }
 }
 
-/** Whether there is something to look at: anything short of a certificate that is working. */
-export function needsAttention(host: HostView): boolean {
+/** Whether there is something to look at: anything short of a certificate that is working — or, for a test address, of being served. */
+export function needsAttention(host: AddressLike): boolean {
+  if (isInstant(host)) return host.applyError !== null;
   return host.applyError !== null || certificateOf(host) !== "active";
 }
 
-export function AddressBadge({ host }: { host: HostView }) {
+export function AddressBadge({ host }: { host: AddressLike }) {
   const status = addressStatus(host);
   return (
     <Badge tone={status.tone} icon={status.icon}>
