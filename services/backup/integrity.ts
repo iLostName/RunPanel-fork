@@ -310,11 +310,14 @@ export async function verifyArchiveFile(
     members = await verifyMembers(file, { signal: opts.signal, onProgress: opts.onProgress, open: opts.open });
   } catch (err) {
     if (isLocked(err)) {
+      // Bytes that match are an intact archive, as for one in a bucket checked
+      // by its hash alone: what is missing is a password, not data.
       return {
-        ok: false,
+        ok: archiveMatches === true,
         message:
-          (archiveMatches ? "Identico a quando è stato creato, ma il contenuto non si può controllare: " : "Il contenuto non si può controllare: ") +
-          err.message,
+          (archiveMatches
+            ? "Identico a quando è stato creato: il suo sha256 corrisponde. Il contenuto non si può controllare da qui: "
+            : "Il contenuto non si può controllare: ") + err.message,
         archiveSha256,
         expectedSha256: expected,
         archiveMatches,

@@ -9,7 +9,7 @@ import { getDb, nowIso } from "@/lib/db";
 import type { ProjectsTable, ServicesTable } from "@/lib/db/schema";
 import { getEnv } from "@/lib/env";
 import { generateId } from "@/lib/utils";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatWhen } from "@/lib/format";
 import { requireHostIfReaching } from "@/lib/host-guard";
 import { configRestoreProblem } from "@/lib/restore-gate";
 import { stripRemoteCredentials } from "@/lib/git-remote";
@@ -28,11 +28,13 @@ import {
 } from "../project-lock";
 import { canSignIn, databaseAdmin, execArgs, serviceTarget, type ServiceTarget } from "../service-databases";
 import { containerMounts } from "../docker/volumes";
-import { extractArchiveEntry, isSafeEntryPath, listArchiveEntries } from "./archive-read";
+import { extractArchiveEntry, isSafeEntryPath, listArchiveEntries, type ArchiveHandle } from "./archive-read";
+import { ArchiveLockedError, checkArchivePassword, readSealedHead, type ZipOpener } from "./archive-crypto";
 import { buildDestination } from "./destinations";
 import { archiveForRestore } from "./archive-source";
 import { memberFailureMessage, readArchiveChecksums, verifyMembers } from "./integrity";
-import { touchUpload, uploadArchivePath, uploadArtifacts } from "./uploads";
+import { keyAvailability, panelArchiveOpener } from "./keyring";
+import { touchUpload, uploadArchivePath, uploadArtifacts, uploadPasswords } from "./uploads";
 import { FREE_SPACE_RESERVE, assertBackupId, freeBytes, resolveArchivePath, restoreLog } from "./paths";
 import { backupDocker, projectOwner, projectVolumes } from "./project-export";
 import { startBackup } from "./runner";
@@ -141,6 +143,12 @@ export interface RestoreRequest {
   uploadId?: string;
   mappings: RestoreMapping[];
   skipSafetyBackup?: boolean;
+  /**
+   * For a run whose archive is encrypted with a password this panel does not
+   * have (its store came from another server, say). An upload is unlocked
+   * before it is checked, and keeps its password with it.
+   */
+  password?: string;
 }
 
 export class RestoreBusyError extends Error {
@@ -157,6 +165,46 @@ export function activeRestoreId(): string | null {
   return globalRef.__runpanelRestoreActive ?? null;
 }
 
+
+/**
+ * Why a restore of this run cannot start for want of a password, or null.
+ *
+ * Only for an archive encrypted with a password this panel no longer has —
+ * its own it opens by itself. Asked before the 202, so the dialog stays open
+ * with what was chosen: no password is refused at once, and a wrong one too
+ * when the archive is on this disk. One in a bucket is tried once downloaded,
+ * and a wrong password stops that restore before anything is touched.
+ */
+export async function restorePasswordProblem(runId: string, password: string | undefined): Promise<string | null> {
+  const db = await getDb();
+  const run = await db
+    .selectFrom("backup_runs")
+    .select(["archive_path", "destination_id", "encryption_key_id"])
+    .where("id", "=", runId)
+    .executeTakeFirst();
+  if (!run?.encryption_key_id || !run.archive_path || !run.destination_id) return null;
+  if ((await keyAvailability()).get(run.encryption_key_id)?.usable) return null;
+  if (!password) {
+    return "Questo archivio è cifrato con una password dei backup che il pannello non ha più: scrivila per ripristinarlo.";
+  }
+
+  const destination = await db
+    .selectFrom("backup_destinations")
+    .select("type")
+    .where("id", "=", run.destination_id)
+    .executeTakeFirst();
+  if (destination?.type !== "local") return null;
+  let file: string;
+  try {
+    file = resolveArchivePath(run.archive_path);
+  } catch {
+    return null;
+  }
+  if (!fs.existsSync(file)) return null;
+  return (await checkArchivePassword(file, password).catch(() => true))
+    ? null
+    : "La password non è quella di questo archivio: serve quella dei backup in uso il giorno in cui è stato creato.";
+}
 
 /** How many times open Postgres sessions are looked for, and how far apart. */
 const SESSION_CHECKS = 6;
@@ -236,8 +284,16 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
 
   try {
     const resolved = await resolveArchive(request, staging, emit);
-    const archive = resolved.file;
-    emit(`Archivio: ${path.basename(archive)} (${formatBytes(fs.statSync(archive).size)})`);
+    // The file and the opener that knows its password travel together: every
+    // read below goes through the decryption, and nothing in clear is written.
+    const archive: ArchiveHandle = { file: resolved.file, open: resolved.open };
+    emit(`Archivio: ${path.basename(archive.file)} (${formatBytes(fs.statSync(archive.file).size)})`);
+    const sealed = await readSealedHead(archive.file).catch(() => null);
+    if (sealed) {
+      emit(
+        `  cifrato con la password dei backup${sealed.header.keyCreatedAt ? ` del ${formatWhen(sealed.header.keyCreatedAt)}` : ""}`
+      );
+    }
 
     const artifacts = await loadArtifacts(request);
     const planned = request.mappings.filter((mapping) => mapping.action === "restore");
@@ -332,6 +388,8 @@ interface ResolvedArchive {
   downloadedSha256: string | null;
   /** Where it came from, for the messages. */
   sourceName: string;
+  /** Opens it, plain or encrypted, with every password this restore may use. */
+  open: ZipOpener;
 }
 
 async function resolveArchive(
@@ -344,7 +402,13 @@ async function resolveArchive(
     if (!fs.existsSync(file)) throw new Error("L'archivio caricato non è più disponibile: caricalo di nuovo.");
     touchUpload(request.uploadId);
     emit("Sorgente: archivio caricato");
-    return { file, expectedSha256: null, downloadedSha256: null, sourceName: "l'archivio caricato" };
+    return {
+      file,
+      expectedSha256: null,
+      downloadedSha256: null,
+      sourceName: "l'archivio caricato",
+      open: panelArchiveOpener(uploadPasswords(request.uploadId)),
+    };
   }
 
   if (!request.runId) throw new Error("Nessuna sorgente indicata");
@@ -388,7 +452,13 @@ async function resolveArchive(
     reserveBytes: FREE_SPACE_RESERVE,
     localPath: resolveArchivePath,
   });
-  return { file, expectedSha256: run.checksum, downloadedSha256: sha256, sourceName: `«${destination.name}»` };
+  return {
+    file,
+    expectedSha256: run.checksum,
+    downloadedSha256: sha256,
+    sourceName: `«${destination.name}»`,
+    open: panelArchiveOpener(request.password ? [request.password] : []),
+  };
 }
 
 export interface RestorableArtifact {
@@ -472,14 +542,20 @@ async function verifyBeforeRestore(
   if (only.length === 0) return;
 
   emit("Controllo l'integrità di quello che sto per ripristinare…");
-  const checksums = await readArchiveChecksums(archive.file);
-  // The catalogue's own record wins over the archive's: it was written by this
-  // panel, the other travelled with the file.
-  for (const artifact of used) {
-    if (artifact.checksum && artifact.kind !== "project-repo") checksums.set(artifact.entryPath, artifact.checksum);
+  let report: Awaited<ReturnType<typeof verifyMembers>>;
+  try {
+    const checksums = await readArchiveChecksums(archive.file, archive.open);
+    // The catalogue's own record wins over the archive's: it was written by this
+    // panel, the other travelled with the file.
+    for (const artifact of used) {
+      if (artifact.checksum && artifact.kind !== "project-repo") checksums.set(artifact.entryPath, artifact.checksum);
+    }
+    report = await verifyMembers(archive.file, { only, checksums, open: archive.open });
+  } catch (err) {
+    // The first read of the archive: a password missing or wrong stops it here.
+    if (err instanceof ArchiveLockedError) throw new Error(`${err.message} Niente è stato toccato.`);
+    throw err;
   }
-
-  const report = await verifyMembers(archive.file, { only, checksums });
   if (report.failures.length > 0) throw new Error(memberFailureMessage(report.failures));
   emit(
     `  integro: ${report.checked} file controllati (${formatBytes(report.bytes)})` +
@@ -500,7 +576,7 @@ async function refuseBeyondPermissions(
   principal: Principal,
   planned: RestoreMapping[],
   artifacts: Map<string, RestorableArtifact>,
-  archive: string,
+  archive: ArchiveHandle,
   staging: string
 ): Promise<void> {
   if (principal.isOwner) return;
@@ -604,7 +680,7 @@ async function takeSafetyBackup(
 async function restoreArtifact(
   artifact: RestorableArtifact,
   mapping: RestoreMapping,
-  archive: string,
+  archive: ArchiveHandle,
   staging: string,
   emit: (line: string) => void,
   stopped: Stopped
@@ -627,7 +703,7 @@ async function restoreArtifact(
   }
 }
 
-async function extract(archive: string, entryPath: string, staging: string): Promise<string> {
+async function extract(archive: ArchiveHandle, entryPath: string, staging: string): Promise<string> {
   if (!isSafeEntryPath(entryPath)) {
     throw new Error(`Nome di file rifiutato nell'archivio: ${entryPath}`);
   }
@@ -689,7 +765,7 @@ async function refuseOpenSessions(target: ServiceTarget, env: Record<string, str
 async function restoreDatabase(
   artifact: RestorableArtifact,
   mapping: RestoreMapping,
-  archive: string,
+  archive: ArchiveHandle,
   staging: string,
   emit: (line: string) => void,
   stopped: Stopped
@@ -831,7 +907,7 @@ async function restoreRedis(
  */
 async function restorePanelStore(
   artifact: RestorableArtifact,
-  archive: string,
+  archive: ArchiveHandle,
   emit: (line: string) => void
 ): Promise<void> {
   const env = getEnv();
@@ -861,7 +937,7 @@ interface ProjectConfigPayload {
 
 async function readProjectConfig(
   artifact: RestorableArtifact,
-  archive: string,
+  archive: ArchiveHandle,
   staging: string
 ): Promise<ProjectConfigPayload> {
   const file = await extract(archive, artifact.entryPath, staging);
@@ -882,7 +958,7 @@ async function readProjectConfig(
 async function restoreProjectConfig(
   artifact: RestorableArtifact,
   mapping: RestoreMapping,
-  archive: string,
+  archive: ArchiveHandle,
   staging: string,
   emit: (line: string) => void,
   stopped: Stopped
@@ -958,7 +1034,7 @@ async function restoreProjectConfig(
 async function restoreVolume(
   artifact: RestorableArtifact,
   mapping: RestoreMapping,
-  archive: string,
+  archive: ArchiveHandle,
   staging: string,
   emit: (line: string) => void,
   stopped: Stopped
@@ -1015,7 +1091,7 @@ async function restoreVolume(
 async function restoreRepo(
   artifact: RestorableArtifact,
   mapping: RestoreMapping,
-  archive: string,
+  archive: ArchiveHandle,
   emit: (line: string) => void,
   stopped: Stopped
 ): Promise<void> {

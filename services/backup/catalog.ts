@@ -6,6 +6,7 @@ import { staleWhileRevalidate } from "@/lib/stale-cache";
 import type { BackupRunStatus, ProjectsTable } from "@/lib/db/schema";
 import { readLogFile } from "../log-file";
 import { listDumpableDatabases } from "./dumpers";
+import { keyAvailability } from "./keyring";
 import { backupLogPath } from "./paths";
 import { backupDocker, listProjectVolumes, projectOwner, projectVolumes } from "./project-export";
 import { parseTargets } from "./scheduler";
@@ -118,6 +119,25 @@ export interface RunView {
   destinationType: string | null;
   /** The last "Verifica integrità", if one was ever run. */
   verification: { status: "ok" | "failed"; checkedAt: string } | null;
+  encryption: RunEncryption | null;
+}
+
+/**
+ * How a run's archive is encrypted; null for one in clear. `keyCreatedAt` says
+ * which password, by the day it was set; `usable`, whether this panel still
+ * has it — when not, a restore asks for it.
+ */
+export interface RunEncryption {
+  keyCreatedAt: string | null;
+  usable: boolean;
+}
+
+export type KeyMap = Map<string, { createdAt: string; usable: boolean }>;
+
+export function runEncryption(keyId: string | null, keys: KeyMap): RunEncryption | null {
+  if (!keyId) return null;
+  const key = keys.get(keyId);
+  return { keyCreatedAt: key?.createdAt ?? null, usable: key?.usable ?? false };
 }
 
 type RunRow = {
@@ -134,26 +154,30 @@ type RunRow = {
   started_at: string;
   finished_at: string | null;
   error_message: string | null;
+  encryption_key_id: string | null;
 };
 
 interface RunContextMaps {
   destinations: Map<string, { name: string; type: string }>;
   verifications: Map<string, { status: string; checked_at: string }>;
+  keys: KeyMap;
 }
 
-/** The destinations and checks a page of runs refers to: two queries, whatever the page size. */
+/** The destinations, checks and keys a page of runs refers to: three queries, whatever the page size. */
 async function runContext(runs: RunRow[]): Promise<RunContextMaps> {
   const db = await getDb();
   const ids = runs.map((run) => run.id);
-  const [destinations, verifications] = await Promise.all([
+  const [destinations, verifications, keys] = await Promise.all([
     db.selectFrom("backup_destinations").select(["id", "name", "type"]).execute(),
     ids.length > 0
       ? db.selectFrom("backup_verifications").select(["run_id", "status", "checked_at"]).where("run_id", "in", ids).execute()
       : Promise.resolve([]),
+    runs.some((run) => run.encryption_key_id) ? keyAvailability() : Promise.resolve<KeyMap>(new Map()),
   ]);
   return {
     destinations: new Map(destinations.map((d) => [d.id, { name: d.name, type: d.type }])),
     verifications: new Map(verifications.map((v) => [v.run_id, v])),
+    keys,
   };
 }
 
@@ -190,6 +214,7 @@ function toRunView(run: RunRow, context?: RunContextMaps): RunView {
     verification: verification
       ? { status: verification.status === "ok" ? "ok" : "failed", checkedAt: verification.checked_at }
       : null,
+    encryption: runEncryption(run.encryption_key_id, context?.keys ?? new Map()),
   };
 }
 

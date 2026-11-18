@@ -420,10 +420,12 @@ export async function run({ repoRoot }) {
         open: sealed.createArchiveOpener(() => ["sbagliata"]),
       });
       r.check(
-        "with the wrong password the check says the bytes match but the content cannot be read",
-        !locked.ok && locked.archiveMatches === true && /password/.test(locked.message),
+        "without its password the check vouches for the bytes, says the content was not read, and does not call it damaged",
+        locked.ok && locked.archiveMatches === true && locked.members === null && /password/.test(locked.message),
         locked.message
       );
+      const lockedNoHash = await integrity.verifyArchiveFile(archivePath, { open: sealed.createArchiveOpener() });
+      r.check("with neither a password nor a recorded sha256 it cannot pass", !lockedNoHash.ok, lockedNoHash.message);
       let thrown = null;
       try {
         await read.readArchiveManifest({ file: archivePath, open: sealed.createArchiveOpener() });

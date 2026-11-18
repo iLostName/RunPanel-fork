@@ -38,6 +38,7 @@ import * as backupVerifications from "./036-backup-verifications";
 import * as hostRedirect from "./037-host-redirect";
 import * as panelHost from "./040-panel-host";
 import * as projectTasks from "./041-project-tasks";
+import * as backupEncryption from "./044-backup-encryption";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -86,6 +87,7 @@ export const migrations: Record<string, Migration> = {
   "037-host-redirect": hostRedirect,
   "040-panel-host": panelHost,
   "041-project-tasks": projectTasks,
+  "044-backup-encryption": backupEncryption,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

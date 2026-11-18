@@ -425,6 +425,19 @@ export interface BackupRunsTable {
   started_at: string;
   finished_at: string | null;
   heartbeat_at: string;
+  /** The `backup_keys` row that encrypted the archive; null for one in clear (migration 044). */
+  encryption_key_id: string | null;
+}
+
+/** Every password archives have been encrypted with — see migration 044. */
+export interface BackupKeysTable {
+  /** Written in clear into each archive's header. */
+  id: string;
+  /** The password, AES-256-GCM with the panel key (purpose `backup-password`). */
+  secret: string;
+  created_at: string;
+  /** Null for the password new archives use. Rows are never deleted. */
+  retired_at: string | null;
 }
 
 export interface BackupArtifactsTable {
@@ -982,6 +995,7 @@ export interface Database {
   backup_artifacts: BackupArtifactsTable;
   restore_runs: RestoreRunsTable;
   backup_verifications: BackupVerificationsTable;
+  backup_keys: BackupKeysTable;
   domains: DomainsTable;
   project_hosts: ProjectHostsTable;
   panel_hosts: PanelHostsTable;

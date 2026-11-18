@@ -8,7 +8,7 @@ import type {
   ProjectsTable,
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatWhen } from "@/lib/format";
 import { S3Failure } from "@/lib/s3-errors";
 import { panelVersion } from "@/lib/version";
 import { opsEvents } from "../events";
@@ -17,6 +17,7 @@ import { isDockerAvailable } from "../docker/cli";
 import { writeArchive } from "./archive";
 import { loadDestination } from "./destinations";
 import { DumpSkipped, dumpServiceDatabase } from "./dumpers";
+import { sealForNewArchive } from "./keyring";
 import { dumpPanelStore } from "./panel-store";
 import {
   FREE_SPACE_RESERVE,
@@ -230,6 +231,11 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
     }
 
     emit(`Backup ${runId} — ${request.policyName ?? "esecuzione manuale"}`);
+
+    // Before any dump: a password that is on but cannot be read stops the run
+    // now, not after an hour of copying, and never lets the archive out in clear.
+    const seal = await sealForNewArchive();
+
     const resumed = await resumeAbandonedPauses().catch(() => 0);
     if (resumed > 0) emit(`Ripresi ${resumed} container rimasti in pausa da un backup interrotto`);
     if (!(await isDockerAvailable())) {
@@ -290,14 +296,18 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
     };
 
     const files: StagedFile[] = outcomes.flatMap((outcome) => outcome.files);
-    const fileName = archiveFileName(runId, request.policyName ?? null, startedAt);
+    const fileName = archiveFileName(runId, request.policyName ?? null, startedAt, { encrypted: seal !== null });
 
-    emit(`Creo l'archivio (${files.length} file)…`);
+    emit(
+      seal
+        ? `Creo l'archivio cifrato con la password dei backup${seal.keyCreatedAt ? ` del ${formatWhen(seal.keyCreatedAt)}` : ""} (${files.length} file)…`
+        : `Creo l'archivio (${files.length} file)…`
+    );
     // Written into staging first, then handed to the destination: for the local
     // destination that hand-off is a rename on the same filesystem, so the
     // archive appears in the catalogue whole or not at all.
     const staged = path.join(ctx.stagingDir, fileName);
-    const archive = await writeArchive(staged, files, manifest);
+    const archive = await writeArchive(staged, files, manifest, { seal });
 
     const destination = await loadDestination(request.destinationId);
     if (destination.type !== "local") emit(`Carico l'archivio su «${destination.name}» (${formatBytes(archive.bytes)})…`);
@@ -323,6 +333,7 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
         archive_path: stored.ref,
         archive_bytes: stored.bytes,
         checksum: archive.sha256,
+        encryption_key_id: seal?.keyId ?? null,
         manifest: JSON.stringify(manifest),
         finished_at: nowIso(),
         heartbeat_at: nowIso(),

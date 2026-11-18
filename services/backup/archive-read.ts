@@ -154,15 +154,16 @@ export async function extractArchiveEntry(
 
 /**
  * The archive's own manifest, or null when it has none. A password that is
- * missing or wrong is not "no manifest": that error is thrown, so the caller
- * can ask for the password instead of calling the archive foreign.
+ * missing or wrong, or an encrypted archive that fails its own checks, is not
+ * "no manifest": those errors are thrown, so the caller can ask for the
+ * password, or say the archive is damaged, instead of calling it foreign.
  */
 export async function readArchiveManifest(file: ArchiveInput): Promise<BackupManifest | null> {
   let stream: Readable;
   try {
     stream = await openArchiveEntry(file, "manifest.json");
   } catch (err) {
-    if (err instanceof Error && err.name === "ArchiveLockedError") throw err;
+    if (err instanceof Error && (err.name === "ArchiveLockedError" || err.name === "SealedArchiveError")) throw err;
     return null;
   }
 
