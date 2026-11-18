@@ -119,6 +119,17 @@ const nextConfig: NextConfig = {
    */
   experimental: {
     webpackMemoryOptimizations: true,
+    /*
+      Off, because the default ('security') can fail the self-update. When Next
+      thinks an AI agent is running the build (any of AI_AGENT, CLAUDECODE,
+      CURSOR_AGENT… in the environment, which a panel started from such a
+      terminal inherits) and the installed version has an advisory, `next build`
+      finishes and then exits 1 to show an upgrade note. The update reads that
+      as a failed build and rolls back, and since the staging directory where
+      Next keeps its "already shown" receipt is deleted with it, every retry
+      fails the same way. Advisories are followed through the lockfile instead.
+    */
+    agentUpgrade: false,
   },
 
   // Native / driver packages that must stay outside the bundle.
