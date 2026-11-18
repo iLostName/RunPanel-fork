@@ -18,6 +18,16 @@ The interface is in Italian; labels are quoted as they appear, with a translatio
 
 An empty project, configured by hand, is created from the same wizard in expert mode.
 
+## App catalogue
+
+**Nuovo progetto › Da un modello** (from a template), or **Installa un'app pronta** in the search (Ctrl K), opens a catalogue of ready apps: n8n, WordPress (with MariaDB), Uptime Kuma, Umami (with PostgreSQL), Ghost (with MySQL), Vaultwarden, Gitea and MinIO, with search and categories. Installing one needs **Creare progetti** and **Accesso all'host** (create projects, host access), as any source does.
+
+The install page asks only the app's own questions, all prefilled: the name, a free port, the time zone, an optional address on a configured domain (required for Vaultwarden, whose vault only opens over HTTPS). Passwords and keys are generated on the server and shown once, at the end, with a copy button; afterwards they are only in the project's variables. **Avanzate** (advanced) shows the port, the server name the app writes into its own links while it has no address, the compose file exactly as it will be written, the variables and the volumes.
+
+One request does the rest, all or nothing. It checks Docker and Compose; refuses a name whose data an earlier install left behind (deleting a Compose project keeps its named volumes, and a new stack would silently reuse them); picks or checks the ports against the panel's own lists and against what is listening on the machine; then writes `compose.yaml` into the project's folder and saves the project, its variables (encrypted) and its address together. If any of it fails, what was created is removed. Then the first deploy starts, followed live, and the page lists what to do once the app is online: usually, open it and create the administrator account before anyone else can.
+
+What gets installed is an ordinary Compose project. Every value the file substitutes is a project variable (`${NAME:-…}`), handed to Compose at each deploy and never written into the project's files; `PORT` is the project's port. The data lives in named volumes, which a new deploy finds as it left them and the project's backups include when volumes are selected. Change the file from **File**, the values from **Variabili**, then deploy again; if the app gets an address later, update `APP_URL` (and `APP_HOST`, where there is one) as well. MinIO runs `pgsty/minio`, the community's continuation of MinIO: the official image is no longer published.
+
 ## The project page
 
 - **Panoramica** (overview, the default): the state in one sentence with the next thing to do (choose a source, run the first deploy, fix a failed deploy, start it again), the last deploy, resources, addresses, linked databases and what is missing for a dependable project.
