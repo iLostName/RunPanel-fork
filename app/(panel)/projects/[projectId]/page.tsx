@@ -12,6 +12,7 @@ import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
 import { PageSkeleton } from "@/components/ui/Skeletons";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { LogLine } from "@/components/ui/LogViewer";
 import { Tabs } from "@/components/ui/Tabs";
 import { parseContractJson } from "@/lib/deploy-contract";
@@ -73,6 +74,10 @@ export default function ProjectDetailPage() {
   const operationLog = useLineBuffer<LogLine>(MAX_LOG_LINES);
   const [shellActive, setShellActive] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
+  // The tab row is plain buttons, so leaving Variabili would drop unsaved
+  // edits without the page's leave guard ever seeing it: asked here instead.
+  const [envDirty, setEnvDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<TabId | null>(null);
 
   const prevStatus = useRef<string | undefined>(undefined);
   const refreshDeploymentsRef = useRef<(() => Promise<unknown>) | null>(null);
@@ -182,16 +187,26 @@ export default function ProjectDetailPage() {
     if (polledStatus && shownStatus && polledStatus !== shownStatus) void refreshProject();
   }, [polledStatus, shownStatus, refreshProject]);
 
-  // Seed the process log from the tail; the stream carries it from there.
+  // Seed the process log from the saved archive, which keeps each line's
+  // stream; the event stream carries it from there. A server of the cluster
+  // still on an older version has no archive: its plain tail, as before.
   // Depends on `reset`, which is stable, rather than on the rebuilt buffer.
   const resetProcessLog = processLog.reset;
   useEffect(() => {
     if (activeTab !== "logs") return;
     const controller = new AbortController();
-    fetch(api(`/api/projects/${projectId}/logs?source=process`), { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : { logs: [] }))
-      .then((data: { logs?: string[] }) => resetProcessLog((data.logs ?? []).map((l) => toLine(l))))
-      .catch(() => {});
+    const signal = controller.signal;
+    (async () => {
+      const saved = await fetch(api(`/api/projects/${projectId}/logs/app?lines=500`), { signal });
+      if (saved.ok) {
+        const data = (await saved.json()) as { entries?: { stream?: string; text: string }[] };
+        resetProcessLog((data.entries ?? []).map((e) => toLine(e.text, e.stream === "stderr" ? "stderr" : "stdout")));
+        return;
+      }
+      const tail = await fetch(api(`/api/projects/${projectId}/logs?source=process`), { signal });
+      const data = (tail.ok ? await tail.json() : { logs: [] }) as { logs?: string[] };
+      resetProcessLog((data.logs ?? []).map((l) => toLine(l)));
+    })().catch(() => {});
     return () => controller.abort();
   }, [activeTab, projectId, resetProcessLog, api]);
 
@@ -346,6 +361,18 @@ export default function ProjectDetailPage() {
   );
   const handleCancelDeploy = useCallback(() => void handleControl("stop"), [handleControl]);
 
+  /** Switch tab, asking first when the variables have unsaved edits. */
+  const changeTab = useCallback(
+    (next: TabId) => {
+      if (activeTab === "env" && envDirty && next !== "env") {
+        setPendingTab(next);
+        return;
+      }
+      setActiveTab(next);
+    },
+    [activeTab, envDirty, setActiveTab]
+  );
+
   /** Open a tab, and in the settings a section of the side menu. */
   const goTo = useCallback(
     (tab: TabId, section?: SettingsSectionId) => {
@@ -355,9 +382,9 @@ export default function ProjectDetailPage() {
         else query.set("section", section);
         window.history.replaceState(null, "", `${window.location.pathname}?${query.toString()}`);
       }
-      setActiveTab(tab);
+      changeTab(tab);
     },
-    [setActiveTab]
+    [changeTab]
   );
 
   const canManage = (project?.permission?.level ?? "manage") === "manage";
@@ -400,7 +427,7 @@ export default function ProjectDetailPage() {
         onGoTo={goTo}
       />
 
-      <Tabs tabs={tabs} value={shownTab} onChange={setActiveTab} label="Sezioni del progetto" />
+      <Tabs tabs={tabs} value={shownTab} onChange={changeTab} label="Sezioni del progetto" />
 
       {/* Each tab is mounted only while selected. */}
       {shownTab === "overview" && (
@@ -449,7 +476,15 @@ export default function ProjectDetailPage() {
         />
       )}
       {shownTab === "logs" && !neverDeployed && (
-        <LogsTab deployLog={deployLog.lines} processLog={processLog.lines} connected={connected} />
+        <LogsTab
+          deployLog={deployLog.lines}
+          processLog={processLog.lines}
+          connected={connected}
+          projectId={projectId}
+          deploying={project.status === "deploying"}
+          deploymentId={project.last_deployment?.id}
+          runtimeType={project.runtime_type}
+        />
       )}
 
       {/* Fetches its variables on every visit: see ProjectEnvTab. */}
@@ -459,6 +494,7 @@ export default function ProjectDetailPage() {
           runtimeType={project.runtime_type}
           buildEnvPrefixes={buildEnvPrefixes}
           readOnly={!canManage}
+          onDirtyChange={setEnvDirty}
         />
       )}
 
@@ -483,6 +519,22 @@ export default function ProjectDetailPage() {
           operationLines={operationLog.lines}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={pendingTab !== null}
+        onOpenChange={(open) => !open && setPendingTab(null)}
+        title="Uscire senza salvare le variabili?"
+        description="Le modifiche alle variabili non salvate andranno perse."
+        confirmLabel="Esci senza salvare"
+        cancelLabel="Resta"
+        destructive
+        onConfirm={() => {
+          const next = pendingTab;
+          setEnvDirty(false);
+          setPendingTab(null);
+          if (next) setActiveTab(next);
+        }}
+      />
 
       {/* Keyed on the open state so each opening starts from the project as it is now. */}
       <VersionDialog
