@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireProject, requireUser } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { readBuildLog } from "@/services/build-logs";
+import { explainDeployError } from "@/lib/deploy-explain";
 
 type Params = { params: Promise<{ deploymentId: string }> };
 
@@ -31,8 +32,15 @@ export async function GET(request: NextRequest, { params }: Params) {
   const tailParam = request.nextUrl.searchParams.get("tail");
   const tail = tailParam ? Math.max(1, Math.min(10_000, Number.parseInt(tailParam, 10) || 0)) : undefined;
 
+  const buildLog = readBuildLog(deploymentId, tail);
   return NextResponse.json(
-    { ...deployment, build_log: readBuildLog(deploymentId, tail) },
+    {
+      ...deployment,
+      build_log: buildLog,
+      // The cause in words, with a code per known cause, for whoever reads the
+      // API rather than the page: lib/deploy-explain.ts, as the page uses it.
+      explanation: deployment.status === "failed" ? explainDeployError(deployment.error_message, buildLog) : null,
+    },
     { headers: { "Cache-Control": "no-store" } }
   );
 }

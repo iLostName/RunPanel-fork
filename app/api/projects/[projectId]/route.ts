@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { explainDeployError } from "@/lib/deploy-explain";
 import { isDenied, requireProject } from "@/lib/auth-guard";
 import { requireHostFor, requireHostIfReaching } from "@/lib/host-guard";
 import { withAudit } from "@/lib/audit";
@@ -93,7 +94,12 @@ export async function GET(_request: NextRequest, { params }: Params) {
     permission: denied.access,
     deploy_count: Number(stats?.deploy_count ?? 0),
     last_deploy_at: stats?.last_deploy_at ?? null,
-    last_deployment: lastDeployment ?? null,
+    last_deployment: lastDeployment
+      ? {
+          ...lastDeployment,
+          explanation: lastDeployment.status === "failed" ? explainDeployError(lastDeployment.error_message) : null,
+        }
+      : null,
     last_success_at: lastSuccess?.at ?? null,
     // The row says what was asked for; the gate says what is actually holding
     // the port. They differ whenever the panel restarted and could not bind.
