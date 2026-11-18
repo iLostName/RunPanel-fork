@@ -143,7 +143,7 @@ export function HostedCopiesPanel({
                 action={
                   me.isOwner ? (
                     <Button size="sm" variant="secondary" onPress={() => setLimiting(row)}>
-                      Limite
+                      Imposta limite
                     </Button>
                   ) : undefined
                 }
