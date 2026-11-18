@@ -1,4 +1,5 @@
 import { createReporter, client, SETUP_TOKEN } from "../harness.mjs";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -243,6 +244,100 @@ export async function run({ base, dataDir, repoRoot }) {
     "the preview and the policy agree on the wording",
     preview.body?.description === created.body?.schedule
   );
+
+  // --- several copies of every backup: destinations and policies ---------------
+  //
+  // Two local destinations in folders of their own stand in for a second disk
+  // and a bucket: the same path every copy takes, without a network. Outside
+  // the data directory, as the panel requires.
+  const copyRoot = fs.mkdtempSync(path.join(path.dirname(dataDir), "runpanel-copies-"));
+  const dirA = path.join(copyRoot, "disco-a");
+  const dirB = path.join(copyRoot, "disco-b");
+  fs.mkdirSync(dirA, { recursive: true });
+  fs.mkdirSync(dirB, { recursive: true });
+  const localIn = (name, folder) =>
+    api.call("/api/backups/destinations", {
+      method: "POST",
+      body: JSON.stringify({ name, type: "local", config: { path: folder } }),
+    });
+
+  const insideData = await localIn("Dentro i dati", path.join(dataDir, "copie"));
+  r.check("a folder inside the panel's data is refused", insideData.status === 400, `${insideData.status} ${JSON.stringify(insideData.body)}`);
+  const relativeFolder = await localIn("Relativa", "copie/a");
+  r.check("so is a relative path", relativeFolder.status === 400, String(relativeFolder.status));
+  const diskA = await localIn("Disco A", dirA);
+  const diskB = await localIn("Disco B", dirB);
+  r.check("a local destination can have a folder of its own", diskA.status === 201 && diskB.status === 201, JSON.stringify([diskA.body, diskB.body]));
+  const probeA = await api.call(`/api/backups/destinations/${diskA.body?.id}`, { method: "POST" });
+  r.check("and is checked by writing there", probeA.body?.ok === true && (probeA.body?.message ?? "").includes("disco-a"), JSON.stringify(probeA.body));
+  const folders = await api.call("/api/backups/destinations");
+  r.check(
+    "the list says which folder",
+    folders.body?.destinations?.find((row) => row.id === diskA.body?.id)?.directory === path.resolve(dirA),
+    JSON.stringify(folders.body?.destinations?.map((row) => [row.name, row.directory]))
+  );
+
+  const policyWith = (destinations, extra = {}) =>
+    api.call("/api/backups/policies", {
+      method: "POST",
+      body: JSON.stringify({ name: "Copie da rifiutare", cron: "", targets: [{ kind: "panel" }], destinations, ...extra }),
+    });
+  const sameTwice = await policyWith([{ destinationId: destination.id }, { destinationId: destination.id }]);
+  r.check("the same destination twice in a policy is refused", sameTwice.status === 400, `${sameTwice.status} ${JSON.stringify(sameTwice.body)}`);
+  const twinA = await localIn("Disco A bis", dirA);
+  const samePlace = await policyWith([{ destinationId: diskA.body?.id }, { destinationId: twinA.body?.id }]);
+  r.check(
+    "so are two destinations writing to the same folder",
+    samePlace.status === 400 && /stesso posto/.test(samePlace.body?.error ?? ""),
+    `${samePlace.status} ${JSON.stringify(samePlace.body)}`
+  );
+  await api.call(`/api/backups/destinations/${twinA.body?.id}`, { method: "DELETE" });
+  const notFirst = await policyWith([{ destinationId: diskA.body?.id }], { destinationId: destination.id });
+  r.check("destinationId, when sent with the list, has to be its first", notFirst.status === 400, String(notFirst.status));
+  const unknownCopy = await policyWith([{ destinationId: destination.id }, { destinationId: "doesnotexist" }]);
+  r.check("an unknown destination in the list is a 404", unknownCopy.status === 404, String(unknownCopy.status));
+
+  const threeWays = [
+    { destinationId: destination.id },
+    { destinationId: diskA.body?.id, retention: { count: 1 } },
+    { destinationId: diskB.body?.id },
+  ];
+  const copiesPolicy = await api.call("/api/backups/policies", {
+    method: "POST",
+    body: JSON.stringify({ name: "Tre copie", cron: "", targets: [{ kind: "panel" }], retentionCount: 3, destinations: threeWays }),
+  });
+  r.check("a policy with three destinations is created", copiesPolicy.status === 201, JSON.stringify(copiesPolicy.body));
+  const listedOrder = (body) => (body?.destinations ?? []).map((entry) => entry.destinationId).join();
+  r.check(
+    "listed in order, the first one also as destinationId",
+    listedOrder(copiesPolicy.body) === threeWays.map((entry) => entry.destinationId).join() && copiesPolicy.body?.destinationId === destination.id,
+    JSON.stringify(copiesPolicy.body?.destinations)
+  );
+  r.check(
+    "each copy with its own rule or the policy's",
+    copiesPolicy.body?.destinations?.[0]?.retention === null &&
+      copiesPolicy.body?.destinations?.[1]?.retention?.count === 1 &&
+      copiesPolicy.body?.destinations?.[2]?.retention === null,
+    JSON.stringify(copiesPolicy.body?.destinations)
+  );
+  const newPrimary = await api.call(`/api/backups/policies/${copiesPolicy.body?.id}`, {
+    method: "PUT",
+    body: JSON.stringify({ destinationId: diskB.body?.id }),
+  });
+  r.check(
+    "a client that only knows destinationId moves the primary and keeps the other copies",
+    listedOrder(newPrimary.body) === [diskB.body?.id, destination.id, diskA.body?.id].join() &&
+      newPrimary.body?.destinations?.[2]?.retention?.count === 1,
+    JSON.stringify(newPrimary.body?.destinations)
+  );
+  await api.call(`/api/backups/policies/${copiesPolicy.body?.id}`, { method: "PUT", body: JSON.stringify({ destinations: threeWays }) });
+  const copyInUse = await api.call(`/api/backups/destinations/${diskB.body?.id}`, { method: "DELETE" });
+  r.check("a destination a policy keeps a copy on is not deleted", copyInUse.status === 409, `${copyInUse.status} ${JSON.stringify(copyInUse.body)}`);
+  const manualTwice = await api.call("/api/backups/runs", {
+    method: "POST",
+    body: JSON.stringify({ targets: [{ kind: "panel" }], destinationIds: [diskA.body?.id, diskA.body?.id] }),
+  });
+  r.check("a manual backup refuses the same destination twice too", manualTwice.status === 400, String(manualTwice.status));
 
   // --- run it --------------------------------------------------------------
   if (canDumpStore) {
@@ -734,9 +829,160 @@ export async function run({ base, dataDir, repoRoot }) {
       r.check("and the encrypted ones still open here", stillOpens?.status === "ok" && stillOpens?.depth === "full", JSON.stringify(stillOpens));
     }
     await api.call(`/api/backups/policies/${sealedPolicy.body?.id}`, { method: "DELETE" });
+
+    // --- several copies of every backup: the runs ---------------------------------
+    //
+    // The archive is written once and copied to every destination; each copy is
+    // pruned by its own rule; a copy that fails warns without failing the backup
+    // and can be sent again; and every read falls back to the next copy when
+    // one is gone.
+    {
+      const archivesIn = (dir) => {
+        const found = [];
+        const walk = (at) => {
+          if (!fs.existsSync(at) || !fs.statSync(at).isDirectory()) return;
+          for (const entry of fs.readdirSync(at, { withFileTypes: true })) {
+            const full = path.join(at, entry.name);
+            if (entry.isDirectory()) walk(full);
+            else if (/\.zip(\.enc)?$/.test(entry.name)) found.push(full);
+          }
+        };
+        walk(dir);
+        return found;
+      };
+      const sha256Of = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+      const runCopies = async () => {
+        const started = await api.call(`/api/backups/policies/${copiesPolicy.body?.id}/run`, { method: "POST" });
+        return waitForRun(api, started.body?.runId);
+      };
+      const idle = () => waitFor("/api/backups/runs?limit=1", (body) => body && body.activeRunId === null);
+
+      const firstCopies = await runCopies();
+      r.check("a run of a policy with three destinations succeeds", firstCopies.status === "success", JSON.stringify(firstCopies.errorMessage));
+      r.check(
+        "with three copies, all saved, in the policy's order",
+        firstCopies.copies?.length === 3 &&
+          firstCopies.copies.every((copy) => copy.status === "done") &&
+          firstCopies.copies.map((copy) => copy.destinationId).join() === threeWays.map((entry) => entry.destinationId).join(),
+        JSON.stringify(firstCopies.copies)
+      );
+      r.check(
+        "the run's own destination fields still describe the primary",
+        firstCopies.destinationName === destination.name && firstCopies.hasArchive === true,
+        `${firstCopies.destinationName} ${firstCopies.hasArchive}`
+      );
+      const onA = archivesIn(dirA);
+      const onB = archivesIn(dirB);
+      r.check("a copy lands in each folder", onA.length === 1 && onB.length === 1, JSON.stringify([onA, onB]));
+      r.check(
+        "each one the archive the run wrote, byte for byte",
+        onA[0] && onB[0] && sha256Of(onA[0]) === firstCopies.checksum && sha256Of(onB[0]) === firstCopies.checksum
+      );
+      r.check("the log names every copy", (firstCopies.log ?? "").includes("3 copie"), (firstCopies.log ?? "").slice(0, 300));
+      const copiesListed = await api.call(`/api/backups/runs?policyId=${copiesPolicy.body?.id}`);
+      r.check("the run list carries the copies too", copiesListed.body?.runs?.[0]?.copies?.length === 3, JSON.stringify(copiesListed.body?.runs?.[0]?.copies));
+
+      // --- each copy by its own rule: Disco A keeps one, the others three ---------
+      await runCopies();
+      r.check("Disco A keeps only its newest copy, the others keep both", archivesIn(dirA).length === 1 && archivesIn(dirB).length === 2);
+      const older = await api.call(`/api/backups/runs/${firstCopies.id}`);
+      r.check(
+        "the older run stays, with the copies its other destinations keep",
+        older.status === 200 && older.body?.copies?.length === 2 && !older.body.copies.some((copy) => copy.destinationId === diskA.body?.id),
+        JSON.stringify(older.body?.copies)
+      );
+
+      // --- a copy that fails ---------------------------------------------------------
+      // Disco B's folder is set aside and a file put in its place: nothing can be
+      // written under it, as with a disk gone read-only or unmounted.
+      fs.renameSync(dirB, `${dirB}-via`);
+      fs.writeFileSync(dirB, "non è una cartella");
+      const third = await runCopies();
+      const lost = third.copies?.find((copy) => copy.destinationId === diskB.body?.id);
+      r.check("a run where a copy failed is not a failed backup", third.status === "success", JSON.stringify(third.errorMessage));
+      r.check("the copy says it failed, and why", lost?.status === "failed" && /cartella/.test(lost.errorMessage ?? ""), JSON.stringify(lost));
+      r.check("the other copies arrived", third.copies?.filter((copy) => copy.status === "done").length === 2, JSON.stringify(third.copies));
+      r.check("the log says the archive is safe anyway", /al sicuro/.test(third.log ?? ""), (third.log ?? "").slice(-300));
+      const warned = await waitFor("/api/notifications", (body) =>
+        (body?.items ?? []).some((item) => item.event === "backup.finished" && item.level === "warn" && /copia/.test(item.title ?? ""))
+      );
+      r.check("and a warning notification says a copy was not saved", Boolean(warned), JSON.stringify((warned?.items ?? []).slice(0, 2)));
+
+      // --- Riprova la copia ---------------------------------------------------------------
+      const saved = third.copies?.find((copy) => copy.status === "done");
+      const notAgain = await api.call(`/api/backups/runs/${third.id}/copies/${saved?.id}/retry`, { method: "POST" });
+      r.check("a copy that arrived is not sent again", notAgain.status === 409, `${notAgain.status} ${JSON.stringify(notAgain.body)}`);
+      fs.rmSync(dirB, { force: true });
+      fs.renameSync(`${dirB}-via`, dirB);
+      const retry = await api.call(`/api/backups/runs/${third.id}/copies/${lost?.id}/retry`, { method: "POST" });
+      r.check("a failed copy can be sent again", retry.status === 202 && retry.body?.copy?.status === "uploading", `${retry.status} ${JSON.stringify(retry.body)}`);
+      const retried = await waitFor(`/api/backups/runs/${third.id}`, (body) => {
+        const status = body?.copies?.find((copy) => copy.id === lost?.id)?.status;
+        return status === "done" || status === "failed";
+      });
+      await idle();
+      const back = retried?.copies?.find((copy) => copy.id === lost?.id);
+      r.check("and arrives, from another copy", back?.status === "done", JSON.stringify(back));
+      const resent = archivesIn(dirB).find((file) => sha256Of(file) === third.checksum);
+      r.check("identical to the archive the backup created", Boolean(resent) && archivesIn(dirB).length === 3, JSON.stringify(archivesIn(dirB)));
+      r.check("the run's log says so", /Riprovo la copia/.test(retried?.log ?? ""), (retried?.log ?? "").slice(-300));
+
+      // --- every read falls back to the next copy ------------------------------------------
+      // The primary's file disappears, as with the disk it was on.
+      const primaryCopy = third.copies?.find((copy) => copy.position === 0);
+      fs.rmSync(path.join(dataDir, "backups", primaryCopy?.ref ?? "missing"), { force: true });
+      const fallbackDownload = await fetch(`${base}/api/backups/runs/${third.id}/download`, { headers: { cookie: api.cookie } });
+      const downloaded = Buffer.from(await fallbackDownload.arrayBuffer());
+      r.check(
+        "the download falls back to the next copy",
+        fallbackDownload.status === 200 && crypto.createHash("sha256").update(downloaded).digest("hex") === third.checksum,
+        String(fallbackDownload.status)
+      );
+      const fallbackCheck = await verify(third.id);
+      r.check(
+        "so does the integrity check, and it says which copy it read",
+        fallbackCheck?.status === "ok" && fallbackCheck?.source?.destinationName === "Disco A",
+        JSON.stringify(fallbackCheck)
+      );
+      const thirdStore = third.artifacts?.find((entry) => entry.kind === "panel-store");
+      const fallbackRestore = await restoreAndWait({
+        runId: third.id,
+        confirm: thirdStore?.refName,
+        targets: [{ artifactId: thirdStore?.id, action: "restore" }],
+      });
+      r.check(
+        "and so does a restore",
+        fallbackRestore.started.status === 202 && fallbackRestore.done?.status === "success",
+        JSON.stringify(fallbackRestore.done?.errorMessage ?? fallbackRestore.started.body)
+      );
+      r.check(
+        "whose log says which copy it passed over and which it used",
+        /successiva/.test(fallbackRestore.done?.log ?? "") && /Disco A/.test(fallbackRestore.done?.log ?? ""),
+        (fallbackRestore.done?.log ?? "").slice(0, 500)
+      );
+
+      // --- deleting a run deletes every copy -----------------------------------------------------
+      const removedCopies = await api.call(`/api/backups/runs/${third.id}`, { method: "DELETE" });
+      r.check(
+        "deleting the run deletes every copy it has",
+        removedCopies.status === 200 && archivesIn(dirA).length === 0 && !archivesIn(dirB).some((file) => file === resent),
+        `${removedCopies.status} ${JSON.stringify([archivesIn(dirA), archivesIn(dirB)])}`
+      );
+    }
   } else {
     r.note("store Postgres: il dump richiede Docker, verifico solo la parte di configurazione");
   }
+
+  // The copies' policy and folders go, so what follows finds the store as it
+  // expects it: one policy, one destination.
+  await api.call(`/api/backups/policies/${copiesPolicy.body?.id}`, { method: "DELETE" });
+  for (const disk of [diskA, diskB]) {
+    const removed = await api.call(`/api/backups/destinations/${disk.body?.id}?confirm=${encodeURIComponent(disk.body?.name ?? "")}`, {
+      method: "DELETE",
+    });
+    r.check(`a destination holding copies can be removed once no policy lists it: ${disk.body?.name}`, removed.status === 200, `${removed.status} ${JSON.stringify(removed.body)}`);
+  }
+  fs.rmSync(copyRoot, { recursive: true, force: true });
 
   // --- editing --------------------------------------------------------------
   const disabled = await api.call(`/api/backups/policies/${policyId}`, {

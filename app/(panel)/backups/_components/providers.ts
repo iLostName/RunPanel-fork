@@ -98,3 +98,23 @@ export function providerLabel(endpoint: string): string {
   const host = hostOf(endpoint);
   return host ? `S3 su ${host}` : "S3";
 }
+
+/**
+ * Where a destination writes, in a few words: "Disco di questo server",
+ * "Cartella /mnt/usb, su questo server", "Backblaze B2 · bucket «runpanel»".
+ * A type this page does not know yet is named by its type, so a new kind of
+ * destination shows up in every list without waiting for its own words.
+ */
+export function describeDestination(destination: {
+  type: string;
+  target?: { endpoint: string; bucket: string } | null;
+  directory?: string | null;
+}): string {
+  if (destination.type === "local") {
+    return destination.directory ? `Cartella ${destination.directory}, su questo server` : "Disco di questo server";
+  }
+  if (destination.type === "s3") {
+    return destination.target ? `${providerLabel(destination.target.endpoint)} · bucket «${destination.target.bucket}»` : "Archivio S3";
+  }
+  return destination.type.charAt(0).toUpperCase() + destination.type.slice(1);
+}

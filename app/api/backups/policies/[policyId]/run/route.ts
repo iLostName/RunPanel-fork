@@ -3,6 +3,7 @@ import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { visiblePolicyIds } from "@/lib/backup-access";
 import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
+import { policyDestinationIds } from "@/services/backup/policy-destinations";
 import { BackupBusyError, startBackup } from "@/services/backup/runner";
 import { parseTargets } from "@/services/backup/scheduler";
 
@@ -36,10 +37,12 @@ export async function POST(_request: NextRequest, { params }: Params) {
     }
 
     try {
+      // Every destination of the policy, as when it runs on schedule: "Esegui
+      // ora" is the same backup, early, and its copies are pruned the same way.
       const { runId, done } = await startBackup({
         trigger: "manual",
         targets: parseTargets(policy.targets),
-        destinationId: policy.destination_id,
+        destinationIds: await policyDestinationIds(policy),
         policyId: policy.id,
         policyName: policy.name,
         includeSecretKey: policy.include_secret_key === 1,

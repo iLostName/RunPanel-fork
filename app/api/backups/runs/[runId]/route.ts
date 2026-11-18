@@ -4,8 +4,9 @@ import { runVisible } from "@/lib/backup-access";
 import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { getRunDetail } from "@/services/backup/catalog";
-import { buildDestination } from "@/services/backup/destinations";
+import { removeCopy, runCopies, syncRunArchive } from "@/services/backup/copies";
 import { assertBackupId, backupLogPath } from "@/services/backup/paths";
+import { activeBackupRunId } from "@/services/backup/runner";
 import { removeLogFile } from "@/services/log-file";
 
 type Params = { params: Promise<{ runId: string }> };
@@ -52,30 +53,33 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       .executeTakeFirst();
 
     if (!run) return NextResponse.json({ error: "Backup non trovato" }, { status: 404 });
-    if (run.status === "running") {
+    const copies = await runCopies(runId);
+    if (run.status === "running" || activeBackupRunId() === runId || copies.some((copy) => copy.status === "uploading")) {
       return NextResponse.json(
         { error: "Il backup è ancora in corso: attendi che finisca" },
         { status: 409 }
       );
     }
 
-    // The archive first: a row removed while its file survives leaves something
-    // on disk that nothing knows about or will ever clean up.
-    if (run.archive_path && run.destination_id) {
-      const destination = await db
-        .selectFrom("backup_destinations")
-        .selectAll()
-        .where("id", "=", run.destination_id)
-        .executeTakeFirst();
-
-      if (destination) {
-        try {
-          await buildDestination(destination).remove(run.archive_path);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "Rimozione dell'archivio fallita";
-          return NextResponse.json({ error: message }, { status: 500 });
-        }
-      }
+    // Every copy, each file before its row: a row removed while its file
+    // survives leaves something that nothing knows about or will ever clean
+    // up. A copy that will not go keeps its row, and so does the run.
+    const refused: string[] = [];
+    for (const copy of copies) {
+      const removed = await removeCopy(copy);
+      if (!removed.ok) refused.push(`«${copy.name}»: ${removed.error}`);
+    }
+    if (refused.length > 0) {
+      await syncRunArchive(runId);
+      return NextResponse.json(
+        {
+          error:
+            refused.length === copies.length
+              ? `Non sono riuscito a cancellare l'archivio. ${refused.join(" ")}`
+              : `Non sono riuscito a cancellare ${refused.length === 1 ? "una copia" : `${refused.length} copie`}, le altre sono state cancellate: ${refused.join(" ")} Il backup resta finché non riprovi.`,
+        },
+        { status: 500 }
+      );
     }
 
     await db.deleteFrom("backup_runs").where("id", "=", runId).execute();

@@ -193,6 +193,23 @@ async function recoverFromCrash(db: Kysely<Database>): Promise<void> {
     .where("status", "=", "deploying")
     .executeTakeFirst();
 
+  // A copy on its way when the process died did not arrive. It says so, and
+  // can be sent again from the run's page.
+  await db
+    .updateTable("backup_run_copies")
+    .set({
+      status: "failed",
+      error_message: "Il server è stato riavviato durante la copia",
+      finished_at: nowIso(),
+    })
+    .where("status", "in", ["pending", "uploading"])
+    .execute();
+
+  // An archive that reached at least one destination before the process died
+  // is a backup, whatever happened to the copies after it: the run closes as
+  // it would have, with the copies that did not arrive marked above.
+  const recovered = await recoverRunsWithCopies(db);
+
   // A half-written archive is not a backup, and a restore that stopped partway
   // is the state an operator most needs to see. Both are left claiming to be in
   // flight, and nothing will ever come back to finish them.
@@ -255,14 +272,57 @@ async function recoverFromCrash(db: Kysely<Database>): Promise<void> {
   const backupCount = rowCount(backups);
   const restoreCount = rowCount(restores);
   const oneTimeCount = rowCount(interrupted) + rowCount(unclaimed);
-  if (deployCount > 0 || projectCount > 0 || backupCount > 0 || restoreCount > 0 || oneTimeCount > 0) {
+  if (deployCount > 0 || projectCount > 0 || backupCount > 0 || restoreCount > 0 || oneTimeCount > 0 || recovered > 0) {
     console.log(
       `[RunPanel] Crash recovery: ${deployCount} deployment(s) marked failed, ` +
         `${projectCount} project(s) reset to stopped, ` +
+        `${recovered} backup(s) closed with the copies that arrived, ` +
         `${backupCount} backup(s) and ${restoreCount} restore(s) marked failed, ` +
         `${oneTimeCount} one-time command(s) put back in the queue`
     );
   }
+}
+
+/**
+ * Close the runs interrupted after their archive reached a destination: as
+ * `success`, or `partial` when some item had failed — what the runner would
+ * have written — pointing at the first copy that arrived. Counts them.
+ */
+async function recoverRunsWithCopies(db: Kysely<Database>): Promise<number> {
+  const running = await db.selectFrom("backup_runs").select("id").where("status", "=", "running").execute();
+  let recovered = 0;
+  for (const run of running) {
+    const done = await db
+      .selectFrom("backup_run_copies")
+      .select(["ref", "bytes", "destination_id"])
+      .where("run_id", "=", run.id)
+      .where("status", "=", "done")
+      .orderBy("position", "asc")
+      .execute();
+    if (done.length === 0) continue;
+
+    const failed = await db
+      .selectFrom("backup_artifacts")
+      .select("id")
+      .where("run_id", "=", run.id)
+      .where("status", "=", "failed")
+      .execute();
+    const primary = done.find((copy) => copy.destination_id !== null) ?? done[0];
+    await db
+      .updateTable("backup_runs")
+      .set({
+        status: failed.length > 0 ? "partial" : "success",
+        archive_path: primary.ref,
+        archive_bytes: primary.bytes,
+        destination_id: primary.destination_id,
+        error_message: failed.length > 0 ? `${failed.length} elementi non salvati` : null,
+        finished_at: nowIso(),
+      })
+      .where("id", "=", run.id)
+      .execute();
+    recovered++;
+  }
+  return recovered;
 }
 
 /**

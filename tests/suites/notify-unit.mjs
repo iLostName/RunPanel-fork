@@ -353,6 +353,23 @@ export async function run({ repoRoot }) {
   r.check("a failed backup is danger", backup("failed").level === "danger");
   r.check("the policy name is carried", backup("success").body.includes("Notturno"));
 
+  // A copy that did not arrive: the backup exists, in one place fewer.
+  const allCopies = backup("success", { copies: { total: 3, saved: 3, failed: [] } });
+  r.check("every copy in place is a clean night", allCopies.level === "ok" && allCopies.body.includes("3 su 3"), allCopies.body);
+  const lostCopy = backup("success", {
+    copies: { total: 3, saved: 2, failed: [{ name: "Backblaze <B2>", error: "Bucket irraggiungibile\nsecond line" }] },
+  });
+  r.check("a copy that did not arrive warns, without calling the backup failed", lostCopy.level === "warn" && /una copia non è stata salvata/.test(lostCopy.title), lostCopy.title);
+  r.check(
+    "and names the destination and why, escaped and on one line",
+    lostCopy.body.includes("Backblaze &lt;B2&gt;") && lostCopy.body.includes("Bucket irraggiungibile") && !lostCopy.body.includes("second line"),
+    lostCopy.body
+  );
+  r.check("and says what to do", /riprovare la copia/.test(lostCopy.body), lostCopy.body);
+  const partialAndLost = backup("partial", { copies: { total: 2, saved: 1, failed: [{ name: "USB", error: "pieno" }] } });
+  r.check("a partial backup with a lost copy says both", partialAndLost.level === "warn" && partialAndLost.body.includes("USB"), partialAndLost.body);
+  r.check("a single destination does not talk about copies", !backup("success", { copies: { total: 1, saved: 1, failed: [] } }).body.includes("Copie"));
+
   // --- The rest of the catalogue -------------------------------------------
   r.check(
     "a crashed project says it was not the panel",

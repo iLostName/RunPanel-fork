@@ -4,6 +4,7 @@ import type { BackupPoliciesTable } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import { removePartialArchives } from "./paths";
 import { pruneUploads } from "./uploads";
+import { policyDestinationIds } from "./policy-destinations";
 import { BackupBusyError, runBackup } from "./runner";
 import type { BackupTarget } from "./types";
 
@@ -165,7 +166,7 @@ async function considerPolicy(
     await runBackup({
       trigger: "schedule",
       targets: parseTargets(policy.targets),
-      destinationId: policy.destination_id,
+      destinationIds: await policyDestinationIds(policy),
       policyId: policy.id,
       policyName: policy.name,
       includeSecretKey: policy.include_secret_key === 1,

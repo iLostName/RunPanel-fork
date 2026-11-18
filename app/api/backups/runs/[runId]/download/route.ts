@@ -1,10 +1,9 @@
-import path from "path";
 import { Readable } from "stream";
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { runVisible } from "@/lib/backup-access";
 import { getDb } from "@/lib/db";
-import { buildDestination } from "@/services/backup/destinations";
+import { readFirstCopy, runArchiveFileName } from "@/services/backup/copies";
 import { archiveContentType, assertBackupId } from "@/services/backup/paths";
 
 type Params = { params: Promise<{ runId: string }> };
@@ -38,31 +37,27 @@ export async function GET(_request: NextRequest, { params }: Params) {
     .where("id", "=", runId)
     .executeTakeFirst();
 
-  if (!run?.archive_path || !run.destination_id) {
+  if (!run?.archive_path) {
     return NextResponse.json({ error: "Questo backup non ha un archivio" }, { status: 404 });
   }
 
-  const destinationRow = await db
-    .selectFrom("backup_destinations")
-    .selectAll()
-    .where("id", "=", run.destination_id)
-    .executeTakeFirst();
-
-  if (!destinationRow) {
-    return NextResponse.json({ error: "Destinazione non più configurata" }, { status: 404 });
-  }
-
   try {
-    const destination = buildDestination(destinationRow);
-    const stream = await destination.open(run.archive_path);
-    const fileName = path.basename(run.archive_path);
+    // The first copy that answers, the ones on this disk first: a bucket that
+    // is down does not stop the download of the copy on the disk.
+    const { stream, bytes } = await readFirstCopy(run.id, async ({ copy, destination, bytes }) => ({
+      stream: await destination.open(copy.ref as string),
+      bytes,
+    }));
+    // Named from the run rather than from the ref: a ref is the destination's
+    // business, and not every destination's is a file name.
+    const fileName = runArchiveFileName(run);
 
     // Served as stored: an encrypted archive leaves encrypted, a copy kept
     // elsewhere is exactly what the password is for.
     return new Response(Readable.toWeb(stream) as ReadableStream, {
       headers: {
         "Content-Type": archiveContentType(fileName),
-        "Content-Length": String(run.archive_bytes ?? 0),
+        "Content-Length": String(bytes || run.archive_bytes || 0),
         "Content-Disposition": `attachment; filename="${fileName}"`,
         "Cache-Control": "no-store",
         // The archive's own digest, so a download can be checked without

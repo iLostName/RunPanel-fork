@@ -4,7 +4,14 @@ import { policyProblem, visiblePolicyIds } from "@/lib/backup-access";
 import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import { updateBackupPolicySchema } from "@/lib/validation";
+import { withPrimary, type PolicyDestination } from "@/lib/backup-copies";
 import { listPolicies } from "@/services/backup/catalog";
+import {
+  destinationListError,
+  normalizeDestinationList,
+  policyDestinations,
+  writePolicyDestinations,
+} from "@/services/backup/policy-destinations";
 import { refreshNextRun } from "@/services/backup/scheduler";
 
 type Params = { params: Promise<{ policyId: string }> };
@@ -46,7 +53,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const db = await getDb();
     const existing = await db
       .selectFrom("backup_policies")
-      .select(["id", "targets", "include_secret_key"])
+      .select(["id", "targets", "include_secret_key", "destination_id"])
       .where("id", "=", policyId)
       .executeTakeFirst();
 
@@ -67,25 +74,32 @@ export async function PUT(request: NextRequest, { params }: Params) {
     );
     if (problem) return NextResponse.json({ error: problem }, { status: 403 });
 
-    // As in POST: otherwise an unknown id surfaces as a foreign key error.
-    if (data.destinationId !== undefined) {
-      const destination = await db
-        .selectFrom("backup_destinations")
-        .select("id")
-        .where("id", "=", data.destinationId)
-        .executeTakeFirst();
-      if (!destination) {
-        return NextResponse.json({ error: "Destinazione non trovata" }, { status: 404 });
+    // `destinations` replaces the list. `destinationId` alone — a client that
+    // knows one destination per policy — moves the primary and leaves the
+    // other copies where they are: it cannot remove what it never heard of.
+    let list: PolicyDestination[] | null = null;
+    if (data.destinations) {
+      list = normalizeDestinationList(data.destinations);
+      if (data.destinationId !== undefined && data.destinationId !== list[0].destinationId) {
+        return NextResponse.json({ error: "destinationId deve essere la prima delle destinazioni" }, { status: 400 });
       }
+    } else if (data.destinationId !== undefined) {
+      list = withPrimary(await policyDestinations(existing), data.destinationId);
     }
 
-    const patch: Record<string, unknown> = { updated_at: nowIso() };
+    // As in POST: otherwise an unknown id surfaces as a foreign key error.
+    if (list) {
+      const listProblem = await destinationListError(list.map((entry) => entry.destinationId));
+      if (listProblem) return NextResponse.json({ error: listProblem.error }, { status: listProblem.notFound ? 404 : 400 });
+    }
+
+    const now = nowIso();
+    const patch: Record<string, unknown> = { updated_at: now };
 
     if (data.name !== undefined) patch.name = data.name;
     if (data.enabled !== undefined) patch.enabled = data.enabled ? 1 : 0;
     if (data.cron !== undefined) patch.cron = data.cron;
     if (data.timezone !== undefined) patch.timezone = data.timezone;
-    if (data.destinationId !== undefined) patch.destination_id = data.destinationId;
     if (data.targets !== undefined) patch.targets = JSON.stringify(data.targets);
     if (data.retentionCount !== undefined) patch.retention_count = data.retentionCount;
     if (data.retentionDays !== undefined) patch.retention_days = data.retentionDays;
@@ -94,7 +108,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
       patch.include_secret_key = data.includeSecretKey ? 1 : 0;
     }
 
-    await db.updateTable("backup_policies").set(patch).where("id", "=", policyId).execute();
+    await db.transaction().execute(async (trx) => {
+      await trx.updateTable("backup_policies").set(patch).where("id", "=", policyId).execute();
+      if (list) await writePolicyDestinations(trx, policyId, list, now);
+    });
 
     // The schedule or the switch may have moved; recompute now so the list is
     // right immediately instead of after the next tick.

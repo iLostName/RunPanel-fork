@@ -3,13 +3,15 @@ import { z } from "zod";
 import { isDenied, requireOwner, requirePermission } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { destinationTypes, destinationUpdateSchema, s3ConfigSchema } from "@/lib/validation";
+import { destinationTypes, destinationUpdateSchema, localConfigSchema, s3ConfigSchema } from "@/lib/validation";
 import { destinationConfig, transientDestination } from "@/services/backup/destinations";
+import { localPathProblem } from "@/services/backup/destinations/local";
 
 const checkSchema = z
   .object({
     type: z.enum(destinationTypes),
-    config: destinationUpdateSchema.shape.config,
+    /** S3's fields, or a local destination's folder of its own. */
+    config: z.union([destinationUpdateSchema.shape.config.unwrap(), localConfigSchema]).optional(),
     /** Editing: the stored configuration fills what the form left empty — the secret, above all. */
     destinationId: z.string().min(1).max(32).optional(),
   })
@@ -67,6 +69,20 @@ export async function POST(request: NextRequest) {
         });
       }
       merged = valid.data;
+    }
+
+    // Writing a probe into a folder of the server is the owner's call, as is
+    // saving a destination there.
+    if (type === "local") {
+      const folder = typeof merged.path === "string" ? merged.path : "";
+      if (folder) {
+        if (!denied.principal.isOwner) {
+          return NextResponse.json({ error: "Solo il proprietario può scegliere una cartella del server" }, { status: 403 });
+        }
+        const problem = localPathProblem(folder);
+        if (problem) return NextResponse.json({ ok: false, message: problem });
+      }
+      merged = folder ? { path: folder } : {};
     }
 
     try {
