@@ -9,6 +9,7 @@ import { isValidTimeZone } from "@/lib/cron";
 import { rescheduleRestarts } from "@/services/restart-scheduler";
 import { ACCENT_PRESETS, ACCENT_SETTING_KEY } from "@/lib/themes";
 import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
+import { applyProxySoon } from "@/services/proxy";
 import { panelPublicUrlSchema, timeZoneSchema } from "@/lib/validation";
 import { PANEL_UPDATE_INTERVALS, POLL_INTERVALS } from "@/lib/polling";
 import {
@@ -160,8 +161,16 @@ export async function PUT(request: NextRequest) {
       // An allowlist rather than "any string that is not a secret": otherwise a
       // preferences payload can write arbitrary keys into the settings table.
       const previousZone = parsed.data.timezone !== undefined ? await getSetting("timezone") : null;
+      const previousUrl =
+        parsed.data[PANEL_PUBLIC_URL_SETTING] !== undefined ? await getSetting(PANEL_PUBLIC_URL_SETTING) : null;
       for (const [key, value] of Object.entries(parsed.data)) {
         if (value !== undefined) await setSetting(key, value);
+      }
+
+      // The panel's own nginx block sends HSTS only for the adopted public
+      // address: rewritten now rather than at the next two-minute resync.
+      if (parsed.data[PANEL_PUBLIC_URL_SETTING] !== undefined && parsed.data[PANEL_PUBLIC_URL_SETTING] !== previousUrl) {
+        applyProxySoon();
       }
 
       // A pending restart was computed in the old zone. Left alone it would fire
