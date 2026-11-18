@@ -31,6 +31,7 @@ Three steps, and the project is created only at the end: source (GitHub, or a ZI
 - A failed deploy states its cause and the fix in words; for Docker projects, when the new version does not answer, the previous one comes back online by itself.
 - From **Altro**: Duplica, Esporta configurazione, Vedi attività. An exported configuration is imported from the wizard in expert mode.
 - **Variabili**: a table or a `.env` text view, paste a `.env` choosing whether to overwrite or skip existing keys, values hidden until shown, the error on the row that is wrong, linked databases' variables with where they come from, and **Salva e ridistribuisci** (save and redeploy).
+- **Scheduled tasks** (Impostazioni › Automazioni): a command with a schedule, run in the project ("every night at 3, clear the cache"), with history, output and outcome of every run, "Esegui ora" (run now), a time limit and an alert when it fails. It never runs twice at once nor during a deploy.
 - **Log**: search, errors only, pause, download. The panel keeps each app's log on disk, rotated, and it can be searched after a restart too.
 
 ## The database page
