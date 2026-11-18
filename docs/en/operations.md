@@ -8,7 +8,7 @@ Everything below concerns the server selected in the bar: with [several servers]
 
 ## Autostart
 
-**Sistema › Avvio automatico** (system, autostart) says what the machine already does at boot and generates what is missing:
+**Salute › Avvio automatico** (health, autostart) says what the machine already does at boot and generates what is missing:
 
 - a **systemd unit** with absolute paths, after and requiring `docker.service`. If the panel runs as root it installs it, otherwise it shows a block to paste;
 - where there is no systemd, a supervised **`@reboot` script**, which the panel adds to the user's crontab itself. Its output goes to `logs/autostart.log`.
@@ -40,7 +40,7 @@ The page shows the last occurrence and what it did. If the panel was off at the 
 
 ## Freeing space
 
-**Sistema › Pulizia Docker** (Docker cleanup) shows how much Docker uses and what can be reclaimed. **Pulisci ora** (clean now) removes only what can be recreated, never volumes or data:
+**Salute › Spazio disco** (Docker cleanup) shows how much Docker uses and what can be reclaimed. **Pulisci ora** (clean now) removes only what can be recreated, never volumes or data:
 
 - old versions of project images, beyond those kept for rollback (2 per project by default);
 - unnamed images no container uses, build leftovers including compose's;
@@ -55,7 +55,7 @@ Every 6 hours the panel does the safe part by itself: image retention, its own u
 
 ## Updating the panel
 
-RunPanel runs from a git clone of its repository. The version shown is `v0.1.0+125`, where the number is the mainline commit count (on a shallow clone, the SHA). At intervals (1, 6 or 24 hours, chosen on the page) it runs `git fetch` and compares; for a private repository it uses the panel's GitHub token. **It never applies anything by itself**: when the branch moves a strip appears at the top of the pages with the **Aggiorna** (update) button, and **Sistema › Aggiornamenti** lists the commits. With several servers, strip and page follow the selected server: to update a node, select it.
+RunPanel runs from a git clone of its repository. The version shown is `v0.1.0+125`, where the number is the mainline commit count (on a shallow clone, the SHA). At intervals (1, 6 or 24 hours, chosen on the page) it runs `git fetch` and compares; for a private repository it uses the panel's GitHub token. **It never applies anything by itself**: when the branch moves a strip appears at the top of the pages with the **Aggiorna** (update) button, and **Impostazioni › Aggiornamenti** lists the commits. With several servers, strip and page follow the selected server: to update a node, select it.
 
 After **Aggiorna**, the panel:
 

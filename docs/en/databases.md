@@ -19,6 +19,10 @@ At creation the user and database are `runpanel` and `runpanel_db`, with a rando
 
 The port is published on every interface. To limit it to certain addresses, at creation or later, see [Network access](network.md).
 
+## The database page
+
+The same header as the project page (name renamed in place, status, Avvia/Riavvia/Ferma with a confirmation) and tabs: **Panoramica** (state, who uses it and which variable it receives), **Connessione** (connection), **Console**, **Database interni** (inner databases), **Backup**, **Impostazioni** (scheduled restart, mounts, permissions and deletion, which asks for the name to be typed when it deletes the data too). On creation the name is proposed from the project (`my-site-db`, `my-site-cache` for Redis) and the port is the first free one on the server, already checked; port, user, password and networks are under **Avanzate**.
+
 ## The console
 
 Three modes: **Motore** (the engine's client, already signed in: `psql`, `mysql`, `redis-cli`, `mongosh`), **Shell** inside the container, and the container's live **Log**.
@@ -30,7 +34,7 @@ Three modes: **Motore** (the engine's client, already signed in: `psql`, `mysql`
 
 ## Databases inside a service
 
-In the **Database** tab a server can hold more than one: they are created and deleted, each with its own connection URL. The list merges what the engine reports with what the panel knows, and flags databases created outside the panel and those the engine no longer has.
+In the **Database interni** (inner databases) tab a server can hold more than one: they are created and deleted, each with its own connection URL. The list merges what the engine reports with what the panel knows, and flags databases created outside the panel and those the engine no longer has.
 
 - Names in lowercase, digits and underscore, at most 63 characters.
 - System databases cannot be dropped; the main one goes only by deleting the service. A Postgres database with open connections is refused rather than force-closed.

@@ -10,11 +10,11 @@ L'insieme dei server collegati è un **cluster**. Non serve niente di raggiungib
 
 ## Collegare un server
 
-1. Sul pannello esistente: **Sistema › Server › Collega un server**. Il pannello genera un token valido un'ora e una volta sola, e mostra il proprio indirizzo (preso da **Impostazioni › Pannello › Indirizzo pubblico**, o dalla richiesta). Il primo token crea anche il cluster.
+1. Sul pannello esistente: **Impostazioni › Server collegati › Collega un server**. Il pannello genera un token valido un'ora e una volta sola, e mostra il proprio indirizzo (preso da **Impostazioni › Generale › Indirizzo pubblico**, o dalla richiesta). Il primo token crea anche il cluster.
 2. Sul server nuovo: installa RunPanel come sempre e apri la sua porta. Nella pagina di primo avvio scegli **Collega a un RunPanel** invece di creare il proprietario, e inserisci il token di setup (stampato nel log, come sempre), l'indirizzo del pannello, il token di collegamento, un nome e l'indirizzo con cui il pannello raggiunge questo server.
 3. Scegli il ruolo: **Pannello** se anche questo server deve mostrare l'interfaccia, **Solo nodo** se deve solo essere gestito.
 
-Il server nuovo contatta il pannello, riceve il segreto del cluster e gli account, e da quel momento il pannello lo chiama. Compare subito in **Sistema › Server** con stato, versione e ultimo contatto.
+Il server nuovo contatta il pannello, riceve il segreto del cluster e gli account, e da quel momento il pannello lo chiama. Compare subito in **Impostazioni › Server collegati** con stato, versione e ultimo contatto.
 
 L'indirizzo del server nuovo è quello con cui lo raggiunge il **pannello**, non quello del tuo browser: con un tunnel SSH o `localhost` il collegamento riesce ma il server risulta irraggiungibile (il form lo segnala).
 
@@ -25,14 +25,14 @@ Si collega solo un'installazione al primo avvio, con una `data/` vuota. I proget
 - **Pannello**: mostra l'interfaccia, accetta gli account del cluster e gestisce tutti i server, compreso collegarne e revocarne altri.
 - **Nodo**: nessun accesso diretto. Chi apre la sua porta vede "Questo server è gestito da …" con i link ai pannelli.
 
-Il ruolo si cambia da **Sistema › Server** e vale per tutti. Un pannello che diventa nodo chiude le sessioni aperte.
+Il ruolo si cambia da **Impostazioni › Server collegati** e vale per tutti. Un pannello che diventa nodo chiude le sessioni aperte.
 
 ## Tutti i server nel pannello
 
 Il server di una pagina sta nel suo indirizzo (`?server=…`): un link a un progetto di or apre sempre or, chiunque lo apra. Il selettore in alto a destra (nel menu, su telefono) cambia quel parametro.
 
 - **Liste di tutti i server.** **Panoramica**, **Progetti**, **Servizi**, **Backup**, **Monitor**, **Diagnostica** e **Aggiornamenti** mostrano tutti i server insieme, ogni riga con il nome del suo server; il filtro "Tutti i server" li restringe a uno. Un server che non risponde compare come "non raggiungibile" e non blocca la lista.
-- **Panoramica.** Una scheda per server con CPU, memoria, disco, Docker, versione, progetti attivi e avvisi (disco quasi pieno, versione diversa, cose da sistemare, aggiornamento disponibile). Sotto, le cartelle, comuni a tutti i server, e poi quello che ogni server tiene fuori dalle cartelle. Le stesse schede sono in **Sistema › Server**.
+- **Panoramica.** Una scheda per server con CPU, memoria, disco, Docker, versione, progetti attivi e avvisi (disco quasi pieno, versione diversa, cose da sistemare, aggiornamento disponibile). Sotto, le cartelle, comuni a tutti i server, e poi quello che ogni server tiene fuori dalle cartelle. Le stesse schede sono in **Impostazioni › Server collegati**.
 - **Cartelle.** Una cartella vale per tutti i server: contiene progetti e servizi di qualunque server, ognuno con il nome del suo. Si crea, si rinomina e si elimina da qualunque pannello; il server di un progetto ricorda dove è archiviato, quindi la scelta resta anche se il pannello cambia o si riavvia. Se un server non risponde, i suoi progetti restano nella loro cartella come **Non raggiungibile**, con gli ultimi dati visti da questo pannello e per questo account: non si aprono e non si spostano finché il server non torna. Eliminare una cartella riporta fuori il contenuto su ogni server; un server spento lo fa quando torna.
 - **Azioni.** Avviare un servizio, eseguire un backup, scaricare un archivio, applicare una correzione della diagnostica o aggiornare un server partono sempre dal server della riga.
 - **Creare.** Nuovo progetto, nuovo database e nuova pianificazione di backup chiedono su quale server.
@@ -53,9 +53,9 @@ Restano di ogni server: le sessioni (si entra su ogni pannello separatamente), i
 
 ## Diagnostica
 
-**Diagnostica**, accanto a ogni server in **Sistema › Server**, lo interroga e confronta: raggiungibile, stesso segreto (la firma viene accettata), stesso cluster, versione, orologio e account allineati. Una versione diversa è evidenziata anche nell'elenco. L'orologio diventa rosso oltre i due minuti e mezzo di differenza; oltre i cinque le richieste vengono rifiutate, perché la firma scade.
+**Diagnostica**, accanto a ogni server in **Impostazioni › Server collegati**, lo interroga e confronta: raggiungibile, stesso segreto (la firma viene accettata), stesso cluster, versione, orologio e account allineati. Una versione diversa è evidenziata anche nell'elenco. L'orologio diventa rosso oltre i due minuti e mezzo di differenza; oltre i cinque le richieste vengono rifiutate, perché la firma scade.
 
-Un nodo non ha un pannello suo: i suoi aggiornamenti si gestiscono da **Sistema › Aggiornamenti** del pannello, che elenca tutti i server. Per ognuno ci sono la versione, i commit in arrivo, **Controlla**, **Aggiorna** e la frequenza del controllo automatico (ogni 1, 6 o 24 ore), che il server esegue da sé e notifica su Telegram con il suo nome. **Controlla tutti** e **Aggiorna tutti** agiscono su ogni server insieme, con il pannello per ultimo. **Dettagli** apre commit e log in diretta di quel server. Un server che si aggiorna si riavvia da solo e per qualche secondo risulta irraggiungibile; il controllo non applica mai niente da solo.
+Un nodo non ha un pannello suo: i suoi aggiornamenti si gestiscono da **Impostazioni › Aggiornamenti** del pannello, che elenca tutti i server. Per ognuno ci sono la versione, i commit in arrivo, **Controlla**, **Aggiorna** e la frequenza del controllo automatico (ogni 1, 6 o 24 ore), che il server esegue da sé e notifica su Telegram con il suo nome. **Controlla tutti** e **Aggiorna tutti** agiscono su ogni server insieme, con il pannello per ultimo. **Dettagli** apre commit e log in diretta di quel server. Un server che si aggiorna si riavvia da solo e per qualche secondo risulta irraggiungibile; il controllo non applica mai niente da solo.
 
 ## Revoca e segreto
 

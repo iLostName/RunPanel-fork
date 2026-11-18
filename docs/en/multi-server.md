@@ -10,11 +10,11 @@ The set of linked servers is a **cluster**. Nothing has to be reachable from the
 
 ## Linking a server
 
-1. On the existing panel: **Sistema › Server › Collega un server** (link a server). The panel issues a token valid for one hour and one use, and shows its own address (from **Impostazioni › Pannello › Indirizzo pubblico**, or the request). The first token also creates the cluster.
+1. On the existing panel: **Impostazioni › Server collegati › Collega un server** (link a server). The panel issues a token valid for one hour and one use, and shows its own address (from **Impostazioni › Generale › Indirizzo pubblico**, or the request). The first token also creates the cluster.
 2. On the new server: install RunPanel as usual and open its port. On the first-run page choose **Collega a un RunPanel** (link to a RunPanel) instead of creating the owner, and enter the setup token (printed in the log, as always), the panel's address, the link token, a name and the address the panel reaches this server at.
 3. Pick the role: **Pannello** (panel) if this server should serve the interface too, **Solo nodo** (node only) if it should only be managed.
 
-The new server contacts the panel, receives the cluster secret and the accounts, and from then on the panel calls it. It shows up at once in **Sistema › Server** with status, version and last contact.
+The new server contacts the panel, receives the cluster secret and the accounts, and from then on the panel calls it. It shows up at once in **Impostazioni › Server collegati** with status, version and last contact.
 
 The new server's address is the one the **panel** reaches it at, not your browser's: through an SSH tunnel or `localhost` the link succeeds but the server shows as unreachable (the form warns about it).
 
@@ -25,14 +25,14 @@ Only an install on its first run, with an empty `data/`, can join. A server's pr
 - **Panel**: serves the interface, accepts the cluster's accounts and manages every server, including linking and revoking others.
 - **Node**: no direct access. Whoever opens its port sees "Questo server è gestito da …" (managed by) with links to the panels.
 
-The role is changed from **Sistema › Server** and applies everywhere. A panel that becomes a node closes its open sessions.
+The role is changed from **Impostazioni › Server collegati** and applies everywhere. A panel that becomes a node closes its open sessions.
 
 ## Every server in the panel
 
 A page's server is part of its address (`?server=…`): a link to a project on "or" always opens on "or", whoever opens it. The selector top right (in the menu, on a phone) changes that parameter.
 
 - **Lists of every server.** **Panoramica** (overview), **Progetti**, **Servizi**, **Backup**, **Monitor**, **Diagnostica** and **Aggiornamenti** show every server at once, each row with its server's name; the "Tutti i server" filter narrows them to one. A server that does not answer shows as unreachable and never blocks the list.
-- **Overview.** One card per server with CPU, memory, disk, Docker, version, running projects and warnings (disk nearly full, different version, things to fix, update available). Below, the folders, shared by every server, then what each server keeps outside them. The same cards are on **Sistema › Server**.
+- **Overview.** One card per server with CPU, memory, disk, Docker, version, running projects and warnings (disk nearly full, different version, things to fix, update available). Below, the folders, shared by every server, then what each server keeps outside them. The same cards are on **Impostazioni › Server collegati**.
 - **Folders.** A folder belongs to every server: it holds projects and services of any server, each with its server's name. It is created, renamed and deleted from any panel; a project's server remembers where it is filed, so the choice stays when the panel changes or restarts. When a server does not answer, its projects stay in their folder as **Non raggiungibile** (unreachable), with the last data this panel saw for this account: they cannot be opened or moved until the server is back. Deleting a folder puts its content back outside on every server; a server that is off does so when it returns.
 - **Actions.** Starting a service, running a backup, downloading an archive, applying a diagnostics fix or updating a server always go to the row's server.
 - **Creating.** New project, new database and new backup policy ask which server.
@@ -53,9 +53,9 @@ Each server keeps its own: sessions (you sign in on each panel separately), invi
 
 ## Diagnosis
 
-**Diagnostica**, next to each server in **Sistema › Server**, asks it who it is and compares: reachable, same secret (the signature is accepted), same cluster, version, clock and accounts in step. A different version is also highlighted in the list. The clock turns red past two and a half minutes of difference; past five, requests are refused because signatures expire.
+**Diagnostica**, next to each server in **Impostazioni › Server collegati**, asks it who it is and compares: reachable, same secret (the signature is accepted), same cluster, version, clock and accounts in step. A different version is also highlighted in the list. The clock turns red past two and a half minutes of difference; past five, requests are refused because signatures expire.
 
-A node has no panel of its own: its updates are handled from the panel's **Sistema › Aggiornamenti**, which lists every server. Each one shows its version, the commits waiting, **Controlla**, **Aggiorna** and how often it checks by itself (every 1, 6 or 24 hours); the server runs that check on its own and announces it on Telegram under its name. **Controlla tutti** and **Aggiorna tutti** act on every server at once, the panel last. **Dettagli** opens that server's commits and live log. A server that updates restarts by itself and is unreachable for a few seconds; the check never applies anything on its own.
+A node has no panel of its own: its updates are handled from the panel's **Impostazioni › Aggiornamenti**, which lists every server. Each one shows its version, the commits waiting, **Controlla**, **Aggiorna** and how often it checks by itself (every 1, 6 or 24 hours); the server runs that check on its own and announces it on Telegram under its name. **Controlla tutti** and **Aggiorna tutti** act on every server at once, the panel last. **Dettagli** opens that server's commits and live log. A server that updates restarts by itself and is unreachable for a few seconds; the check never applies anything on its own.
 
 ## Revocation and the secret
 

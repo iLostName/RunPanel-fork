@@ -6,6 +6,23 @@
 
 Un progetto vive sul server su cui è stato creato: con [più server](multi-server.md), crealo con quel server selezionato. Cambiare sorgente, branch, repository o caricare file richiede il permesso **Accesso all'host** (vedi [Utenti e permessi](users.md)).
 
+## Creare un progetto
+
+**Nuovo progetto** fa tre passi, e crea il progetto solo all'ultimo: un wizard abbandonato non lascia niente.
+
+1. **Sorgente**: un repository GitHub (dall'elenco, se GitHub è collegato, o incollando l'indirizzo di uno pubblico) oppure un archivio ZIP trascinato nella pagina. GitHub si collega da un dialog, senza uscire dal wizard.
+2. **Rivedi**: il pannello legge il codice senza clonarlo (l'API di GitHub, o l'indice dello ZIP nel browser) e dice cosa ha trovato, per esempio *Next.js · porta 3000 · npm*. Il nome arriva dal repository. Le domande rimaste hanno già una risposta: che cosa fa l'app (sito o servizio in background, che spegne il controllo di salute), se serve un database (proposto quando il codice ne usa uno: viene creato e collegato), le variabili (incollando un `.env`), un indirizzo su un dominio già configurato, e gli aggiornamenti a ogni push. Runtime, porta e comandi stanno in **Personalizza**. La porta proposta è già libera: per le app native, se quella rilevata è occupata, l'app riceve la successiva nella variabile `PORT`.
+3. **Online**: crea progetto, database, variabili e indirizzo, poi avvia il primo deploy e ne mostra le fasi e il log. Se un passo prima del deploy non riesce, quello che era già stato creato viene tolto. Gli aggiornamenti automatici usano il webhook quando GitHub può raggiungere il pannello, altrimenti il controllo periodico.
+
+Un progetto vuoto, da configurare a mano, si crea dallo stesso wizard in modalità esperto.
+
+## La pagina del progetto
+
+- **Panoramica** (si apre qui): lo stato in una frase con la prossima cosa da fare (scegliere la sorgente, fare il primo deploy, correggere un deploy fallito, riavviare), l'ultimo deploy, le risorse, gli indirizzi, i database collegati e cosa manca per un progetto affidabile.
+- **Deploy**: la cronologia, il deploy in corso seguito dal vivo (con **Annulla**), e **Ripristina** sulle versioni precedenti riuscite di un repository GitHub. Un deploy fallito dice la causa in parole (porta sbagliata, memoria finita durante la build, dipendenze non installate, repository non leggibile…) con il messaggio originale in **Dettagli**.
+- **Log**, **Variabili**, **File** (con l'avviso che il deploy successivo rimette i file come nella sorgente), **Terminale** (solo Docker).
+- **Impostazioni**, con un menu laterale: Generale, Sorgente, Build e avvio, Indirizzi, Rete, Risorse, Automazioni, Backup, Avanzate, Permessi, Zona pericolosa. Una sola barra salva tutte le sezioni modificate, e il menu segna quelle con modifiche non salvate. Viene inviato solo quello che è cambiato.
+
 ## Sorgenti
 
 - **GitHub**: collega un token nella pagina **GitHub** e scegli il repository da un elenco, con i branch letti dall'API. In alternativa incolla un URL `https://` pubblico. In un cluster il token è condiviso da tutti i server.
