@@ -1137,3 +1137,27 @@ export function envVarsIssueText(body: unknown, issues: readonly { path: Propert
   if (root === "vars" && issue.code === "too_big") return "Troppe variabili: il massimo è 500";
   return issue.message || "Dati non validi";
 }
+
+// --- App catalogue ---
+
+/**
+ * Installing an app of the catalogue.
+ *
+ * Only the shape is bounded here. What each answer may be depends on the
+ * template that asks it, so `validateAnswers` in lib/app-catalog checks them
+ * once this lets them through; this is what keeps a megabyte, or a nested
+ * object, from ever reaching it.
+ */
+export const catalogInstallSchema = z.object({
+  templateId: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/, "Modello non valido"),
+  name: z.string().trim().min(1, "Serve un nome").max(100, "Il nome può avere al massimo 100 caratteri"),
+  /** Left out: the server picks a free one. */
+  port: z.number().int().min(1024, "Una porta tra 1024 e 65535").max(65535, "Una porta tra 1024 e 65535").optional(),
+  answers: z
+    .record(z.string().max(64), z.union([z.string().max(4096), z.number(), z.boolean()]))
+    .refine((answers) => Object.keys(answers).length <= 50, "Troppe risposte")
+    .optional(),
+  address: z.object({ domainId: z.string().min(1).max(32), subdomain: subdomainSchema }).nullable().optional(),
+  /** The server's name as the person reaches it; checked again where it is used. */
+  publicHost: z.string().trim().max(253).optional(),
+});

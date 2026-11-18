@@ -53,6 +53,7 @@ export const ACTION_LABEL: Record<string, string> = {
   "project.repo-path.reset": "Cartella del repository ripristinata",
   "project.upload": "Archivio caricato",
   "project.webhook": "Webhook GitHub",
+  "catalog.install": "App installata dal catalogo",
   "service.control": "Avvio / stop / riavvio servizio",
   "service.update": "Impostazioni servizio",
   "service.delete": "Servizio eliminato",
