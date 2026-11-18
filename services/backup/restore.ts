@@ -32,6 +32,8 @@ import { extractArchiveEntry, isSafeEntryPath, listArchiveEntries, type ArchiveH
 import { ArchiveLockedError, checkArchivePassword, readSealedHead, type ZipOpener } from "./archive-crypto";
 import { buildDestination } from "./destinations";
 import { archiveForRestore } from "./archive-source";
+import { readOrder } from "@/lib/backup-copies";
+import { readFirstCopy, runCopies, StopFallback } from "./copies";
 import { memberFailureMessage, readArchiveChecksums, verifyMembers } from "./integrity";
 import { keyAvailability, panelArchiveOpener } from "./keyring";
 import { touchUpload, uploadArchivePath, uploadArtifacts, uploadPasswords } from "./uploads";
@@ -179,31 +181,31 @@ export async function restorePasswordProblem(runId: string, password: string | u
   const db = await getDb();
   const run = await db
     .selectFrom("backup_runs")
-    .select(["archive_path", "destination_id", "encryption_key_id"])
+    .select(["archive_path", "encryption_key_id"])
     .where("id", "=", runId)
     .executeTakeFirst();
-  if (!run?.encryption_key_id || !run.archive_path || !run.destination_id) return null;
+  if (!run?.encryption_key_id || !run.archive_path) return null;
   if ((await keyAvailability()).get(run.encryption_key_id)?.usable) return null;
   if (!password) {
     return "Questo archivio è cifrato con una password dei backup che il pannello non ha più: scrivila per ripristinarlo.";
   }
 
-  const destination = await db
-    .selectFrom("backup_destinations")
-    .select("type")
-    .where("id", "=", run.destination_id)
-    .executeTakeFirst();
-  if (destination?.type !== "local") return null;
-  let file: string;
-  try {
-    file = resolveArchivePath(run.archive_path);
-  } catch {
-    return null;
+  // Tried on a copy on this disk, if there is one: every copy is the same
+  // file, sealed with the same password.
+  for (const copy of readOrder(await runCopies(runId))) {
+    if (!copy.local || !copy.row || !copy.ref) continue;
+    let file: string;
+    try {
+      file = buildDestination(copy.row).localPath?.(copy.ref) ?? "";
+    } catch {
+      continue;
+    }
+    if (!file || !fs.existsSync(file)) continue;
+    return (await checkArchivePassword(file, password).catch(() => true))
+      ? null
+      : "La password non è quella di questo archivio: serve quella dei backup in uso il giorno in cui è stato creato.";
   }
-  if (!fs.existsSync(file)) return null;
-  return (await checkArchivePassword(file, password).catch(() => true))
-    ? null
-    : "La password non è quella di questo archivio: serve quella dei backup in uso il giorno in cui è stato creato.";
+  return null;
 }
 
 /** How many times open Postgres sessions are looked for, and how far apart. */
@@ -283,19 +285,6 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
   let failure: string | null = null;
 
   try {
-    const resolved = await resolveArchive(request, staging, emit);
-    // The file and the opener that knows its password travel together: every
-    // read below goes through the decryption, and the archive is never written
-    // out in clear — only the members a step needs are extracted, as from a zip.
-    const archive: ArchiveHandle = { file: resolved.file, open: resolved.open };
-    emit(`Archivio: ${path.basename(archive.file)} (${formatBytes(fs.statSync(archive.file).size)})`);
-    const sealed = await readSealedHead(archive.file).catch(() => null);
-    if (sealed) {
-      emit(
-        `  cifrato con la password dei backup${sealed.header.keyCreatedAt ? ` del ${formatWhen(sealed.header.keyCreatedAt)}` : ""}`
-      );
-    }
-
     const artifacts = await loadArtifacts(request);
     const planned = request.mappings.filter((mapping) => mapping.action === "restore");
     if (planned.length === 0) throw new Error("Nessun elemento selezionato");
@@ -303,8 +292,22 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
     emit(`${planned.length} element${planned.length === 1 ? "o" : "i"} da ripristinare`);
 
     // First of all: a damaged archive must stop the restore while nothing has
-    // been stopped, copied or overwritten yet.
-    await verifyBeforeRestore(resolved, planned, artifacts, emit);
+    // been stopped, copied or overwritten yet. With several copies, one that
+    // is missing, unreachable or damaged gives way to the next.
+    const resolved = await resolveArchive(request, staging, emit, async (candidate) => {
+      emit(`Archivio: ${path.basename(candidate.file)} (${formatBytes(fs.statSync(candidate.file).size)})`);
+      const sealed = await readSealedHead(candidate.file).catch(() => null);
+      if (sealed) {
+        emit(
+          `  cifrato con la password dei backup${sealed.header.keyCreatedAt ? ` del ${formatWhen(sealed.header.keyCreatedAt)}` : ""}`
+        );
+      }
+      await verifyBeforeRestore(candidate, planned, artifacts, emit);
+    });
+    // The file and the opener that knows its password travel together: every
+    // read below goes through the decryption, and the archive is never written
+    // out in clear — only the members a step needs are extracted, as from a zip.
+    const archive: ArchiveHandle = { file: resolved.file, open: resolved.open };
 
     // Before the safety copy and before anything is stopped: a restore that is
     // not theirs must leave every service exactly as it found it.
@@ -393,23 +396,38 @@ interface ResolvedArchive {
   open: ZipOpener;
 }
 
+/**
+ * The archive to restore from, already through `check` — what the restore
+ * verifies before it touches anything.
+ *
+ * A run's archive comes from its first copy that answers (services/backup/
+ * copies.ts): the ones on this disk first, then the policy's order. A copy
+ * that is gone, does not answer, or fails `check` — a download whose sha256
+ * is not the one recorded, a member that does not read back — gives way to
+ * the next one, and the log says which copy was used. A password that is
+ * missing or wrong is not a fault of the copy: every copy is the same file,
+ * so it stops the restore at once.
+ */
 async function resolveArchive(
   request: RestoreRequest,
   staging: string,
-  emit: (line: string) => void
+  emit: (line: string) => void,
+  check: (candidate: ResolvedArchive) => Promise<void>
 ): Promise<ResolvedArchive> {
   if (request.uploadId) {
     const file = uploadArchivePath(request.uploadId);
     if (!fs.existsSync(file)) throw new Error("L'archivio caricato non è più disponibile: caricalo di nuovo.");
     touchUpload(request.uploadId);
     emit("Sorgente: archivio caricato");
-    return {
+    const resolved: ResolvedArchive = {
       file,
       expectedSha256: null,
       downloadedSha256: null,
       sourceName: "l'archivio caricato",
       open: panelArchiveOpener(uploadPasswords(request.uploadId)),
     };
+    await check(resolved);
+    return resolved;
   }
 
   if (!request.runId) throw new Error("Nessuna sorgente indicata");
@@ -421,45 +439,51 @@ async function resolveArchive(
     .where("id", "=", assertBackupId(request.runId))
     .executeTakeFirst();
 
-  if (!run?.archive_path || !run.destination_id) {
+  if (!run || !run.archive_path) {
     throw new Error("Questo backup non ha un archivio da cui ripristinare");
   }
 
-  const destinationRow = await db
-    .selectFrom("backup_destinations")
-    .selectAll()
-    .where("id", "=", run.destination_id)
-    .executeTakeFirst();
-
-  if (!destinationRow) throw new Error("La destinazione di quel backup non è più configurata");
-
-  const destination = buildDestination(destinationRow);
-  const stat = await destination.stat(run.archive_path).catch((err: unknown) => {
-    throw new Error(`Non riesco a raggiungere l'archivio su «${destination.name}»: ${err instanceof Error ? err.message : String(err)}`);
-  });
-  if (!stat.exists) {
-    throw new Error(
-      destination.type === "local"
-        ? "L'archivio non è più sul disco di questo server: è stato spostato o eliminato fuori dal pannello."
-        : `L'archivio non c'è più in «${destination.name}»: è stato eliminato fuori dal pannello, o da una regola di scadenza del bucket.`
-    );
-  }
-
   emit(`Sorgente: backup del ${new Date(run.started_at).toLocaleString()}`);
-  if (destination.type !== "local") emit(`Scarico l'archivio da ${destination.name} (${formatBytes(stat.bytes)})…`);
-  const { file, sha256 } = await archiveForRestore(destination, run.archive_path, staging, {
-    bytes: stat.bytes,
-    freeBytes: freeBytes(),
-    reserveBytes: FREE_SPACE_RESERVE,
-    localPath: resolveArchivePath,
-  });
-  return {
-    file,
-    expectedSha256: run.checksum,
-    downloadedSha256: sha256,
-    sourceName: `«${destination.name}»`,
-    open: panelArchiveOpener(request.password ? [request.password] : []),
-  };
+  const several = readOrder(await runCopies(run.id)).length > 1;
+
+  return readFirstCopy(
+    run.id,
+    async ({ copy, destination, bytes }) => {
+      if (!destination.localPath) emit(`Scarico l'archivio da ${destination.name} (${formatBytes(bytes)})…`);
+      else if (several) emit(`Uso la copia su «${destination.name}»`);
+
+      const { file, sha256, downloaded } = await archiveForRestore(destination, copy.ref as string, staging, {
+        bytes,
+        freeBytes: freeBytes(),
+        reserveBytes: FREE_SPACE_RESERVE,
+        localPath: (ref) => destination.localPath?.(ref) ?? resolveArchivePath(ref),
+      });
+      const resolved: ResolvedArchive = {
+        file,
+        expectedSha256: run.checksum,
+        downloadedSha256: sha256,
+        sourceName: `«${destination.name}»`,
+        open: panelArchiveOpener(request.password ? [request.password] : []),
+      };
+      try {
+        await check(resolved);
+      } catch (err) {
+        if (downloaded) fs.rmSync(file, { force: true });
+        if (err instanceof RestoreLockedError) throw new StopFallback(err);
+        throw err;
+      }
+      return resolved;
+    },
+    { log: emit }
+  );
+}
+
+/** A password missing or wrong: about the reader, not about any one copy. */
+class RestoreLockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RestoreLockedError";
+  }
 }
 
 export interface RestorableArtifact {
@@ -554,7 +578,7 @@ async function verifyBeforeRestore(
     report = await verifyMembers(archive.file, { only, checksums, open: archive.open });
   } catch (err) {
     // The first read of the archive: a password missing or wrong stops it here.
-    if (err instanceof ArchiveLockedError) throw new Error(`${err.message} Niente è stato toccato.`);
+    if (err instanceof ArchiveLockedError) throw new RestoreLockedError(`${err.message} Niente è stato toccato.`);
     throw err;
   }
   if (report.failures.length > 0) throw new Error(memberFailureMessage(report.failures));
@@ -650,6 +674,10 @@ async function takeSafetyBackup(
 
   emit("Backup di sicurezza di quello che sto per sovrascrivere…");
 
+  // One copy, on the default destination, even when the policies write to
+  // several: the restore waits for it, and its job is to undo this restore in
+  // the next minutes, not to outlive a disk. Pinned, it is never pruned, so
+  // a copy everywhere would pile up on every destination with every restore.
   const { defaultDestinationId } = await import("./destinations");
   const destinationId = await defaultDestinationId();
   if (!destinationId) throw new Error("Nessuna destinazione per il backup di sicurezza");
@@ -657,7 +685,7 @@ async function takeSafetyBackup(
   const { done, runId } = await startBackup({
     trigger: "pre-restore",
     targets,
-    destinationId,
+    destinationIds: [destinationId],
     policyName: "Sicurezza pre-ripristino",
     pinned: true,
   });
