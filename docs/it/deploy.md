@@ -59,6 +59,8 @@ La precedenza, dal basso: il preset, poi il `runpanel.json` del repository, poi 
 
 Il codice di un progetto sta in `data/repos/<slug>`. Per un progetto nativo, dalle impostazioni si può spostare la cartella su un altro disco con tutto dentro, `node_modules` e build compresi, così riparte senza ricostruire. Al vecchio posto resta un collegamento, e la copia di partenza resta finché non la cancelli tu.
 
+Un progetto nativo collegato a GitHub, su un server Linux, gira da una cartella per versione: `data/releases/<slug>/<id>`, con i file del commit, le sue dipendenze e la sua build. I file che l'app tiene (un database SQLite, gli upload, un `.env.local` scritto a mano) restano in `data/repos/<slug>`, e ogni versione li raggiunge con un collegamento. Vedi [Tornare alla versione precedente](#tornare-alla-versione-precedente).
+
 ## Il contratto di deploy
 
 Quello che a RunPanel serve sapere per distribuire un progetto. I campi sono neutri rispetto al runtime e ognuno li traduce a modo suo.
@@ -124,12 +126,31 @@ Via API: `GET /api/projects/<id>/logs/app` (le ultime righe, con `lines`, `q` e 
 1. **Coda**: un deploy alla volta per progetto. Le richieste che arrivano nel frattempo diventano **un** deploy successivo; quel deploy in attesa vive in memoria e si perde se il pannello si riavvia.
 2. **Sorgente**: clone o pull del branch, oppure il commit su cui il progetto è fermo. Il checkout viene riportato al commit (`reset --hard` e `clean`): le modifiche fatte dal file manager a file non ignorati si perdono.
 3. **Contratto**: preset, `runpanel.json`, impostazioni del pannello.
-4. **Build**: install e build secondo il runtime, con l'output in diretta.
+4. **Build**: install e build secondo il runtime, con l'output in diretta. Un progetto nativo con le cartelle per versione costruisce nella cartella della nuova versione, mentre la vecchia resta online.
 5. **Release command**: eseguito una volta, al massimo 10 minuti. Se fallisce la nuova versione non parte e la vecchia resta su: è il posto per le migrazioni.
 6. **Avvio**: la versione vecchia si ferma solo adesso (sui runtime nativi Windows, prima del build), poi PM2 o Docker avviano la nuova con policy e limiti del contratto.
 7. **Health check**: RunPanel sonda l'app ogni 2 secondi, dopo 3 secondi di attesa e per al massimo 30 (`startPeriodSec`, `timeoutSec`). Passa qualsiasi risposta HTTP, a meno che il contratto indichi `expectStatus`; un container senza porta deve solo restare acceso.
 
-Se l'health check fallisce, il deploy è segnato come fallito con le ultime 40 righe del processo nel log, e il progetto va in errore. **Non c'è un ritorno automatico alla versione precedente**, che è già stata fermata: per tornare indietro vedi [Tornare a un commit](automation.md#tornare-a-un-commit). Un release command fallito lascia il progetto Docker sull'ultima immagine riuscita, che è quella da cui riparte Riavvia. Compose e i runtime nativi non hanno un'immagine da conservare: Riavvia parte da quello che il deploy fallito ha già costruito, e per tornare indietro serve un nuovo deploy del commit buono.
+Se l'health check fallisce, il deploy è segnato come fallito con le ultime 40 righe del processo nel log. Con **Se non risponde, rimetti online la versione precedente** acceso (**Impostazioni › Build e avvio**, di serie è acceso) torna online la versione di prima, dove si può: vedi sotto. Altrimenti il progetto va in errore, e per tornare indietro c'è [Tornare a un commit](automation.md#tornare-a-un-commit). Un release command fallito non tocca la versione che gira: si ferma prima.
+
+### Tornare alla versione precedente
+
+- **Docker**: l'immagine di prima è ancora sul disco (il pannello ne tiene due per progetto), e torna online con il contratto con cui girava.
+- **Nativi (node, statico, custom) collegati a GitHub, su Linux**: ogni deploy prepara la nuova versione in una cartella sua, `data/releases/<slug>/<id>`, e quella di prima resta pronta. Se la nuova non risponde, torna online la precedente così com'era, e la nuova resta come deploy fallito da correggere.
+- **Compose**, e i nativi su **Windows** o caricati da **ZIP**: compilano nella cartella del progetto e non hanno una versione da rimettere online. Un progetto da ZIP non distingue i file del codice da quelli che l'app scrive; Windows non ha un modo di scambiare la cartella in un colpo solo.
+
+Come funziona per i nativi:
+
+- **Cosa ha ogni versione**: i file del commit, copiati dalla cartella del progetto, una sua `.git` (per una build che chiede a git il commit), le sue dipendenze e la sua build: `node_modules`, `.next`, `dist`, `build`, `venv` e le altre cartelle che anche il backup considera ricostruibili. Il file `.env` scritto dal pannello è suo, riscritto a ogni avvio.
+- **Cosa è in comune**: tutto quello che git ignora e non è una cartella di build — il database SQLite, gli upload, i log dell'app, un `.env.local` — resta nella cartella del progetto, e ogni versione lo raggiunge con un collegamento. Una cartella che nel repository contiene solo un segnaposto (`public/uploads/.gitkeep`, `storage/` di Laravel) è in comune tutta intera. Il release command gira nella nuova versione e vede gli stessi dati: una migrazione va sul database vero.
+- **File nuovi**: se l'app crea un file o una cartella che la cartella del progetto non aveva ancora, questo sta nella versione che gira fino al deploy successivo, che lo passa alla cartella del progetto appena la versione vecchia si ferma. Conta solo quello che l'app ha scritto dopo essere partita: un file lasciato dalla build resta alla sua versione. Se la cartella del progetto ne aveva già una copia, quella viene spostata in `data/releases/<slug>/.displaced/`, mai cancellata. Intanto il backup della copia locale prende questi file dalla versione che gira, e un ripristino li rimette lì.
+- **Il cambio**: la versione vecchia si ferma, i suoi file nuovi passano alla cartella del progetto, `current` punta alla nuova (un rename, che su Linux non lascia mai il puntatore a metà) e la nuova parte.
+- **Cosa segue la versione che gira**: Riavvia, il riavvio dopo un crash o al boot, la scheda **File** (le modifiche valgono fino al deploy successivo, come prima), le attività pianificate, i comandi una tantum e il release command. Il pannello trova il codice nel commit della versione, non nella cartella del progetto, che dopo un deploy fallito può essere già sul commit nuovo.
+- **Spazio su disco**: restano due versioni, quella che gira e la precedente. Le altre vengono cancellate alla fine di ogni deploy, tranne una che contiene file scritti dall'app non ancora passati alla cartella del progetto: resta, e il log del deploy la indica. `node_modules` viene copiato dalla versione precedente quando il lockfile è identico (una copia, non un collegamento: una build che riscrive un file di `node_modules`, come `prisma generate`, non tocca la versione a cui si torna), poi l'install gira comunque; con btrfs o XFS la copia non occupa spazio in più. Viene copiata anche la cache di Next (`.next/cache`). Dopo il primo deploy riuscito, `node_modules` e la build vecchi nella cartella del progetto vengono cancellati.
+- **Il primo deploy dopo l'aggiornamento** del pannello non ha una versione precedente da rimettere online: quella di prima girava nella cartella del progetto, che il deploy ha già portato al nuovo commit. Dal secondo deploy in poi sì. Prima di un deploy, Riavvia fa quello che faceva.
+- **Spento**: il deploy compila nella cartella del progetto come prima. I file nuovi dell'ultima versione passano alla cartella del progetto, e le cartelle delle versioni vengono cancellate dopo il primo deploy riuscito. È anche la strada per un progetto che non si costruisce bene in una cartella separata.
+
+Limiti: una build che scrive fuori dalle cartelle di build note (un `public/bundle.js` ignorato da git, un binario Go nella radice) scrive un file che finisce in comune tra le versioni, e il ritorno indietro non lo rimette com'era; un'app che cancella e ricrea una cartella in comune ne crea una sua dentro la versione, che passa alla cartella del progetto al deploy successivo. La cartella del progetto spostata su un altro disco funziona, ma le versioni restano nella cartella dati del pannello.
 
 Fermare un progetto durante un deploy annulla il deploy: il comando in corso viene interrotto, il deploy finisce come fallito, l'app resta ferma e anche un deploy in coda viene scartato. Restart, spostamento del checkout, applicazione dei bind e ripristino di un volume non si sovrappongono: una richiesta di deploy che arriva in quel momento parte appena finiscono.
 
@@ -141,3 +162,5 @@ Fermare un progetto durante un deploy annulla il deploy: il comando in corso vie
 - Docker e Compose: niente da cancellare.
 
 Un progetto caricato da ZIP tiene `dist` e `build`. Non si può fare su un progetto fermo su un commit.
+
+Con le cartelle per versione, Re-build da zero non ferma l'app e non cancella niente: prepara una versione nuova dal codice di quella che gira (comprese le modifiche fatte dalla scheda **File**) senza riusare `node_modules` né la cache della build, poi fa il cambio come un deploy. Se la nuova non risponde, torna quella di prima.

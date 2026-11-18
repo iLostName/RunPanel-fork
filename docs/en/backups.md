@@ -20,7 +20,7 @@ Accounts other than the owner back up and restore only the projects and services
 
 Every dump runs **inside the container it belongs to**, so client and server are the same version. The panel's SQLite store is captured with `VACUUM INTO` and checked with `PRAGMA integrity_check`; the Postgres store with a custom-format `pg_dump`, in a container of the same major.
 
-A project uploaded as a ZIP always includes its repository. The repository copy skips `node_modules`, `.next`, `dist`, `build`, `vendor`, `.venv` and the like, and the `.env` the panel writes.
+A project uploaded as a ZIP always includes its repository. The repository copy skips `node_modules`, `.next`, `dist`, `build`, `vendor`, `.venv` and the like, and the `.env` the panel writes. For a native project with [version folders](deploy.md#going-back-to-the-previous-version) it also takes the files the app created in the running version, which reach the project folder only at the next deploy.
 
 ## Project volumes
 
@@ -106,7 +106,7 @@ Before anything is stopped, copied or overwritten:
 
 - **Volume**: the project stops; its containers still running are stopped and restarted at the end, while a container of another project using the volume blocks the restore. Excluded paths are left as they are. A Compose volume that no longer exists is recreated by a deploy, then the restore is repeated.
 - **Database**: if the service belongs to a running project, the project stops and comes back at the end. On Postgres the restore refuses to start while a connection stays open, because the script drops databases in order and would stop halfway. MySQL and Mongo lay the dump over what is there. A full MySQL or Mongo dump carries the users of its source server: on another service it replaces them, and the restore ends in error saying the stored credentials no longer work, with the data already in place.
-- **Repository**: files are overwritten, extra files are not deleted. During a deploy the restore refuses.
+- **Repository**: files are overwritten, extra files are not deleted. During a deploy the restore refuses. With version folders the files go where the app reads them: into the running version, and through it into the project folder for the shared ones.
 - **A project's configuration**: the project must still exist. It is encrypted with the key of the panel that wrote it: from another panel's archive it cannot be read, and the restore says so.
 - **Panel store (SQLite)**: not restored live. The database is set aside and takes over at the next restart, with the previous one kept next to it. The encryption key is not put back: if needed, copy it by hand.
 - **Panel store (Postgres)**: refused by the panel; the `pg_restore` command to run with the panel stopped is in `manifest.json`.
