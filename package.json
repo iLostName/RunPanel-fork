@@ -26,7 +26,7 @@
     "clsx": "^2.1.1",
     "kysely": "^0.29.5",
     "nanoid": "^6.0.1",
-    "next": "^16.4.3",
+    "next": "^16.4.6",
     "nodemailer": "10.3.1",
     "pg": "^8.23.0",
     "react": "^19.2.9",
@@ -51,7 +51,7 @@
     "@types/yauzl": "^3.4.0",
     "@types/yazl": "^3.3.1",
     "eslint": "^9.39.5",
-    "eslint-config-next": "^16.4.3",
+    "eslint-config-next": "^16.4.6",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "typescript-legacy": "npm:typescript@^6.0.3"
