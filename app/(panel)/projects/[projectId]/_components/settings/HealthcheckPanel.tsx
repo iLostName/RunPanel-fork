@@ -4,6 +4,7 @@ import { Input, Label, TextField } from "@heroui/react";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { SettingToggle } from "@/components/ui/SettingToggle";
 import { FieldHint } from "@/components/ui/Hint";
+import { Badge } from "@/components/ui/Badge";
 import { HealthcheckHint } from "@/components/DeployHints";
 import type { DeployForm } from "./useDeployForm";
 
@@ -32,12 +33,19 @@ function unavailableReason(runtimeType: string, sourceType: string, releasesSupp
 /**
  * How a deploy is judged: the request the panel makes before calling it
  * done, and going back to the previous version when it fails — for Docker,
- * and for native apps, which then build each version in a folder of its own.
+ * and for native apps that opt in, which then build each version in a folder
+ * of its own.
+ *
+ * Two flags behind one switch. Docker's is `rollback.enabled`, on by default.
+ * A native project's is `rollback.native` as well, off until somebody turns it
+ * on here: it moves where the app is built and run from, which an update of
+ * the panel must not do to a live project on its own.
  */
 export function HealthcheckPanel({ form, releasesSupported }: { form: DeployForm; releasesSupported: boolean }) {
   const { values, patchContract } = form;
   const { contract, runtimeType, sourceType } = values;
   const unavailable = unavailableReason(runtimeType, sourceType, releasesSupported);
+  const isDocker = runtimeType === "docker";
 
   return (
     <Panel className="space-y-4">
@@ -62,16 +70,28 @@ export function HealthcheckPanel({ form, releasesSupported }: { form: DeployForm
           <HealthcheckHint />
           {unavailable ? (
             <FieldHint>{unavailable}</FieldHint>
-          ) : (
+          ) : isDocker ? (
             <SettingToggle
               label="Se non risponde, rimetti online la versione precedente"
-              description={
-                runtimeType === "docker"
-                  ? "La nuova versione resta come deploy fallito, da correggere; intanto l'app continua a funzionare con quella di prima."
-                  : "Ogni deploy prepara la nuova versione in una cartella sua e tiene pronta quella di prima. I file che l'app scrive, come un database SQLite o gli upload, restano in comune. Spento, il deploy compila nella cartella del progetto come prima."
-              }
+              description="La nuova versione resta come deploy fallito, da correggere; intanto l'app continua a funzionare con quella di prima."
               isSelected={contract.rollback.enabled}
-              onChange={(enabled) => patchContract({ rollback: { enabled } })}
+              onChange={(enabled) => patchContract({ rollback: { ...contract.rollback, enabled } })}
+            />
+          ) : (
+            <SettingToggle
+              label={
+                <span className="inline-flex flex-wrap items-center gap-2">
+                  Se non risponde, rimetti online la versione precedente
+                  <Badge tone="accent">Nuovo</Badge>
+                </span>
+              }
+              description="Ogni deploy prepara la nuova versione in una cartella sua e tiene pronta quella di prima; i file che l'app scrive, come un database SQLite o gli upload, restano in comune. Il primo deploy dopo averlo acceso prepara le cartelle delle versioni e il ritorno funziona dal secondo: conviene provarlo prima su un progetto meno importante."
+              isSelected={contract.rollback.enabled && contract.rollback.native}
+              // Turning it on asks for both flags; turning it off only drops the
+              // native one, so a project switched back to Docker keeps its return.
+              onChange={(on) =>
+                patchContract({ rollback: on ? { ...contract.rollback, enabled: true, native: true } : { ...contract.rollback, native: false } })
+              }
             />
           )}
           <div className="grid gap-4 sm:grid-cols-3">
