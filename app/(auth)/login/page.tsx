@@ -1,12 +1,28 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { TextField, Label, Input, Button, Spinner } from "@heroui/react";
 import Image from "next/image";
 import logo from "@/components/logo.svg";
 import { Panel } from "@/components/ui/Panel";
-import { Code, FieldHint } from "@/components/ui/Hint";
+import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { isLoopbackHost } from "@/lib/cookie-security";
+
+const noSubscription = () => () => {};
+
+/**
+ * Plain http on an address other than this machine's own: the password and the
+ * session travel unencrypted. Read from `location`, which the server cannot
+ * see; false on the server so the first render matches.
+ */
+function useInsecureConnection(): boolean {
+  return useSyncExternalStore(
+    noSubscription,
+    () => window.location.protocol === "http:" && !isLoopbackHost(window.location.hostname),
+    () => false
+  );
+}
 import { Segmented } from "@/components/ui/Segmented";
 import { SelectField } from "@/components/ui/SelectField";
 
@@ -44,6 +60,7 @@ const ROLE_OPTIONS = [
 
 export default function LoginPage() {
   const router = useRouter();
+  const insecure = useInsecureConnection();
   const [check, setCheck] = useState<Check | null>(null);
   const [mode, setMode] = useState<SetupMode>("owner");
   const [email, setEmail] = useState("");
@@ -255,6 +272,13 @@ export default function LoginPage() {
             <p role="status" className="text-success text-center text-sm">
               Collegato. Accedi con un account del cluster.
             </p>
+          )}
+
+          {insecure && (
+            <Hint tone="warn" title="Connessione non cifrata">
+              Sei su http: password e sessione viaggiano in chiaro. Va bene su una rete privata
+              (Tailscale, una VPN); su internet metti prima il pannello dietro HTTPS.
+            </Hint>
           )}
 
           {isFirstRun && (

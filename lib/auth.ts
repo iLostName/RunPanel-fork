@@ -5,6 +5,7 @@ import { cookies, headers } from "next/headers";
 import { HDR_API_TOKEN_MARK, TOKEN_SESSION_PREFIX, isApiTokenMark, lookupApiToken, readBearer } from "./api-tokens";
 import { verifySignedHeaders } from "./cluster-auth";
 import { HDR_MEMBER } from "./cluster-sign";
+import { sessionCookieSecure } from "./cookie-security";
 import { getDb, rowCount } from "./db";
 import { getSetting } from "./settings";
 import { generateId } from "./utils";
@@ -91,11 +92,19 @@ export async function createSession(userId: string, meta: { userAgent?: string; 
   // Opportunistic tidy-up: expired rows have no other reaper.
   await db.deleteFrom("sessions").where("expires_at", "<", now.toISOString()).execute();
 
+  // `Secure` follows the scheme the browser is on: see lib/cookie-security.ts.
+  const requestHeaders = await headers();
+  const secure = sessionCookieSecure({
+    production: process.env.NODE_ENV === "production",
+    origin: requestHeaders.get("origin"),
+    forwardedProto: requestHeaders.get("x-forwarded-proto"),
+  });
+
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     maxAge: SESSION_MAX_AGE,
     path: "/",
   });
