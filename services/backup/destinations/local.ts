@@ -43,7 +43,9 @@ export function localDestination(row: BackupDestinationsTable): Destination {
 
     async open(ref): Promise<Readable> {
       const file = resolveArchivePath(ref);
-      if (!fs.existsSync(file)) throw new Error(`L'archivio non è più su disco: ${ref}`);
+      if (!fs.existsSync(file)) {
+        throw new Error(`L'archivio non è più sul disco di questo server: è stato spostato o eliminato fuori dal pannello (${ref}).`);
+      }
       return fs.createReadStream(file);
     },
 
@@ -57,20 +59,43 @@ export function localDestination(row: BackupDestinationsTable): Destination {
     },
 
     async test() {
-      // Writing a real file, not just checking that the directory exists: a
-      // read-only mount and a full disk both look fine until something writes.
-      const probe = path.join(config.backupArchivesDir, `.write-test-${process.pid}`);
+      // Writing and reading back a real file, not just checking that the
+      // directory exists: a read-only mount and a full disk both look fine
+      // until something writes.
+      const directory = config.backupArchivesDir;
+      const probe = path.join(directory, `.write-test-${process.pid}-${Date.now()}`);
+      const marker = `runpanel ${Date.now()}`;
       try {
-        fs.mkdirSync(config.backupArchivesDir, { recursive: true });
-        fs.writeFileSync(probe, "ok");
+        fs.mkdirSync(directory, { recursive: true });
+        fs.writeFileSync(probe, marker, { mode: 0o600 });
+        const back = fs.readFileSync(probe, "utf8");
         fs.rmSync(probe, { force: true });
-        return { ok: true, message: `Scrittura verificata in ${config.backupArchivesDir}` };
+        if (back !== marker) {
+          return { ok: false, message: `Il file scritto in ${directory} si rilegge diverso: il disco potrebbe essere danneggiato.` };
+        }
+        return { ok: true, message: `Scrittura e lettura riuscite in ${directory}, su questo server.` };
       } catch (err) {
-        return {
-          ok: false,
-          message: `Non riesco a scrivere in ${config.backupArchivesDir}: ${(err as Error).message}`,
-        };
+        fs.rmSync(probe, { force: true });
+        return { ok: false, message: localProblem(err, directory), code: (err as NodeJS.ErrnoException).code };
       }
     },
   };
+}
+
+/** The usual reasons a folder cannot be written to, with what to do. */
+export function localProblem(err: unknown, directory: string): string {
+  const code = (err as NodeJS.ErrnoException)?.code;
+  switch (code) {
+    case "EACCES":
+    case "EPERM":
+      return `Il pannello non ha il permesso di scrivere in ${directory}. Dai la cartella all'utente con cui gira RunPanel (per esempio con chown).`;
+    case "ENOSPC":
+      return `Il disco che contiene ${directory} è pieno. Libera spazio o conserva meno archivi.`;
+    case "EROFS":
+      return `Il disco che contiene ${directory} è montato in sola lettura.`;
+    case "EDQUOT":
+      return `L'utente del pannello ha esaurito la sua quota di spazio sul disco di ${directory}.`;
+    default:
+      return `Non riesco a scrivere in ${directory}: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }

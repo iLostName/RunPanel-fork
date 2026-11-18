@@ -351,8 +351,16 @@ async function resolveArchive(
   if (!destinationRow) throw new Error("La destinazione di quel backup non è più configurata");
 
   const destination = buildDestination(destinationRow);
-  const stat = await destination.stat(run.archive_path);
-  if (!stat.exists) throw new Error("L'archivio non è più su disco");
+  const stat = await destination.stat(run.archive_path).catch((err: unknown) => {
+    throw new Error(`Non riesco a raggiungere l'archivio su «${destination.name}»: ${err instanceof Error ? err.message : String(err)}`);
+  });
+  if (!stat.exists) {
+    throw new Error(
+      destination.type === "local"
+        ? "L'archivio non è più sul disco di questo server: è stato spostato o eliminato fuori dal pannello."
+        : `L'archivio non c'è più in «${destination.name}»: è stato eliminato fuori dal pannello, o da una regola di scadenza del bucket.`
+    );
+  }
 
   emit(`Sorgente: backup del ${new Date(run.started_at).toLocaleString()}`);
   if (destination.type !== "local") emit(`Scarico l'archivio da ${destination.name} (${formatBytes(stat.bytes)})…`);

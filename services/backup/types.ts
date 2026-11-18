@@ -121,5 +121,17 @@ export interface Destination {
   open(ref: string): Promise<Readable>;
   stat(ref: string): Promise<{ bytes: number; exists: boolean }>;
   /** Behind the "Verifica" button, so a broken destination is found before the night it matters. */
-  test(): Promise<{ ok: boolean; message: string }>;
+  test(): Promise<DestinationCheck>;
+}
+
+/** What "Verifica" found. `message` is plain Italian; `code` and `detail` are for expert mode. */
+export interface DestinationCheck {
+  ok: boolean;
+  message: string;
+  /** Usable, with a limit worth knowing about: a bucket where nothing can be deleted. */
+  warning?: boolean;
+  /** The provider's error code, or one of ours (`DNS`, `TIMEOUT`…). */
+  code?: string;
+  /** The provider's own words. Never a secret. */
+  detail?: string | null;
 }
