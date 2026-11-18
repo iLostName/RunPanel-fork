@@ -35,7 +35,7 @@ Tre passi, e il progetto viene creato solo alla fine: sorgente (GitHub o ZIP tra
 
 ## La pagina del database
 
-Stesso header della pagina progetto e schede Panoramica, Connessione, Console, Database interni, Backup, Impostazioni. Alla creazione nome e porta libera vengono proposti dal pannello. Le card Nginx, Apache e Caddy, che non facevano niente, sono state tolte.
+Stesso header della pagina progetto e schede Panoramica, Connessione, Console, **Dati**, Database interni, Backup, Impostazioni. In **Dati** si guardano tabelle e righe (PostgreSQL, MySQL), chiavi (Redis) e documenti (MongoDB), e si scrivono query: sempre in sola lettura, con un limite di righe e di tempo, e ogni lettura finisce nel registro attività. Alla creazione nome e porta libera vengono proposti dal pannello. Le card Nginx, Apache e Caddy, che non facevano niente, sono state tolte.
 
 ## Indirizzi e HTTPS
 

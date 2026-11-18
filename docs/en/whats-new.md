@@ -35,7 +35,7 @@ Three steps, and the project is created only at the end: source (GitHub, or a ZI
 
 ## The database page
 
-The same header as the project page and tabs Panoramica, Connessione, Console, Database interni, Backup, Impostazioni. On creation the panel proposes the name and a free port. The Nginx, Apache and Caddy cards, which did nothing, are gone.
+The same header as the project page and tabs Panoramica, Connessione, Console, **Dati** (data), Database interni, Backup, Impostazioni. **Dati** shows tables and rows (PostgreSQL, MySQL), keys (Redis) and documents (MongoDB), and runs queries: always read-only, with a row and a time limit, and every read goes to the activity log. On creation the panel proposes the name and a free port. The Nginx, Apache and Caddy cards, which did nothing, are gone.
 
 ## Addresses and HTTPS
 
