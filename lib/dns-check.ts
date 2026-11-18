@@ -73,8 +73,9 @@ export interface DnsCheckInput {
   cloudflareLinked: boolean;
   isCloudflareAddress: (address: string) => boolean;
   /**
-   * The routing check: asked over HTTP from here, the name answered this
-   * nginx's own token. Null or absent when it was not tried.
+   * The routing check: every address in `unmatchedAddresses`, asked for the
+   * name on port 80 the way Let's Encrypt asks, answered this nginx's own
+   * token. Null or absent when it was not tried.
    */
   reaches?: boolean | null;
 }
@@ -150,12 +151,11 @@ export function checkDns(input: DnsCheckInput): DnsCheck {
   let summary: string;
 
   if (has("wrong")) {
-    // Nothing matched an address this server knows as its own, and yet the
-    // name answered its token: what was incomplete is that knowledge (a 1:1
-    // NAT, a floating address), not the record. With one family right and the
-    // other wrong it is the record — a stale AAAA most often — and the routing
-    // check may simply have gone out over the family that works.
-    if (reaches && !has("ok")) {
+    // Every address the server did not recognise answered its token when
+    // asked directly: what was incomplete is that knowledge (a 1:1 NAT, a
+    // floating address), not the record. One that did not answer — a stale
+    // AAAA most often — keeps it wrong, which is the point of asking each.
+    if (reaches) {
       state = "ok";
       summary = "L'indirizzo arriva a questo server.";
       notes.push(
@@ -215,13 +215,20 @@ export function checkDns(input: DnsCheckInput): DnsCheck {
 
 /**
  * Whether the routing check could change a verdict taken without it — the
- * only time it is worth its HTTP request. Behind a linked Cloudflare domain it
+ * only time it is worth its HTTP requests. Behind a linked Cloudflare domain it
  * cannot: the certificate does not depend on where the name leads.
  */
 export function routingCouldHelp(check: DnsCheck): boolean {
-  return (
-    (check.state === "elsewhere" && check.families.A.status !== "ok" && check.families.AAAA.status !== "ok") ||
-    check.state === "unknown" ||
-    (check.state === "cloudflare" && !check.ready)
+  return check.state === "elsewhere" || check.state === "unknown" || (check.state === "cloudflare" && !check.ready);
+}
+
+/**
+ * The addresses the routing check has to ask, each of them: the ones that
+ * are not this server's, the ones it cannot tell, and Cloudflare's, which pass
+ * the request on to wherever the record really leads.
+ */
+export function unmatchedAddresses(check: DnsCheck): string[] {
+  return [check.families.A, check.families.AAAA].flatMap((family) =>
+    family.status === "wrong" ? family.foreign : family.status === "unverified" || family.status === "proxied" ? family.found : []
   );
 }

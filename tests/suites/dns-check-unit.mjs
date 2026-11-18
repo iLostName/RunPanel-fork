@@ -20,7 +20,7 @@ export const meta = { name: "dns-check-unit", needsDocker: false, drivers: [], s
 export async function run({ repoRoot }) {
   const r = createReporter("dns-check-unit");
   const load = (...parts) => import(pathToFileURL(join(repoRoot, ...parts)).href);
-  const { checkDns, routingCouldHelp } = await load("lib", "dns-check.ts");
+  const { checkDns, routingCouldHelp, unmatchedAddresses } = await load("lib", "dns-check.ts");
   const { certificateState, explainCertificateError, EXPIRING_DAYS } = await load("services", "proxy", "certificate.ts");
   const { compileRules, isAllowed, isLoopback, parseAddress } = await load("lib", "ip-access.ts");
   const { CLOUDFLARE_RANGES } = await load("services", "proxy", "render.ts");
@@ -84,21 +84,26 @@ export async function run({ repoRoot }) {
   // --- the routing check ---------------------------------------------------------------------
   c = check(found("198.51.100.9"), none);
   r.check("an A that matches nothing known is worth a routing check", routingCouldHelp(c));
+  r.check("which asks that address", unmatchedAddresses(c).join() === "198.51.100.9");
   c = check(found("198.51.100.9"), none, { reaches: true });
-  r.check("reaching this nginx overrides an address the server does not know as its own", c.state === "ok" && c.ready && c.notes.some((note) => note.includes("NAT")), JSON.stringify(c));
+  r.check("its answering the token overrides what the server knows of itself", c.state === "ok" && c.ready && c.notes.some((note) => note.includes("NAT")), JSON.stringify(c));
+  c = check(found("198.51.100.9"), none, { reaches: false });
+  r.check("not answering keeps it elsewhere", c.state === "elsewhere" && !c.ready);
   c = check(found("203.0.113.7"), found("2001:db8::99"));
-  r.check("a right A and a wrong AAAA is not one the routing check can fix", !routingCouldHelp(c));
+  r.check("with A right, only the stale AAAA is asked about", routingCouldHelp(c) && unmatchedAddresses(c).join() === "2001:db8::99");
+  c = check(found("203.0.113.7"), found("2001:db8::99"), { reaches: false });
+  r.check("a stale AAAA that does not answer stays wrong", c.state === "elsewhere" && !c.ready);
   c = check(found("203.0.113.7"), found("2001:db8::99"), { reaches: true });
-  r.check("so reaching over IPv4 does not hide a stale AAAA", c.state === "elsewhere" && !c.ready);
+  r.check("one that answers the token itself is this server after all", c.state === "ok" && c.ready);
   c = check(found("203.0.113.7"), none);
-  r.check("an ok verdict needs no routing check", !routingCouldHelp(c));
+  r.check("an ok verdict needs no routing check", !routingCouldHelp(c) && unmatchedAddresses(c).length === 0);
 
   // --- behind NAT ----------------------------------------------------------------------------
   const behindNat = { server: { v4: [], v6: [] } };
   c = check(found("198.51.100.9"), none, behindNat);
   r.check("with no known public IPv4 the record is unverified, not wrong", c.state === "unknown" && c.families.A.status === "unverified" && c.foreign.length === 0);
   r.check("unknown is still ready: Let's Encrypt decides", c.ready);
-  r.check("and worth a routing check", routingCouldHelp(c));
+  r.check("and worth a routing check, of the addresses found", routingCouldHelp(c) && unmatchedAddresses(c).join() === "198.51.100.9");
   c = check(found("198.51.100.9"), none, { ...behindNat, reaches: true });
   r.check("reaching turns unknown into ok", c.state === "ok" && c.ready);
   c = check(none, none, behindNat);
@@ -108,7 +113,7 @@ export async function run({ repoRoot }) {
   c = check(found("104.16.132.229", "104.16.133.229"), found("2606:4700::6810:84e5"));
   r.check("orange-cloud addresses read as Cloudflare, not elsewhere", c.state === "cloudflare" && c.foreign.length === 0, JSON.stringify(c));
   r.check("unlinked, it waits and says what to do", !c.ready && c.summary.includes("collega Cloudflare"), c.summary);
-  r.check("unlinked, a routing check could show it reaches", routingCouldHelp(c));
+  r.check("unlinked, a routing check through Cloudflare could show it reaches", routingCouldHelp(c) && unmatchedAddresses(c).length === 3);
   c = check(found("104.16.132.229"), none, { reaches: true });
   r.check("unlinked but reaching this nginx is ready", c.state === "cloudflare" && c.ready);
   c = check(found("104.16.132.229"), none, { cloudflareLinked: true });

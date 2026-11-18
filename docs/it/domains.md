@@ -64,7 +64,7 @@ La risposta viene confrontata con **gli indirizzi pubblici di questo server**: q
 | *Da confermare* | il record risolve, ma l'indirizzo pubblico di questo server non è noto |
 | *DNS non raggiungibile* | i resolver non hanno risposto, il che non dice nulla del record |
 
-Quando gli indirizzi non coincidono con quelli che il server conosce di sé, il pannello chiede anche il nome in HTTP, per un token a cui risponde solo questo nginx: se torna, il nome arriva davvero a questo server (un NAT, un indirizzo flottante) e l'indirizzo conta come giusto. Un record giusto per una famiglia e sbagliato per l'altra resta sbagliato.
+Quando gli indirizzi non coincidono con quelli che il server conosce di sé, il pannello li interroga uno per uno — sulla porta 80, con il nome, come fa Let's Encrypt — per un token a cui risponde solo questo nginx: se tornano tutti, il nome arriva davvero a questo server (un NAT, un indirizzo flottante) e l'indirizzo conta come giusto. Uno che non risponde, come un `AAAA` vecchio verso un altro server, lo lascia sbagliato; un indirizzo privato o di loopback non conta mai.
 
 ## www
 

@@ -64,7 +64,7 @@ The answer is compared with **this server's public addresses**: the ones on its 
 | *Da confermare* | the record resolves, but this server's public address is unknown |
 | *DNS non raggiungibile* | the resolvers did not answer, which says nothing about the record |
 
-When the addresses do not match what the server knows of itself, the panel also asks the name over HTTP for a token only this nginx answers: if it comes back, the name does reach this server (a NAT, a floating address) and the address counts as right. A record right for one family and wrong for the other stays wrong.
+When the addresses do not match what the server knows of itself, the panel asks each of them directly — on port 80, for the name, as Let's Encrypt does — for a token only this nginx answers: if every one hands it back, the name does reach this server (a NAT, a floating address) and the address counts as right. One that does not, such as a stale `AAAA` pointing at an old server, keeps it wrong; a private or loopback address never counts.
 
 ## www
 

@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import dns from "dns";
 import fs from "fs";
+import http from "http";
 import path from "path";
 import { getDb, nowIso } from "@/lib/db";
 import { getEnv } from "@/lib/env";
@@ -9,10 +10,10 @@ import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
 import { generateId } from "@/lib/utils";
 import { listenPort, readAccess } from "@/lib/access-columns";
 import { compileRules } from "@/lib/ip-access";
-import { checkDns, routingCouldHelp, type DnsCheck, type DnsState } from "@/lib/dns-check";
+import { checkDns, routingCouldHelp, unmatchedAddresses, type DnsCheck, type DnsState } from "@/lib/dns-check";
 import type { ProjectHostsTable } from "@/lib/db/schema";
 import { certificateState, explainCertificateError } from "./certificate";
-import { isCloudflareAddress, resolvePublicly, serverAddresses, type KnownAddresses } from "./dns";
+import { isCloudflareAddress, isPublicAddress, resolvePublicly, serverAddresses, type KnownAddresses } from "./dns";
 import {
   PREVIOUS_SITES_DIR,
   STAGED_SITES_DIR,
@@ -581,6 +582,53 @@ export interface DnsSubject {
   cloudflare: number;
 }
 
+/**
+ * Whether `address`, asked for `hostname` on port 80 the way Let's Encrypt
+ * asks, hands back this nginx's token. One address at a time, rather than a
+ * fetch of the name: that would go through this machine's resolver — an
+ * `/etc/hosts` line, a split-horizon DNS — and over whichever family it
+ * likes, and prove nothing about the address the rest of the internet gets.
+ */
+export function answersToken(address: string, hostname: string, token: string, timeoutMs: number, port = 80): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        host: address,
+        port,
+        path: CHECK_PATH,
+        method: "GET",
+        headers: { Host: hostname },
+        timeout: timeoutMs,
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => {
+          if (body.length < 256) body += chunk;
+        });
+        res.on("end", () => resolve(res.statusCode === 200 && body.trim() === token));
+        res.on("error", () => resolve(false));
+      }
+    );
+    req.on("timeout", () => req.destroy());
+    req.on("error", () => resolve(false));
+    req.end();
+  });
+}
+
+/**
+ * Every address the name resolves to that the server does not know as its
+ * own, each asked for the token. A private or loopback address never counts:
+ * it would answer from here and from nowhere else.
+ */
+async function everyAddressReaches(addresses: string[], hostname: string, token: string): Promise<boolean> {
+  if (addresses.length === 0 || addresses.length > 6) return false;
+  if (!addresses.every((address) => isPublicAddress(address, address.includes(":") ? "IPv6" : "IPv4"))) return false;
+  const answers = await Promise.all(addresses.map((address) => answersToken(address, hostname, token, 4_000)));
+  return answers.every(Boolean);
+}
+
 async function takeDnsReport(subject: DnsSubject, found: ProxyProbe, fresh: boolean): Promise<HostDnsReport> {
   const [answers, server] = await Promise.all([resolvePublicly(subject.hostname), serverAddresses(fresh)]);
   const input = {
@@ -594,7 +642,7 @@ async function takeDnsReport(subject: DnsSubject, found: ProxyProbe, fresh: bool
   let reaches: boolean | null = null;
   // Only a name nginx serves can hand its token back.
   if (routingCouldHelp(check) && canApply(found) && !subject.apply_error) {
-    reaches = (await checkRouting(subject.hostname, subject.check_token, 4_000)).reaches;
+    reaches = await everyAddressReaches(unmatchedAddresses(check), subject.hostname, subject.check_token);
     if (reaches) check = checkDns({ ...input, reaches });
   }
   dnsSeen.set(subject.id, { state: check.state, ready: check.ready, at: Date.now() });
@@ -623,6 +671,7 @@ export function hostDnsReport(subject: DnsSubject, found: ProxyProbe, fresh = fa
   return report;
 }
 
+/** These names, or every one still waiting for its first certificate. */
 async function loadDnsSubjects(hostIds?: string[]) {
   const db = await getDb();
   let query = db
@@ -637,7 +686,7 @@ async function loadDnsSubjects(hostIds?: string[]) {
       "project_hosts.created_at",
       "domains.cloudflare",
     ]);
-  if (hostIds) query = query.where("project_hosts.id", "in", hostIds);
+  query = hostIds ? query.where("project_hosts.id", "in", hostIds) : query.where("project_hosts.status", "=", "pending");
   return query.execute();
 }
 

@@ -76,7 +76,7 @@ export async function resolvePublicly(hostname: string): Promise<PublicAnswers> 
   return { ...(await askAll(hostname, system)), via: "system", servers: system };
 }
 
-function isPublicAddress(address: string, family: "IPv4" | "IPv6"): boolean {
+export function isPublicAddress(address: string, family: "IPv4" | "IPv6"): boolean {
   const a = address.toLowerCase();
   return family === "IPv4"
     ? !/^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(a)
