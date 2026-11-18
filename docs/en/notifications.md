@@ -125,6 +125,8 @@ Any 2xx is a success. A redirect is not followed (it counts as a failure: use th
 | **Aggiornamento del pannello disponibile** | The check found new commits |
 | **Il pannello è ripartito** | After a restart or an update; off by default |
 | **Spazio su disco in esaurimento** | See below |
+| **Un'app non risponde** | Two missed health checks in a row (one a minute, for every app with a port), and again once it has answered for a few minutes |
+| **CPU o memoria sopra il 90%** | The server or a project, for at least 5 minutes; again when it is back under 80% for 5 more |
 
 What is notified is the moment a threshold is crossed, not the state.
 
@@ -137,7 +139,7 @@ The check runs every five minutes, the first 90 seconds after start, on the data
 
 ## So that it does not become noise
 
-- **Once per quarter of an hour** for the same event about the same subject (a project, a disk, a policy): a project that keeps falling does not hide another, and the next message says how many times it happened in between. Deploys, backups and scheduled restarts are never held back. The bell counts the repeats on the notification that announced them.
+- **Once per quarter of an hour** for the same event about the same subject (a project, a disk, a policy): a project that keeps falling does not hide another, and the next message says how many times it happened in between. Deploys, backups and scheduled restarts are never held back, nor are the two app-health alerts, which already wait before warning and before giving the all-clear. The bell counts the repeats on the notification that announced them.
 - **Bursts are joined** per channel: the first message goes out at once, what follows within a minute (two for email) arrives as one message listing them. When Docker stops, twenty services stopping with it are one message, not twenty.
 - **One retry** after a temporary failure (timeout, 5xx, 429 honouring its wait).
 

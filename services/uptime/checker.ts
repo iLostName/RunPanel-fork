@@ -233,6 +233,7 @@ export async function checkOnce(): Promise<number> {
           cause: causeLabel(event.cause),
           target: describeTarget(target),
           durationMs: null,
+          projectId: target.projectId,
         });
       }
     } else if (event?.kind === "up") {
@@ -256,6 +257,7 @@ export async function checkOnce(): Promise<number> {
         cause: null,
         target: describeTarget(target),
         durationMs: watch.announcedSince !== null ? watch.upSince - watch.announcedSince : null,
+        projectId: target.projectId,
       });
       watch.announced = false;
       watch.announcedSince = null;

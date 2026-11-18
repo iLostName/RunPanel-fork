@@ -397,6 +397,8 @@ export type NotifyEvent =
       peak: number;
       /** How long it stayed high; set on the way back. */
       durationMs: number | null;
+      /** For a project: which one, so the notification centre shows it to who can see that project. */
+      projectId?: string;
     }
   /** An app that stopped answering its uptime check, and later answered again. */
   | {
@@ -409,6 +411,8 @@ export type NotifyEvent =
       target: string | null;
       /** How long it did not answer; set on the way back. */
       durationMs: number | null;
+      /** Which project, for the notification centre: names are not unique. */
+      projectId?: string;
     };
 
 /**

@@ -239,6 +239,10 @@ export const NOTIFY_EVENT_META: Partial<Record<NotifyEventKey, Partial<NotifyEve
   "backup.finished": { permission: "backup", href: "/backups" },
   "panel.update": { permission: "updates", href: "/updates" },
   "panel.restarted": { permission: "updates", href: "/updates" },
+  // About a project, which the event names by id: these only apply to the
+  // server-wide reading (`metrics.high` for the host itself).
+  "uptime.down": { permission: "monitor", href: "/monitor" },
+  "metrics.high": { permission: "monitor", href: "/monitor" },
 };
 
 export const DEFAULT_NOTIFY_AUDIENCE: GlobalPermission = "monitor";

@@ -125,6 +125,8 @@ Qualsiasi 2xx è un successo. Un reindirizzamento non viene seguito (conta come 
 | **Aggiornamento del pannello disponibile** | Il controllo ha trovato commit nuovi |
 | **Il pannello è ripartito** | Dopo un riavvio o un aggiornamento; spento di default |
 | **Spazio su disco in esaurimento** | Vedi sotto |
+| **Un'app non risponde** | Due controlli di salute mancati di fila (uno al minuto, per ogni app con una porta), e di nuovo quando risponde da qualche minuto |
+| **CPU o memoria sopra il 90%** | Del server o di un progetto, per almeno 5 minuti; di nuovo quando torna sotto l'80% per altri 5 |
 
 Viene notificato il momento in cui una soglia viene attraversata, non lo stato.
 
@@ -137,7 +139,7 @@ Il controllo gira ogni cinque minuti, il primo 90 secondi dopo l'avvio, sul disc
 
 ## Perché non diventi rumore
 
-- **Una volta ogni quarto d'ora** per lo stesso evento sullo stesso soggetto (un progetto, un disco, una policy): un progetto che continua a cadere non copre un altro, e il messaggio dopo dice quante volte è successo nel frattempo. Deploy, backup e riavvii programmati non vengono mai trattenuti. La campanella conta le ripetizioni sulla notifica che le ha annunciate.
+- **Una volta ogni quarto d'ora** per lo stesso evento sullo stesso soggetto (un progetto, un disco, una policy): un progetto che continua a cadere non copre un altro, e il messaggio dopo dice quante volte è successo nel frattempo. Deploy, backup e riavvii programmati non vengono mai trattenuti, e nemmeno i due avvisi sulla salute delle app, che aspettano già da soli prima di avvisare e prima del cessato allarme. La campanella conta le ripetizioni sulla notifica che le ha annunciate.
 - **Gli avvisi ravvicinati si uniscono**, canale per canale: il primo parte subito, quelli che arrivano entro un minuto (due per l'email) arrivano insieme, in un messaggio solo che li elenca. Quando si ferma Docker, venti servizi che si fermano con lui sono un messaggio, non venti.
 - **Un nuovo tentativo** dopo un errore temporaneo (timeout, 5xx, 429 rispettando l'attesa richiesta).
 
