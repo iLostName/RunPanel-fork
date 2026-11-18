@@ -11,7 +11,7 @@ import { encodeQr, qrSvgPath } from "@/lib/qr";
  * code a dark theme would otherwise produce. The four-module margin is the
  * quiet zone the standard asks for.
  */
-export function QrCode({ value, size = 192, label }: { value: string; size?: number; label: string }) {
+export function QrCode({ value, size = 216, label }: { value: string; size?: number; label: string }) {
   const matrix = useMemo(() => encodeQr(value), [value]);
   const path = useMemo(() => qrSvgPath(matrix), [matrix]);
   const extent = matrix.size + 8;

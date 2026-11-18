@@ -10,6 +10,7 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
 import { SessionList } from "@/components/ui/SessionList";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
+import { useNode } from "@/lib/hooks/useNode";
 import { useResource } from "@/lib/hooks/useResource";
 import { formatWhen } from "@/lib/format";
 import { MSG } from "@/lib/copy";
@@ -24,6 +25,7 @@ import { toast } from "@/lib/toast";
  */
 export function UserSecurity({ userId, email }: { userId: string; email: string | null }) {
   const status = useResource<{ enabled: boolean; enabledAt: string | null }>(`/api/users/${userId}/two-factor`);
+  const { isSolo } = useNode();
   const [confirm, setConfirm] = useState(false);
 
   async function reset(): Promise<boolean> {
@@ -81,6 +83,8 @@ export function UserSecurity({ userId, email }: { userId: string; email: string 
         ) : (
           <FieldHint>La attiva chi usa l&apos;account, dalla sua pagina Account.</FieldHint>
         )}
+        {/* The accounts are the cluster's, the second step is each panel's own. */}
+        {!isSolo && <FieldHint>Vale per questo server: sugli altri pannelli del cluster ha uno stato a parte.</FieldHint>}
       </Panel>
 
       <Section title="Dispositivi" summary="Dove questo account è entrato">

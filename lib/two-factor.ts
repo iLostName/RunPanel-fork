@@ -134,15 +134,37 @@ export async function confirmTwoFactorSetup(userId: string, code: string): Promi
   const step = seed ? verifyTotp(seed, code) : null;
   if (step === null) return { ok: false, reason: "invalid" };
 
-  // Conditional on still being pending, so two confirmations cannot both win.
-  const claimed = await db
-    .updateTable("user_two_factor")
-    .set({ enabled_at: nowIso(), last_used_step: step })
-    .where("user_id", "=", userId)
-    .where("enabled_at", "is", null)
-    .executeTakeFirst();
-  if (rowCount(claimed) === 0) return { ok: false, reason: "none" };
-  return { ok: true, recoveryCodes: await replaceRecoveryCodes(userId) };
+  // The codes exist before the switch flips, and both land together: on, but
+  // with no recovery codes, is the state that locks people out.
+  const codes = generateRecoveryCodes();
+  const rows = await recoveryRows(userId, codes);
+  const enabled = await db.transaction().execute(async (trx) => {
+    // Conditional on still being pending, so two confirmations cannot both win.
+    const claimed = await trx
+      .updateTable("user_two_factor")
+      .set({ enabled_at: nowIso(), last_used_step: step })
+      .where("user_id", "=", userId)
+      .where("enabled_at", "is", null)
+      .executeTakeFirst();
+    if (rowCount(claimed) === 0) return false;
+    await trx.deleteFrom("user_recovery_codes").where("user_id", "=", userId).execute();
+    await trx.insertInto("user_recovery_codes").values(rows).execute();
+    return true;
+  });
+  return enabled ? { ok: true, recoveryCodes: codes } : { ok: false, reason: "none" };
+}
+
+/**
+ * The stored rows for a set of codes. One hash at a time: each scrypt holds
+ * 16 MB while it runs, and ten at once is a spike a small server notices.
+ */
+async function recoveryRows(userId: string, codes: string[]) {
+  const now = nowIso();
+  const rows = [];
+  for (const code of codes) {
+    rows.push({ id: generateId(), user_id: userId, code_hash: await hashRecoveryCode(code), used_at: null, created_at: now });
+  }
+  return rows;
 }
 
 /** Everything of it: seed, codes, remembered devices, sign-ins in progress. */
@@ -161,15 +183,11 @@ export async function disableTwoFactor(userId: string): Promise<boolean> {
 /** Ten new codes; every earlier one, used or not, stops working. */
 export async function replaceRecoveryCodes(userId: string): Promise<string[]> {
   const codes = generateRecoveryCodes();
-  const hashes = await Promise.all(codes.map((code) => hashRecoveryCode(code)));
-  const now = nowIso();
+  const rows = await recoveryRows(userId, codes);
   const db = await getDb();
   await db.transaction().execute(async (trx) => {
     await trx.deleteFrom("user_recovery_codes").where("user_id", "=", userId).execute();
-    await trx
-      .insertInto("user_recovery_codes")
-      .values(hashes.map((code_hash) => ({ id: generateId(), user_id: userId, code_hash, used_at: null, created_at: now })))
-      .execute();
+    await trx.insertInto("user_recovery_codes").values(rows).execute();
   });
   return codes;
 }
