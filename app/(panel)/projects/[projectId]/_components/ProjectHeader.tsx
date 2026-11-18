@@ -10,6 +10,8 @@ import { phaseLabel } from "@/lib/deploy-phases";
 import { runtimeLabel } from "@/lib/labels";
 import { useServerHref } from "@/lib/hooks/useNode";
 import { exportProjectConfig, projectHasSource } from "./project-facts";
+import { DuplicateDialog } from "./DuplicateDialog";
+import { useCan } from "@/lib/hooks/useMe";
 import type { Project, SettingsSectionId, TabId } from "./types";
 
 /**
@@ -41,6 +43,10 @@ export const ProjectHeader = memo(function ProjectHeader({
 }) {
   const href = useServerHref();
   const [stopOpen, setStopOpen] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  // The copy is a new project running the same code: both permissions, as the server checks.
+  const canCreate = useCan("projects.create");
+  const canHost = useCan("host");
 
   const deploying = project.status === "deploying";
   // Read-only accounts see the state, not the controls: the server refuses
@@ -78,6 +84,9 @@ export const ProjectHeader = memo(function ProjectHeader({
           : []),
         ...(canManage
           ? [
+              ...(canCreate && canHost
+                ? [{ id: "duplicate", label: "Duplica", icon: "solar:copy-linear", onAction: () => setDuplicateOpen(true) }]
+                : []),
               { id: "export", label: "Esporta configurazione", icon: "solar:download-minimalistic-linear", onAction: () => exportProjectConfig(project) },
               { id: "delete", label: "Elimina il progetto", icon: "solar:trash-bin-minimalistic-linear", danger: true, onAction: () => onGoTo("settings", "danger") },
             ]
@@ -196,6 +205,8 @@ export const ProjectHeader = memo(function ProjectHeader({
         menu={menu}
         menuLabel="Altre azioni sul progetto"
       />
+
+      {duplicateOpen && <DuplicateDialog project={project} isOpen={duplicateOpen} onOpenChange={setDuplicateOpen} />}
 
       <ConfirmDialog
         isOpen={stopOpen}

@@ -38,6 +38,7 @@ export const ACTION_LABEL: Record<string, string> = {
   "project.env": "Variabili d'ambiente",
   "project.delete": "Progetto eliminato",
   "project.create": "Progetto creato",
+  "project.duplicate": "Progetto duplicato",
   "project.app.delete": "App rimossa dal progetto",
   "project.backup": "Backup del progetto modificato",
   "project.files": "File modificato",
