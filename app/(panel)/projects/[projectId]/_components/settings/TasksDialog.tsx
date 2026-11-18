@@ -110,7 +110,13 @@ export function TasksDialog({
         toast.error(body.error ?? (task ? MSG.saveFailed : MSG.createFailed));
         return false;
       }
-      toast.success(task ? "Attività salvata" : "Attività creata: parte all'orario che hai scelto");
+      toast.success(
+        task
+          ? "Attività salvata"
+          : cron && enabled
+            ? "Attività creata: parte all'orario che hai scelto"
+            : "Attività creata: parte quando premi «Esegui ora»"
+      );
       onSaved();
       return true;
     } catch {
