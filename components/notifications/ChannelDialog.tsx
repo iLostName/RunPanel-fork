@@ -327,18 +327,21 @@ export function ChannelDialog({
           {!channel.secretsReadable && <Badge tone="danger">Segreti da reinserire</Badge>}
         </div>
       ) : (
-        <ChoiceGroup label="Dove vuoi ricevere gli avvisi" className="sm:grid-cols-2">
-          {CHANNEL_KINDS.map((candidate) => (
-            <ChoiceCard
-              key={candidate}
-              selected={kind === candidate}
-              onSelect={() => chooseKind(candidate)}
-              icon={CHANNEL_KIND_INFO[candidate].icon}
-              title={CHANNEL_KIND_INFO[candidate].label}
-              description={CHANNEL_KIND_INFO[candidate].description}
-            />
-          ))}
-        </ChoiceGroup>
+        <div className="space-y-2">
+          <span className="text-foreground block text-sm">Dove vuoi ricevere gli avvisi?</span>
+          <ChoiceGroup label="Dove vuoi ricevere gli avvisi" className="sm:grid-cols-2">
+            {CHANNEL_KINDS.map((candidate) => (
+              <ChoiceCard
+                key={candidate}
+                selected={kind === candidate}
+                onSelect={() => chooseKind(candidate)}
+                icon={CHANNEL_KIND_INFO[candidate].icon}
+                title={CHANNEL_KIND_INFO[candidate].label}
+                description={CHANNEL_KIND_INFO[candidate].description}
+              />
+            ))}
+          </ChoiceGroup>
+        </div>
       )}
 
       {editing && !channel.secretsReadable && (
