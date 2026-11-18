@@ -59,8 +59,11 @@ Still in **Backup dei volumi**, each volume can exclude paths relative to its ro
 
 ## Where they go
 
-- **Disco locale** (local disk): always `data/backups/archives/<year>/<month>`, files 0600. Created at first start; the path cannot be changed. An archive that only lives on the machine it protects dies with it: add an S3 destination for that.
+- **Disco locale** (local disk): always `data/backups/archives/<year>/<month>`, files 0600. Created at first start; the path cannot be changed. An archive that only lives on the machine it protects dies with it: that is what the destinations below are for.
 - **S3-compatible**: Amazon S3, Cloudflare R2, Backblaze B2, Hetzner Object Storage, Wasabi, and MinIO or any server of your own. Picking the service fills the endpoint and the addressing style; the region is usually the only field to change. Bucket, keys and an optional prefix complete it; the configuration is encrypted. `https://` anywhere, `http://` only to a private address. The object is named `<prefix>/<file>` and uploaded in one request: on AWS the 5 GB per-object limit applies. After the upload the panel reads back the size the bucket kept, and a mismatch fails the run.
+- **SFTP server or NAS**: Synology, QNAP, a Hetzner Storage Box, another server; with a key the panel generates. See [SFTP server or NAS](#sftp-server-or-nas).
+- **WebDAV**: Nextcloud, ownCloud, a NAS's WebDAV, Koofr, pCloud. See [WebDAV](#webdav).
+- **Google Drive, OneDrive, Dropbox** and the other services rclone speaks, when rclone is installed on the server. See [rclone](#rclone-google-drive-onedrive-dropbox-and-the-rest).
 
 A new destination, or one being edited, is **tried before it is saved**: a test object is written, read back and deleted. A failed check saves nothing and says why; **Salva comunque** (save anyway) is there for a bucket that is unreachable from here on purpose. **Verifica** (check) in the list runs the same test later. A bucket where the key cannot delete is accepted with a warning: that is a deliberate protection against ransomware, but retention then cannot remove old archives.
 
@@ -74,9 +77,43 @@ From the list, the owner can also:
 
 Other accounts holding the `backup` permission can add destinations, check them, rename them and delete one that holds nothing, but not change where an existing one writes or which one is the default: either would move everyone's archives, the owner's included.
 
-Every archive is first built in `data/backups/staging`, S3 included: local free space is needed, and the backup stops if it falls under 2 GB.
+Every archive is first built in `data/backups/staging`, S3 and the other off-server destinations included: local free space is needed, and the backup stops if it falls under 2 GB.
 
 The archive is a zip with `manifest.json`, `LEGGIMI.txt` and a `checksums.txt` in `sha256sum -c` format (for dumps and volumes; repository files are not listed). Project variables and service credentials are encrypted with this server's key; including the key itself is a separate, explicit choice. The rest (dumps, volumes, code) is in clear, unless the whole archive is encrypted with a password: see below.
+
+### SFTP server or NAS
+
+A NAS (Synology, QNAP), a Hetzner Storage Box, a second VPS: any server that offers SFTP, including servers that offer **only** SFTP, without a shell, as storage boxes and many NAS do.
+
+- **The key**: picking this type makes the panel generate an Ed25519 key pair for the destination and show the public key, with a copy button: it is the line to add to the user's `.ssh/authorized_keys` on the server. The form says how for the kind of server picked: the two commands to paste for a Linux server, `ssh-copy-id -p 23 -s` for a Storage Box, where to turn on SFTP and the users' home folders for Synology and QNAP. The private key never leaves the panel: it is stored encrypted with the destination and written to disk (a 0600 file in `data/tmp`) only until ssh has logged in. **Modifica › Genera una nuova chiave** (edit › generate a new key) replaces it. There is no password login: with the system's `ssh` it would need a program typing it in, and a dedicated key is safer anyway.
+- **The server's fingerprint**: on the first successful check the panel shows the fingerprint of the server's host key (`SHA256:…`) and pins it. From then on a server presenting another key is refused: "si presenta con una chiave diversa da quella salvata alla prima connessione". If you reinstalled or replaced the server, **Modifica › Dimentica l'impronta** (edit › forget the fingerprint), and the next check pins the new one. Changing the host or the port forgets it by itself. A destination saved without a check pins it on first use.
+- **The upload**: the archive is written as `.<name>.<random>.partial`, in pipelined blocks, flushed to the server's disk (when the server allows it), checked for size, and only then renamed. A cut connection leaves at most a `.partial`, never a file that looks like a finished archive. That is why the user needs permission to write and rename in the folder; deleting is what retention needs (without it, the check passes with a warning). Downloads stream, the archive is never held in memory.
+- **The folder** is relative to the user's home, or absolute (`/volume1/backup/runpanel`); it is created when missing. On a NAS its first part is a shared folder that must already exist.
+- The panel uses the system's `ssh` (OpenSSH) with the SFTP subsystem, ignoring `~/.ssh/config` and any agent: when it is missing, the form says so (`sudo apt install openssh-client`).
+- **The check** writes, renames, reads back and deletes a test file, and reports the free space when the server tells it. Failures are explained: an address that does not exist, a closed or wrong port, no answer, a key the server does not know (with the right permissions for `.ssh`), SFTP not enabled, algorithms too old, something other than SSH on that port, a changed host key, a missing permission, a full disk or quota, an `echo` in `.bashrc` that breaks SFTP.
+
+### WebDAV
+
+Nextcloud, ownCloud, a Synology NAS with the WebDAV Server package, Koofr, pCloud or any WebDAV server.
+
+- For Nextcloud and ownCloud the server's address and the user are enough: the panel builds `https://<server>/remote.php/dav/files/<user>/` (changeable under **Avanzate**). Koofr and pCloud have their address filled in; for anything else it is typed whole.
+- **App password**: on Nextcloud it is made in **Personal settings › Security › Devices & sessions › Create new app password**. With two-factor authentication on, the account password does not work, and an app password can be revoked alone without touching the account.
+- `https://` anywhere, `http://` only to a private address, as for S3. User and password go in their own fields, not in the address; the password is never shown (empty in **Modifica** = keep the stored one).
+- The upload is a streamed PUT to a provisional name (`.partial`); then its size is checked with PROPFIND and it is renamed with MOVE. An interrupted upload never leaves a file with the archive's name. Downloads stream (GET), deletes are a DELETE.
+- **Large archives and reverse proxies**: a reverse proxy in front of the server (nginx, Apache, Cloudflare) may cap the size of a request. It shows in one of two ways: a 413 error, or the connection closing halfway through the upload. In the second case the panel uploads a tiny file to find out: if that goes through, it says the proxy's limit is almost certainly the cause. The limit is raised on the server: `client_max_body_size` in nginx, `LimitRequestBody` in Apache; Cloudflare's free plan stops at 100 MB per request. A long upload can also meet the proxy's timeout (a 504: `proxy_read_timeout` in nginx).
+- Failures are explained: password not accepted (with where to create an app password), permissions, wrong address (with Nextcloud's shape), an address that is not WebDAV, a redirect (with where it points), quota exhausted (507), archive too large (413), proxy errors (502, 504), as well as network and certificate errors.
+
+### rclone: Google Drive, OneDrive, Dropbox and the rest
+
+Through [rclone](https://rclone.org), when it is installed on the panel's server: one destination type for Google Drive, OneDrive, Dropbox, Mega, Box, pCloud and the other services rclone supports.
+
+- The form says whether rclone is there and which version (1.60 or newer is needed; some distributions ship an older one). When it is missing, it says how to install it: `sudo -v ; curl https://rclone.org/install.sh | sudo bash` from the server's terminal, or the program downloaded from rclone.org into `/usr/local/bin`. The panel installs nothing by itself.
+- **Guided setup** for Google Drive, OneDrive and Dropbox: on your own computer, which has a browser, run `rclone authorize "drive"` (or `"onedrive"`, `"dropbox"`), sign in and allow, and paste what the terminal prints between `--->` and `<---End paste` (the whole output works too: the panel finds the token). For OneDrive the panel asks Microsoft which drive to use, so paste the token within the hour.
+- **Expert mode**, owner only: paste one or more sections of an `rclone.conf` (`rclone config show` prints them) — any remote, a `crypt` over another one included — and pick the one to use. Options that make rclone run a program (`ssh`, `…_command`) are refused; and it is the owner's alone because other rclone options act on this server's files.
+- **No `rclone.conf` is ever written**: the remote reaches rclone through `RCLONE_CONFIG_<REMOTE>_<OPTION>` environment variables, built for each command from the encrypted stored config, and `RCLONE_CONFIG` points at `/dev/null`, so rclone keeps its configuration in memory. A refreshed access token lasts for that command; what stays stored is the refresh token, which the services keep valid while it is used (OneDrive revokes it after 90 days unused, Google after six months). Regular backups never get there; if it happens, the check says to run `rclone authorize` again.
+- The operations are `rclone copyto` with the archive staged in `staging`, `rclone cat` to stream it back, `rclone deletefile`, and `rclone lsjson --stat` for its size. rclone checks the size and, where the service has one, the hash of every upload, and these services only show a file once it is complete; after the upload the panel reads the size back anyway.
+- **The check** lists the folder, then writes, reads back and deletes a test file. Failures are explained: rclone missing or too old, an authorization expired or revoked (with the command to redo it), credentials not accepted, the account's space exhausted, too many requests, permissions, a folder or archive that is not there, network and certificate errors.
+- With Google Drive, rclone uses a client ID shared by all its users and rate-limited by Google: for large or frequent archives create your own in the Google Cloud Console and use expert mode with `client_id` and `client_secret`.
 
 ## Encryption with a password
 
