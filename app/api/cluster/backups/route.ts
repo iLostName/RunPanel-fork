@@ -5,31 +5,36 @@ import { fanOut, memberStatuses } from "@/services/cluster/fanout";
 
 /**
  * Backups of every server: policies, recent runs, destinations, each server's
- * summary and target catalog (to name what a policy saves). Every row is
- * tagged with its server, and every server applies the user's own backup
- * access.
+ * summary and target catalog (to name what a policy saves), and the copies
+ * each one keeps for the others (`hosted`, with the disk they are on). Every
+ * row is tagged with its server, and every server applies the user's own
+ * backup access. A server on an older version has no `hosted`, and simply
+ * shows none.
  */
 export async function GET() {
   const denied = await requirePermission("backup");
   if (isDenied(denied)) return denied;
   const userId = denied.session.user.id;
 
-  const [policies, runs, destinations, catalogs] = await Promise.all([
+  const [policies, runs, destinations, catalogs, hosted] = await Promise.all([
     fanOut<{ policies: unknown[] }>("/api/backups/policies", { userId }),
     fanOut<{ runs: unknown[]; activeRunId: string | null; overview: unknown }>("/api/backups/runs?limit=25", { userId }),
     fanOut<{ destinations: unknown[] }>("/api/backups/destinations", { userId }),
     fanOut<unknown>("/api/backups/targets", { userId, timeoutMs: 10_000 }),
+    fanOut<{ sources: unknown[]; disk: unknown }>("/api/backups/hosted", { userId }),
   ]);
 
   return json({
     policies: mergeByMember(policies.map((r) => ({ member: r.member, items: r.data?.policies ?? [] }))),
     runs: mergeByMember(runs.map((r) => ({ member: r.member, items: r.data?.runs ?? [] }))),
     destinations: mergeByMember(destinations.map((r) => ({ member: r.member, items: r.data?.destinations ?? [] }))),
+    hosted: mergeByMember(hosted.map((r) => ({ member: r.member, items: r.data?.sources ?? [] }))),
     perServer: runs.map((r) => ({
       memberId: r.member.id,
       activeRunId: r.data?.activeRunId ?? null,
       overview: r.data?.overview ?? null,
       catalog: catalogs.find((c) => c.member.id === r.member.id)?.data ?? null,
+      hostedDisk: hosted.find((h) => h.member.id === r.member.id)?.data?.disk ?? null,
     })),
     members: memberStatuses(runs),
   });
