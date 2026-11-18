@@ -14,6 +14,7 @@ import { RepoPathSection } from "../RepoPathSection";
 import { WebhookSection } from "../WebhookSection";
 import type { Project } from "../types";
 import type { DeployForm } from "./useDeployForm";
+import { TasksSection } from "./TasksSection";
 
 /** Name, and for experts the identifiers the panel uses on disk and in Docker. */
 export function GeneralSection({ form, project }: { form: DeployForm; project: Project }) {
@@ -67,6 +68,7 @@ export function AutomationsSection({
         lastResult={project.restart_last_result}
         onSaved={(updated) => onProjectChange((prev) => ({ ...prev, ...(updated as Partial<Project>) }))}
       />
+      <TasksSection projectId={project.id} />
     </div>
   );
 }

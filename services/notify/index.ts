@@ -90,11 +90,13 @@ function cooldownKey(event: NotifyEvent): string {
       return event.key;
     case "metrics.high":
     case "uptime.down":
-      // Never suppressed here. Both come in pairs — a warning and its
+    case "task.failed":
+      // Never suppressed here. All three come in pairs — a warning and its
       // all-clear — and their senders damp flapping themselves (a hold and a
-      // second threshold; a recovery announced only once it has lasted). A
-      // cooldown per direction on top could drop an all-clear whose warning
-      // went out, and leave an alarm standing that is long over.
+      // second threshold; a recovery announced only once it has lasted; a
+      // streak announced once and then at most twice a day). A cooldown per
+      // direction on top could drop an all-clear whose warning went out, and
+      // leave an alarm standing that is long over.
       return "";
   }
 }
