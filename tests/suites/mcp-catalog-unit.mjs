@@ -25,6 +25,8 @@ const INTERNAL = [
   /^cluster\/(join|directory|leave|ping|secret|folders\/sync)$/,
   // Another panel asking for the public status of some projects: signed, never a user's.
   /^cluster\/status-page$/,
+  // Another server keeping its backups here: signed member to member, never a user's.
+  /^cluster\/peer-backups(\/.*)?$/,
   // The data browser: rows are not for an assistant's context (services/mcp/panel-api.ts).
   /^services\/\[serviceId\]\/browse$/,
 ];
