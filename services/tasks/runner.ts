@@ -260,13 +260,17 @@ async function execute(handle: RunHandle, task: ProjectTasksTable, project: Proj
   await finish(handle, task, project, outcome);
 }
 
-/** What the run is recorded as: the stop when somebody stopped it, the process otherwise. */
+/**
+ * What the run is recorded as: the stop when somebody stopped it, the process
+ * otherwise. A plain non-zero exit has no `error`: its code says it, and the
+ * output says why.
+ */
 function verdict(handle: RunHandle, outcome: ExecOutcome): { status: TaskRunStatus; error: string | null } {
   if (handle.stop) return { status: handle.stop.status, error: handle.stop.message };
   if (outcome.exitCode === 0 && !outcome.error) return { status: "succeeded", error: null };
   return {
     status: "failed",
-    error: outcome.error ?? (outcome.exitCode !== null ? `Uscita con codice ${outcome.exitCode}` : "Terminata senza un codice di uscita"),
+    error: outcome.error ?? (outcome.exitCode !== null ? null : "Terminata senza un codice di uscita"),
   };
 }
 
