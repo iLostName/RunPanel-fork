@@ -21,9 +21,9 @@ import { Technical } from "@/components/ui/Technical";
 import { cn } from "@/lib/utils";
 
 /**
- * La cronologia di un'attività: ogni esecuzione, anche quelle saltate, e il
- * log di quella scelta. Mentre una gira, lista e log si aggiornano da soli —
- * l'output arriva dal processo, non dal registro, finché non ha finito.
+ * A task's history: every run, skipped ones included, and the log of the one
+ * picked. While one runs, the list and the log refresh by themselves — the
+ * output comes from the process, not from the store, until it has finished.
  */
 
 /** An instant on the task's clock, which is not necessarily the browser's. */

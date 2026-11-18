@@ -29,14 +29,14 @@ import { TasksDialog, whereTasksRun } from "./TasksDialog";
 import { TasksHistory, formatInZone } from "./TasksHistory";
 
 /**
- * Le attività pianificate del progetto: comandi che girano da soli a orari
- * fissi, nel contesto dell'app. Il motore è `services/tasks/`; le regole e le
- * parole sono in `lib/tasks-rules.ts`, le stesse che scrive il server.
+ * The project's scheduled tasks: commands that run by themselves at set
+ * times, in the app's context. The engine is `services/tasks/`; the rules and
+ * the words are `lib/tasks-rules.ts`, the same ones the server writes.
  *
- * Ogni riga dice tre cose in italiano semplice — quando parte, com'è andata
- * l'ultima volta, quando ripartirà — e il resto (comando, codice di uscita,
- * fuso) sta nella modalità esperto e nella cronologia. Mentre un'attività gira
- * la lista si aggiorna da sola ogni pochi secondi, altrimenti ogni mezzo minuto.
+ * Each row says three things in plain Italian — when it runs, how the last
+ * run went, when it runs next — and the rest (command, exit code, zone) is
+ * for expert mode and the history. While a task runs the list refreshes every
+ * few seconds; otherwise every half minute.
  */
 
 /** Why a run did not run or was stopped, when that is not already in the outcome's words. */

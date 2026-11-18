@@ -22,15 +22,15 @@ import { SettingToggle } from "@/components/ui/SettingToggle";
 import { Advanced } from "@/components/ui/Technical";
 
 /**
- * Creare o modificare un'attività pianificata.
+ * Creating or editing a scheduled task.
  *
- * Quattro domande, nell'ordine in cui le si pensa: come si chiama, cosa fa,
- * quando, e per chi ne sa di più quanto può durare. La pianificazione è lo
- * stesso `SchedulePicker` dei backup, con "Solo su richiesta" per un comando
- * da tenere a portata di "Esegui ora". Salvare non la fa partire.
+ * Four questions, in the order people think of them: what it is called, what
+ * it does, when, and — for whoever wants it — how long it may take. The
+ * schedule is the backups' own `SchedulePicker`, with "Solo su richiesta" for
+ * a command kept at hand for "Esegui ora". Saving never runs it.
  */
 
-/** Dove gira il comando, in una frase: dipende dal runtime del progetto, non dall'attività. */
+/** Where the command runs, in one sentence: the project's runtime decides, not the task. */
 export function whereTasksRun(runtimeType: string): string {
   if (runtimeType === "docker") return "Il comando gira dentro il container dell'app, con le sue variabili e i suoi file.";
   if (runtimeType === "compose") return "Il comando gira dentro il servizio dello stack che scegli, con le sue variabili e i suoi file.";
