@@ -378,7 +378,10 @@ async function containerScripts(r, shell) {
     args[0] === "exec" && args[1] === "runpanel-shop" && args.at(-1) === "echo 'ciao' && exit 3" && !shell.CONTAINER_WRAPPER.includes("ciao"),
     JSON.stringify(args)
   );
-  r.check("the stop runs as root in the container", shell.containerKillArgs("c", 42, 5).slice(0, 4).join(" ") === "exec --user 0 c");
+  r.check(
+    "the stop runs as the container's own user, never as root",
+    shell.containerKillArgs("c", 42, 5).slice(0, 3).join(" ") === "exec c sh" && !shell.containerKillArgs("c", 42, 5).includes("--user")
+  );
 
   let usable = false;
   try {

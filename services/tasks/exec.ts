@@ -86,7 +86,6 @@ export function execInContainer(container: string, command: string, opts: ExecOp
     });
 
     let pid: number | null = null;
-    let firstStderr = true;
     let stopping = false;
     let killing = false;
     let settled = false;
@@ -116,8 +115,10 @@ export function execInContainer(container: string, command: string, opts: ExecOp
 
     const stdout = lineSplitter((line) => opts.onOutput(`${stripAnsi(line)}\n`));
     const stderr = lineSplitter((line) => {
-      if (firstStderr) {
-        firstStderr = false;
+      // Not necessarily the very first line — the docker client may warn about
+      // its own configuration before the exec starts — but only once, and only
+      // with this run's nonce, which nothing inside the container can read.
+      if (pid === null) {
         const found = parsePidMarker(line, marker);
         if (found !== null) {
           pid = found;

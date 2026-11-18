@@ -19,7 +19,7 @@ export const PID_MARKER_PREFIX = "__runpanel_task_pid_";
 /**
  * The marker for one run. The nonce is what keeps a task from forging it: it
  * lives only in the wrapper's argv, which the `exec` below replaces before the
- * task's own code runs — and only the first line is read as a marker anyway.
+ * task's own code runs — and only the first line carrying it is read.
  */
 export function pidMarker(nonce: string): string {
   return `${PID_MARKER_PREFIX}${nonce}__=`;
@@ -128,9 +128,16 @@ export function containerRunArgs(container: string, command: string, marker: str
 }
 
 /**
- * `docker exec` for the stop, as root: a task that switched user, or an image
- * whose default user is not the one that started it, is still ours to end.
+ * `docker exec` for the stop, as the same user the command ran as — the
+ * container's default, like the run itself.
+ *
+ * Not as root, deliberately. The pid comes from a line on the run's stderr,
+ * and a process in the container running as that user could write to that
+ * pipe: as root, the stop would hand it a way to end processes it cannot end
+ * itself. As the same user it can only do what it already could. A command
+ * that switched to another user is the one case this cannot reach, and the
+ * in-container `timeout` of the wrapper still ends it, a minute past its limit.
  */
 export function containerKillArgs(container: string, pid: number, graceSec: number): string[] {
-  return ["exec", "--user", "0", container, "sh", "-c", CONTAINER_KILL_TREE, "runpanel-kill", String(pid), String(graceSec)];
+  return ["exec", container, "sh", "-c", CONTAINER_KILL_TREE, "runpanel-kill", String(pid), String(graceSec)];
 }
