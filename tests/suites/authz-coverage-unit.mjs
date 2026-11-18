@@ -17,6 +17,8 @@ export const meta = { name: "authz-coverage-unit", needsDocker: false, drivers: 
 const PUBLIC = new Set([
   "auth/check/route.ts",
   "auth/login/route.ts",
+  // The code after the password: its credential is the token the password step handed out.
+  "auth/login/two-factor/route.ts",
   "auth/logout/route.ts",
   "auth/invite/route.ts",
   "webhooks/github/[projectId]/route.ts",
@@ -30,6 +32,8 @@ const PUBLIC = new Set([
  */
 const OWN_ORIGIN_CHECK = [
   "auth/login/route.ts",
+  "auth/login/two-factor/route.ts",
+  "auth/two-factor/route.ts",
   "auth/logout/route.ts",
   "auth/invite/route.ts",
   "upload/route.ts",

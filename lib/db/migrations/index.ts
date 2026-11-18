@@ -30,6 +30,7 @@ import * as clusterLastSeen from "./028-cluster-last-seen";
 import * as sourceUrlCredentials from "./029-source-url-credentials";
 import * as hostPassword from "./030-host-password";
 import * as apiTokens from "./031-api-tokens";
+import * as twoFactor from "./035-two-factor";
 import * as hostRedirect from "./037-host-redirect";
 
 /**
@@ -71,6 +72,7 @@ export const migrations: Record<string, Migration> = {
   "029-source-url-credentials": sourceUrlCredentials,
   "030-host-password": hostPassword,
   "031-api-tokens": apiTokens,
+  "035-two-factor": twoFactor,
   "037-host-redirect": hostRedirect,
 };
 
