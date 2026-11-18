@@ -61,7 +61,7 @@ Precedence, from the bottom: the preset, then the repository's `runpanel.json`, 
 
 A project's code lives in `data/repos/<slug>`. For a native project, the settings can move the folder to another disk with everything in it, `node_modules` and builds included, so it restarts without rebuilding. A link stays at the old place, and the original copy stays until you delete it.
 
-A native project connected to GitHub, on a Linux server, runs from one folder per version: `data/releases/<slug>/<id>`, with the commit's files, its dependencies and its build. The files the app keeps (a SQLite database, uploads, a hand-written `.env.local`) stay in `data/repos/<slug>`, and every version reaches them through a link. See [Going back to the previous version](#going-back-to-the-previous-version).
+A native project connected to GitHub, on a Linux server, can run from one folder per version, once you turn it on: `data/releases/<slug>/<id>`, with the commit's files, its dependencies and its build. The files the app keeps (a SQLite database, uploads, a hand-written `.env.local`) stay in `data/repos/<slug>`, and every version reaches them through a link. See [Going back to the previous version](#going-back-to-the-previous-version).
 
 ## The deploy contract
 
@@ -73,6 +73,7 @@ What RunPanel needs to know to deploy a project. The fields are runtime-neutral 
 | `envFile` | written 0600 and mounted read-only | written 0600 in the repository (path relative to its root) |
 | `commands.release` | throwaway container before start | command in the repository folder |
 | `healthcheck` | probed by RunPanel after start | same |
+| `rollback.enabled` / `rollback.native` | `enabled` (on by default) puts the previous image back online | both are needed: `native` (off by default, panel-only) turns on version folders |
 | `runtime.restartPolicy` | `--restart` | PM2 `autorestart` |
 | `runtime.memory` / `cpus` / `shmSize` | container limits | `max_memory_restart` where applicable |
 | `docker.network` / `hostname` / `capAdd` / `extraHosts` | `docker run` flags | not applicable |
@@ -96,7 +97,7 @@ A repository can declare how it wants to be deployed:
 
 Where both set a value the panel wins. An invalid file is ignored as a whole.
 
-Some fields are **panel-only** and are dropped when they come from the repository, with a line in the deploy log: `docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts`, `docker.context`, `docker.dockerfile`, `docker.target`, `envFile.path`, `healthcheck.path` and `healthcheck.port`. They decide what the project reaches outside its container, where decrypted secrets are written and what the panel probes: a repository must not choose them for itself. For the same reason [one-time commands](automation.md#one-time-commands) are kept out of the contract.
+Some fields are **panel-only** and are dropped when they come from the repository, with a line in the deploy log: `docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts`, `docker.context`, `docker.dockerfile`, `docker.target`, `envFile.path`, `healthcheck.path`, `healthcheck.port` and `rollback.native`. They decide what the project reaches outside its container, where decrypted secrets are written, what the panel probes and which server folder a native app runs from: a repository must not choose them for itself. For the same reason [one-time commands](automation.md#one-time-commands) are kept out of the contract.
 
 ## Environment variables
 
@@ -128,17 +129,17 @@ Over the API: `GET /api/projects/<id>/logs/app` (the last lines, with `lines`, `
 1. **Queue**: one deploy at a time per project. Requests arriving meanwhile become **one** following deploy; that waiting deploy lives in memory and is lost if the panel restarts.
 2. **Source**: clone or pull of the branch, or the commit the project is pinned to. The checkout is reset to the commit (`reset --hard` and `clean`): changes made in the file manager to non-ignored files are lost.
 3. **Contract**: preset, `runpanel.json`, panel settings.
-4. **Build**: install and build according to the runtime, with live output. A native project with version folders builds in the new version's folder, while the old one stays online.
+4. **Build**: install and build according to the runtime, with live output. A native project with version folders turned on builds in the new version's folder, while the old one stays online.
 5. **Release command**: run once, at most 10 minutes. If it fails the new version does not start and the old one stays up: this is where migrations go.
 6. **Start**: the old version is stopped only now (on Windows native runtimes, before the build), then PM2 or Docker start the new one with the contract's policy and limits.
 7. **Health check**: RunPanel probes the app every 2 seconds, after a 3-second wait and for at most 30 (`startPeriodSec`, `timeoutSec`). Any HTTP response passes unless the contract sets `expectStatus`; a container without a port only has to stay up.
 
-If the health check fails, the deploy is marked failed with the process's last 40 lines in the log. With **Se non risponde, rimetti online la versione precedente** on (**Impostazioni › Build e avvio**, on by default) the previous version comes back online, where it can: see below. Otherwise the project goes into error, and to go back there is [Going back to a commit](automation.md#going-back-to-a-commit). A failed release command never touches the running version: it stops before that.
+If the health check fails, the deploy is marked failed with the process's last 40 lines in the log. With **Se non risponde, rimetti online la versione precedente** on (**Impostazioni › Build e avvio**) the previous version comes back online, where it can: see below. Otherwise the project goes into error, and to go back there is [Going back to a commit](automation.md#going-back-to-a-commit). A failed release command never touches the running version: it stops before that.
 
 ### Going back to the previous version
 
-- **Docker**: the previous image is still on disk (the panel keeps two per project), and comes back online with the contract it ran with.
-- **Native (node, static, custom) connected to GitHub, on Linux**: every deploy prepares the new version in a folder of its own, `data/releases/<slug>/<id>`, and the previous one stays ready. If the new one does not answer, the previous one comes back online as it was, and the new one stays as a failed deploy to fix.
+- **Docker**: on by default. The previous image is still on disk (the panel keeps two per project), and comes back online with the contract it ran with.
+- **Native (node, static, custom) connected to GitHub, on Linux**: off by default, turned on project by project (the switch is marked **Nuovo**). From then on every deploy prepares the new version in a folder of its own, `data/releases/<slug>/<id>`, and the previous one stays ready. If the new one does not answer, the previous one comes back online as it was, and the new one stays as a failed deploy to fix. The first deploy after turning it on prepares the folders and the return works from the second: trying it first on a less important project is a good idea. In the contract these are two fields, `rollback.enabled` and `rollback.native`, both on; the second can only be changed from the panel, never from the repository's `runpanel.json`.
 - **Compose**, and native projects on **Windows** or uploaded as a **ZIP**: they build in the project folder and have no version to put back. A ZIP project cannot tell the code's files from the ones the app writes; Windows has no way to swap the folder in one step.
 
 How it works for native projects:
@@ -149,8 +150,8 @@ How it works for native projects:
 - **The switch**: the old version stops, its new files go to the project folder, `current` points at the new one (a rename, which on Linux never leaves the pointer half-written) and the new one starts.
 - **What follows the running version**: Restart, the restart after a crash or at boot, the **File** tab (edits last until the next deploy, as before), scheduled tasks, one-time commands and the release command. The code is the version's commit, not the project folder's, which after a failed deploy may already be on the new commit.
 - **Disk space**: two versions stay, the running one and the previous one. The others are deleted at the end of every deploy, except one holding files the app wrote that have not reached the project folder yet: it stays, and the deploy log names it. `node_modules` is copied from the previous version when the lockfile is identical (a copy, not a link: a build that rewrites a file in `node_modules`, like `prisma generate`, does not touch the version a rollback goes back to), and the install runs anyway; on btrfs or XFS the copy takes no extra space. Next's cache (`.next/cache`) is copied too. After the first successful deploy, the old `node_modules` and build in the project folder are deleted.
-- **The first deploy after updating** the panel has no previous version to put back: the old one ran in the project folder, which the deploy has already moved to the new commit. From the second deploy on, it does. Before any deploy, Restart does what it always did.
-- **Switched off**: the deploy builds in the project folder as before. The last version's new files go to the project folder, and the version folders are deleted after the first successful deploy. It is also the way out for a project that does not build well in a separate folder.
+- **The first deploy after turning it on** has no previous version to put back: the old one ran in the project folder, which the deploy has already moved to the new commit. From the second deploy on, it does. Until a deploy, Restart does what it always did. Updating the panel turns nothing on: a project stays as it was until you turn it on.
+- **Switched off again**: the deploy builds in the project folder as before, with nothing to put back: the data never left it. The last version's new files go to the project folder, and the version folders are deleted after the first successful deploy. It is also the way out for a project that does not build well in a separate folder.
 
 Limits: a build file outside the known folders that the project folder already has — a `public/bundle.js` git ignores, left by an in-place deploy — is shared between versions: the new build rewrites it there, and going back does not restore it. Deleting it once from the project folder is enough: from the next deploy on, each version has its own. An app that deletes and recreates a shared folder gets one of its own inside the version, which reaches the project folder at the next deploy. A project folder moved to another disk works, but the versions stay in the panel's data directory.
 
