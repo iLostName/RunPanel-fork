@@ -56,7 +56,7 @@ PostgreSQL, MySQL, Redis e MongoDB creati come container etichettati con i propr
 <td valign="top">
 
 ### 💾 Backup che si ripristinano
-Dump programmati dei database, dello store del pannello, della configurazione e dei volumi dei progetti, in un unico zip verificabile, su disco locale o su un bucket S3-compatibile, e se vuoi cifrato con una password tua.
+Dump programmati dei database, dello store del pannello, della configurazione e dei volumi dei progetti, in un unico zip verificabile, su disco locale, su un bucket S3-compatibile, su un server SFTP o un NAS, in una cartella WebDAV (Nextcloud e simili) o, con rclone, su Google Drive, OneDrive e Dropbox, e se vuoi cifrato con una password tua.
 
 </td>
 <td valign="top">
@@ -237,6 +237,7 @@ Sistema, Accessi e Impostazioni raggruppano più pagine in schede, ognuna con il
 | **Node.js** | 20 o superiore |
 | **Docker** | per i runtime a container, i database creati dal pannello e i loro backup |
 | **PM2** | per i progetti con runtime nativo (`node`, `static`, `custom`): `npm i -g pm2` |
+| **Client OpenSSH**, **rclone** | facoltativi, per le destinazioni dei backup SFTP e per Google Drive, OneDrive, Dropbox (rclone 1.60 o successivo) |
 
 ```bash
 git clone https://github.com/AlessTRV/RunPanel.git
