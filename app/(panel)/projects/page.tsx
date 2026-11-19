@@ -10,6 +10,8 @@ import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadError } from "@/components/ui/LoadError";
 import { LinkButton } from "@/components/ui/LinkButton";
+import { Fab } from "@/components/ui/Fab";
+import { PhoneMenu } from "@/components/ui/PhoneMenu";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
@@ -21,7 +23,8 @@ import { MoveMenu } from "@/components/folders/MoveMenu";
 import { useFolderMove } from "@/components/folders/useFolderMove";
 import { useNode, useServerHref } from "@/lib/hooks/useNode";
 import { useCan, useMe } from "@/lib/hooks/useMe";
-import { formatWhen } from "@/lib/format";
+import { TOUCH_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
+import { formatRelative, formatWhen } from "@/lib/format";
 import { useClusterList } from "@/lib/hooks/useClusterList";
 import type { Located } from "@/lib/cluster-merge";
 import { PROJECT_ACTIONS, rowAllows, type Access } from "@/lib/authz";
@@ -115,6 +118,10 @@ const ProjectRow = memo(function ProjectRow({
             {project.runtime_type}
             {project.port ? ` · :${project.port}` : ""}
             {project.source_branch ? ` · ${project.source_branch}` : ""}
+            {/* The column on the right that says when is not drawn on a phone. */}
+            {!project.unreachable && project.last_deploy_at && (
+              <span className="font-sans sm:hidden"> · {formatRelative(project.last_deploy_at)}</span>
+            )}
           </span>
           {project.access_mode === "restricted" && (
             <span className="inline-flex shrink-0 items-center gap-1" title="Accesso limitato a reti specifiche">
@@ -319,17 +326,23 @@ export default function ProjectsPage() {
   const grouped = useMemo(() => groupOverview(namedFolders, projects, []), [namedFolders, projects]);
   const movable = useCallback((project: Located<Project>) => !project.unreachable && rowAllows(project, PROJECT_ACTIONS.settings), []);
   const anyMovable = useMemo(() => namedFolders.length > 0 && projects.some(movable), [namedFolders, projects, movable]);
+  // A row cannot be dragged with a finger: there the menu is the only way, and the only one named.
+  const touch = useMediaQuery(TOUCH_QUERY);
 
   const savedFolder = useCallback(
     async (folder: FolderLike, created: boolean) => {
       await refreshFolders();
       if (created && folder.name) {
         toast.success(`Cartella «${folder.name}» creata`, {
-          description: projects.some(movable) ? "Trascinaci un progetto, oppure usa «Sposta in…» dal suo menu ⋯." : undefined,
+          description: projects.some(movable)
+            ? touch
+              ? "Per metterci un progetto, usa «Sposta in…» dal suo menu ⋯."
+              : "Trascinaci un progetto, oppure usa «Sposta in…» dal suo menu ⋯."
+            : undefined,
         });
       }
     },
-    [refreshFolders, projects, movable]
+    [refreshFolders, projects, movable, touch]
   );
 
   const deletedFolder = useCallback(
@@ -401,6 +414,11 @@ export default function ProjectsPage() {
 
   const openFolder = selection.kind === "folder" ? (namedById.get(selection.id) ?? null) : null;
   const openGroup = openFolder ? grouped.folders.find((g) => g.folder.id === openFolder.id) : undefined;
+  // The dialogs take the folder as the store has it, not under its shown name.
+  const openFolderDialog = (kind: "rename" | "delete") => {
+    const real = openFolder ? folders.find((f) => f.id === openFolder.id) : undefined;
+    if (real) setFolderDialog({ kind, folder: real });
+  };
   // Only once the folders are in: before that every id is unknown.
   const folderGone = selection.kind === "folder" && folderRows !== null && !openFolder;
   const showAll = (
@@ -452,7 +470,9 @@ export default function ProjectsPage() {
           title="Cartella vuota"
           description={
             anyMovable
-              ? `Trascina un progetto sulla scheda «${openFolder.name}» qui sopra, oppure scegli «Sposta in…» dal menu ⋯ del progetto.`
+              ? touch
+                ? "Per metterci un progetto, scegli «Sposta in…» dal menu ⋯ del progetto."
+                : `Trascina un progetto sulla scheda «${openFolder.name}» qui sopra, oppure scegli «Sposta in…» dal menu ⋯ del progetto.`
               : "Non c'è ancora nessun progetto in questa cartella."
           }
           action={showAll}
@@ -477,8 +497,9 @@ export default function ProjectsPage() {
         actions={
           <>
             <ServerFilter />
+            {/* On a phone this is the floating button at the end of the page. */}
             {canCreate && (
-              <LinkButton href={href("/projects/new")} variant="secondary">
+              <LinkButton href={href("/projects/new")} variant="secondary" className="max-md:hidden">
                 <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
                 Nuovo progetto
               </LinkButton>
@@ -518,28 +539,30 @@ export default function ProjectsPage() {
           actions={
             rowAllows(openFolder, { level: "manage" }) && (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onPress={() => {
-                    const real = folders.find((f) => f.id === openFolder.id);
-                    if (real) setFolderDialog({ kind: "rename", folder: real });
-                  }}
-                >
+                {/* In the ⋯ on a phone, where the two buttons left the folder's
+                    name and counts a column a few words wide. */}
+                <Button variant="ghost" size="sm" className="max-md:hidden" onPress={() => openFolderDialog("rename")}>
                   <Icon icon="solar:pen-linear" width={15} aria-hidden />
                   Rinomina
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onPress={() => {
-                    const real = folders.find((f) => f.id === openFolder.id);
-                    if (real) setFolderDialog({ kind: "delete", folder: real });
-                  }}
-                >
+                <Button variant="ghost" size="sm" className="max-md:hidden" onPress={() => openFolderDialog("delete")}>
                   <Icon icon="solar:trash-bin-minimalistic-linear" width={15} aria-hidden />
                   Elimina
                 </Button>
+                <PhoneMenu
+                  label={`Cartella «${openFolder.name}»`}
+                  className="border-transparent"
+                  actions={[
+                    { id: "rename", label: "Rinomina", icon: "solar:pen-linear", onAction: () => openFolderDialog("rename") },
+                    {
+                      id: "delete",
+                      label: "Elimina",
+                      icon: "solar:trash-bin-minimalistic-linear",
+                      danger: true,
+                      onAction: () => openFolderDialog("delete"),
+                    },
+                  ]}
+                />
               </>
             )
           }
@@ -589,6 +612,8 @@ export default function ProjectsPage() {
       )}
 
       <FolderDialogs request={folderDialog} onClose={() => setFolderDialog(null)} onSaved={savedFolder} onDeleted={deletedFolder} />
+
+      {canCreate && <Fab href={href("/projects/new")} label="Nuovo progetto" />}
     </>
   );
 }
