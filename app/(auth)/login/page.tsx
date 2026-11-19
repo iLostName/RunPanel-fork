@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { TextField, Label, Input, Button, Spinner } from "@heroui/react";
 import Image from "next/image";
 import logo from "@/components/logo.svg";
-import { Panel } from "@/components/ui/Panel";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { GithubButton, OrDivider, startGithubFlow } from "@/components/github/GithubSignIn";
 import { isLoopbackHost } from "@/lib/cookie-security";
@@ -29,6 +28,7 @@ function useInsecureConnection(): boolean {
 }
 import { Segmented } from "@/components/ui/Segmented";
 import { SelectField } from "@/components/ui/SelectField";
+import { AuthCard } from "../_components/AuthCard";
 import { SecondStep } from "./SecondStep";
 
 /**
@@ -341,53 +341,51 @@ export default function LoginPage() {
   if (check.role === "node") {
     const panels = check.managedBy ?? [];
     return (
-      <div className="flex min-h-dvh items-center justify-center p-4">
-        <Panel className="w-full max-w-md space-y-5 p-6 sm:p-8">
-          <div className="flex flex-col items-center gap-2 text-center">
-            <Image src={logo} alt="" aria-hidden width={44} height={44} className="size-11" priority />
-            <h1 className="text-foreground text-xl font-semibold tracking-tight">RunPanel</h1>
-            <p className="text-muted text-sm">Questo server è gestito da un altro RunPanel.</p>
-          </div>
-          {panels.length > 0 ? (
-            <ul className="space-y-2">
-              {panels.map((p) => (
-                <li key={p.url}>
-                  <a
-                    href={`${p.url}/login`}
-                    className="border-border bg-surface-secondary hover:bg-surface-hover flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
-                  >
-                    <span className="text-foreground font-medium">{p.name}</span>
-                    <span className="text-muted font-mono text-xs">{p.url}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-muted text-center text-sm">Accedi da uno dei pannelli del cluster.</p>
-          )}
-        </Panel>
-      </div>
+      <AuthCard className="space-y-5">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <Image src={logo} alt="" aria-hidden width={44} height={44} className="size-11" priority />
+          <h1 className="text-foreground text-xl font-semibold tracking-tight">RunPanel</h1>
+          <p className="text-muted text-sm">Questo server è gestito da un altro RunPanel.</p>
+        </div>
+        {panels.length > 0 ? (
+          <ul className="space-y-2">
+            {panels.map((p) => (
+              <li key={p.url}>
+                {/* Wraps on a phone: name and address side by side left a
+                    long address running off the screen. */}
+                <a
+                  href={`${p.url}/login`}
+                  className="border-border bg-surface-secondary hover:bg-surface-hover flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 rounded-lg border px-3 py-2 text-sm"
+                >
+                  <span className="text-foreground font-medium">{p.name}</span>
+                  <span className="text-muted min-w-0 font-mono text-xs [overflow-wrap:anywhere]">{p.url}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted text-center text-sm">Accedi da uno dei pannelli del cluster.</p>
+        )}
+      </AuthCard>
     );
   }
 
   if (challenge) {
     return (
-      <div className="flex min-h-dvh items-center justify-center p-4">
-        <Panel className="w-full max-w-md p-6 sm:p-8">
-          <SecondStep
-            challenge={challenge}
-            onExpired={(message) => {
-              setChallenge(null);
-              setError(viaGithub ? "L'accesso è scaduto: entra di nuovo con GitHub." : message);
-            }}
-            onSignedIn={(emailRequired) => router.push(emailRequired ? "/setup-email" : (nextPath ?? "/home"))}
-            onBack={() => {
-              setChallenge(null);
-              setError(null);
-            }}
-          />
-        </Panel>
-      </div>
+      <AuthCard>
+        <SecondStep
+          challenge={challenge}
+          onExpired={(message) => {
+            setChallenge(null);
+            setError(viaGithub ? "L'accesso è scaduto: entra di nuovo con GitHub." : message);
+          }}
+          onSignedIn={(emailRequired) => router.push(emailRequired ? "/setup-email" : (nextPath ?? "/home"))}
+          onBack={() => {
+            setChallenge(null);
+            setError(null);
+          }}
+        />
+      </AuthCard>
     );
   }
 
@@ -398,157 +396,155 @@ export default function LoginPage() {
       : "Collega questo server a un RunPanel esistente";
 
   return (
-    <div className="flex min-h-dvh items-center justify-center p-4">
-      <Panel className="w-full max-w-md p-6 sm:p-8">
-        {/* A real form: Enter submits from any field, and password managers
-            recognise it as a sign-in. */}
-        <form
-          className="space-y-5"
-          noValidate
-          onSubmit={(e) => {
-            e.preventDefault();
-            void (isFirstRun ? (mode === "owner" ? handleSetup() : handleLink()) : handleLogin());
-          }}
-        >
-          <div className="flex flex-col items-center gap-2 text-center">
-            <Image src={logo} alt="" aria-hidden width={44} height={44} className="size-11" priority />
-            <h1 className="text-foreground text-xl font-semibold tracking-tight">RunPanel</h1>
-            <p className="text-muted text-sm">{title}</p>
-          </div>
+    <AuthCard>
+      {/* A real form: Enter submits from any field, and password managers
+          recognise it as a sign-in. */}
+      <form
+        className="space-y-5"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void (isFirstRun ? (mode === "owner" ? handleSetup() : handleLink()) : handleLogin());
+        }}
+      >
+        <div className="flex flex-col items-center gap-2 text-center">
+          <Image src={logo} alt="" aria-hidden width={44} height={44} className="size-11" priority />
+          <h1 className="text-foreground text-xl font-semibold tracking-tight">RunPanel</h1>
+          <p className="text-muted text-sm">{title}</p>
+        </div>
 
-          {linkedAs === "panel" && (
-            <p role="status" className="text-success text-center text-sm">
-              Collegato. Accedi con un account del cluster.
-            </p>
-          )}
+        {linkedAs === "panel" && (
+          <p role="status" className="text-success text-center text-sm">
+            Collegato. Accedi con un account del cluster.
+          </p>
+        )}
 
-          {insecure && (
-            <Hint tone="warn" title="Connessione non cifrata">
-              Sei su http: password e sessione viaggiano in chiaro. Va bene su una rete privata
-              (Tailscale, una VPN); su internet metti prima il pannello dietro HTTPS.
-            </Hint>
-          )}
+        {insecure && (
+          <Hint tone="warn" title="Connessione non cifrata">
+            Sei su http: password e sessione viaggiano in chiaro. Va bene su una rete privata
+            (Tailscale, una VPN); su internet metti prima il pannello dietro HTTPS.
+          </Hint>
+        )}
 
+        {isFirstRun && (
+          <Segmented
+            label="Come configurare questo server"
+            value={mode}
+            onChange={setMode}
+            className="justify-center"
+            options={[
+              { value: "owner", label: "Crea il proprietario" },
+              { value: "link", label: "Collega a un RunPanel" },
+            ]}
+          />
+        )}
+
+        <div className="space-y-4">
+          {/*
+            Proves the person claiming this panel is the one who can read its
+            log, rather than whoever reached the port first.
+          */}
           {isFirstRun && (
-            <Segmented
-              label="Come configurare questo server"
-              value={mode}
-              onChange={setMode}
-              className="justify-center"
-              options={[
-                { value: "owner", label: "Crea il proprietario" },
-                { value: "link", label: "Collega a un RunPanel" },
-              ]}
-            />
+            <div>
+              <TextField value={setupToken} onChange={setSetupToken} autoFocus>
+                <Label>Token di setup</Label>
+                <Input placeholder="3f9c1a…" className="font-mono text-sm" />
+              </TextField>
+              <FieldHint>
+                <SetupTokenHelp hint={check.setupHint} />
+              </FieldHint>
+            </div>
           )}
 
-          <div className="space-y-4">
-            {/*
-              Proves the person claiming this panel is the one who can read its
-              log, rather than whoever reached the port first.
-            */}
-            {isFirstRun && (
+          {isFirstRun && mode === "link" ? (
+            <>
+              <TextField value={panelUrl} onChange={setPanelUrl}>
+                <Label>Indirizzo del pannello</Label>
+                <Input placeholder="http://100.64.0.5:3000" className="font-mono text-sm" autoComplete="off" />
+              </TextField>
               <div>
-                <TextField value={setupToken} onChange={setSetupToken} autoFocus>
-                  <Label>Token di setup</Label>
-                  <Input placeholder="3f9c1a…" className="font-mono text-sm" />
+                <TextField value={linkToken} onChange={setLinkToken}>
+                  <Label>Token di collegamento</Label>
+                  <Input className="font-mono text-sm" autoComplete="off" />
+                </TextField>
+                <FieldHint>Lo genera il pannello in Impostazioni › Server collegati › Collega un server. Vale un&apos;ora.</FieldHint>
+              </div>
+              <TextField value={serverName} onChange={setServerName}>
+                <Label>Nome di questo server</Label>
+                <Input placeholder="hetzner-2" autoComplete="off" />
+              </TextField>
+              <div>
+                <TextField value={serverUrl} onChange={setServerUrl}>
+                  <Label>Indirizzo di questo server</Label>
+                  <Input className="font-mono text-sm" autoComplete="off" />
                 </TextField>
                 <FieldHint>
-                  <SetupTokenHelp hint={check.setupHint} />
+                  Quello con cui il pannello lo raggiunge: l&apos;IP Tailscale e la porta.
+                  {/^https?:\/\/(localhost|127\.|\[::1\])/i.test(serverUrl) && (
+                    <>
+                      {" "}
+                      <span className="text-warning">Un indirizzo locale vale solo da questa macchina: il pannello non lo raggiungerebbe.</span>
+                    </>
+                  )}
                 </FieldHint>
               </div>
-            )}
-
-            {isFirstRun && mode === "link" ? (
-              <>
-                <TextField value={panelUrl} onChange={setPanelUrl}>
-                  <Label>Indirizzo del pannello</Label>
-                  <Input placeholder="http://100.64.0.5:3000" className="font-mono text-sm" autoComplete="off" />
-                </TextField>
-                <div>
-                  <TextField value={linkToken} onChange={setLinkToken}>
-                    <Label>Token di collegamento</Label>
-                    <Input className="font-mono text-sm" autoComplete="off" />
-                  </TextField>
-                  <FieldHint>Lo genera il pannello in Impostazioni › Server collegati › Collega un server. Vale un&apos;ora.</FieldHint>
-                </div>
-                <TextField value={serverName} onChange={setServerName}>
-                  <Label>Nome di questo server</Label>
-                  <Input placeholder="hetzner-2" autoComplete="off" />
-                </TextField>
-                <div>
-                  <TextField value={serverUrl} onChange={setServerUrl}>
-                    <Label>Indirizzo di questo server</Label>
-                    <Input className="font-mono text-sm" autoComplete="off" />
-                  </TextField>
-                  <FieldHint>
-                    Quello con cui il pannello lo raggiunge: l&apos;IP Tailscale e la porta.
-                    {/^https?:\/\/(localhost|127\.|\[::1\])/i.test(serverUrl) && (
-                      <>
-                        {" "}
-                        <span className="text-warning">Un indirizzo locale vale solo da questa macchina: il pannello non lo raggiungerebbe.</span>
-                      </>
-                    )}
-                  </FieldHint>
-                </div>
-                <SelectField label="Ruolo" value={role} onChange={setRole} options={ROLE_OPTIONS} />
-              </>
-            ) : (
-              <>
-                <TextField type="email" value={email} onChange={setEmail} autoFocus={!isFirstRun}>
-                  <Label>Email</Label>
-                  <Input placeholder="nome@esempio.it" autoComplete="username" />
-                </TextField>
-                {!isFirstRun && (
-                  // One line rather than a paragraph: it concerns an upgrade that
-                  // happens once, and was the longest text on the screen every day.
-                  <FieldHint>Account senza email, da una versione vecchia? Lascia vuoto.</FieldHint>
-                )}
-
-                <TextField type="password" value={password} onChange={setPassword}>
-                  <Label>Password</Label>
-                  <Input autoComplete={isFirstRun ? "new-password" : "current-password"} />
-                </TextField>
-
-                {isFirstRun && (
-                  <TextField type="password" value={confirmPassword} onChange={setConfirmPassword}>
-                    <Label>Conferma password</Label>
-                    <Input autoComplete="new-password" />
-                  </TextField>
-                )}
-              </>
-            )}
-          </div>
-
-          {error && (
-            <p role="alert" className="text-danger text-sm">
-              {error}
-              {githubElsewhere && (
-                <>
-                  {" "}
-                  <a href={githubElsewhere} className="text-accent font-medium hover:underline">
-                    Apri il pannello da lì
-                  </a>
-                </>
-              )}
-            </p>
-          )}
-
-          <Button type="submit" variant="primary" className="w-full" isPending={loading}>
-            {!isFirstRun ? "Accedi" : mode === "owner" ? "Configura il pannello" : "Collega il server"}
-          </Button>
-
-          {/* Only once the owner has set it up; a GitHub account still has to be linked to a user. */}
-          {!isFirstRun && check.github && (
+              <SelectField label="Ruolo" value={role} onChange={setRole} options={ROLE_OPTIONS} />
+            </>
+          ) : (
             <>
-              <OrDivider />
-              <GithubButton isPending={githubPending} isDisabled={loading} onPress={() => void handleGithub()}>
-                Accedi con GitHub
-              </GithubButton>
+              <TextField type="email" value={email} onChange={setEmail} autoFocus={!isFirstRun}>
+                <Label>Email</Label>
+                <Input placeholder="nome@esempio.it" autoComplete="username" />
+              </TextField>
+              {!isFirstRun && (
+                // One line rather than a paragraph: it concerns an upgrade that
+                // happens once, and was the longest text on the screen every day.
+                <FieldHint>Account senza email, da una versione vecchia? Lascia vuoto.</FieldHint>
+              )}
+
+              <TextField type="password" value={password} onChange={setPassword}>
+                <Label>Password</Label>
+                <Input autoComplete={isFirstRun ? "new-password" : "current-password"} />
+              </TextField>
+
+              {isFirstRun && (
+                <TextField type="password" value={confirmPassword} onChange={setConfirmPassword}>
+                  <Label>Conferma password</Label>
+                  <Input autoComplete="new-password" />
+                </TextField>
+              )}
             </>
           )}
-        </form>
-      </Panel>
-    </div>
+        </div>
+
+        {error && (
+          <p role="alert" className="text-danger text-sm">
+            {error}
+            {githubElsewhere && (
+              <>
+                {" "}
+                <a href={githubElsewhere} className="text-accent font-medium hover:underline">
+                  Apri il pannello da lì
+                </a>
+              </>
+            )}
+          </p>
+        )}
+
+        <Button type="submit" variant="primary" className="w-full" isPending={loading}>
+          {!isFirstRun ? "Accedi" : mode === "owner" ? "Configura il pannello" : "Collega il server"}
+        </Button>
+
+        {/* Only once the owner has set it up; a GitHub account still has to be linked to a user. */}
+        {!isFirstRun && check.github && (
+          <>
+            <OrDivider />
+            <GithubButton isPending={githubPending} isDisabled={loading} onPress={() => void handleGithub()}>
+              Accedi con GitHub
+            </GithubButton>
+          </>
+        )}
+      </form>
+    </AuthCard>
   );
 }

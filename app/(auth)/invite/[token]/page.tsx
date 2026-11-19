@@ -5,10 +5,27 @@ import { useRouter } from "next/navigation";
 import { TextField, Label, Input, Button, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
-import { Panel } from "@/components/ui/Panel";
 import { FieldHint } from "@/components/ui/Hint";
 import { GithubButton, OrDivider, startGithubFlow } from "@/components/github/GithubSignIn";
 import { githubResultMessage } from "@/lib/github-login-messages";
+import { AuthCard } from "../../_components/AuthCard";
+
+/**
+ * An address longer than the screen, as invitations to a company address
+ * often are: it breaks before the @ when it has to, and inside a part only
+ * when that part alone is still too long.
+ */
+function BreakableEmail({ email }: { email: string }) {
+  const at = email.lastIndexOf("@");
+  if (at <= 0) return <>{email}</>;
+  return (
+    <>
+      {email.slice(0, at)}
+      <wbr />
+      {email.slice(at)}
+    </>
+  );
+}
 
 type State =
   | { phase: "loading" }
@@ -117,7 +134,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
 
   if (state.phase === "loading") {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-dvh items-center justify-center">
         <Spinner />
       </div>
     );
@@ -126,92 +143,96 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   const offerGithub = state.phase === "ready" && state.kind === "invite" && state.github;
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Panel className="w-full max-w-md space-y-5 p-6 sm:p-8">
-        <div className="flex flex-col items-center gap-2 text-center">
-          <Icon
-            icon={state.phase === "invalid" ? "solar:danger-triangle-linear" : "solar:key-linear"}
-            className={state.phase === "invalid" ? "text-warning" : "text-accent"}
-            width={44}
-            aria-hidden
-          />
-          <h1 className="text-foreground text-xl font-semibold tracking-tight">
-            {state.phase === "invalid"
-              ? "Link non più valido"
-              : state.kind === "reset"
-                ? "Scegli una nuova password"
-                : "Benvenuto su RunPanel"}
-          </h1>
-          <p className="text-muted text-sm">
-            {state.phase === "invalid" ? (
-              <>{state.message} Chiedi a chi ti ha invitato di generarne uno nuovo.</>
-            ) : (
-              <>
-                Account <strong className="text-foreground">{state.email}</strong>
-              </>
-            )}
-          </p>
-        </div>
+    <AuthCard className="space-y-5">
+      <div className="flex flex-col items-center gap-2 text-center">
+        <Icon
+          icon={state.phase === "invalid" ? "solar:danger-triangle-linear" : "solar:key-linear"}
+          className={state.phase === "invalid" ? "text-warning" : "text-accent"}
+          width={44}
+          aria-hidden
+        />
+        <h1 className="text-foreground text-xl font-semibold tracking-tight">
+          {state.phase === "invalid"
+            ? "Link non più valido"
+            : state.kind === "reset"
+              ? "Scegli una nuova password"
+              : "Benvenuto su RunPanel"}
+        </h1>
+        {/* `anywhere`, not `break-word`: only the first lowers the line's
+            narrowest width, which is what lets a centred flex child shrink
+            to the screen instead of running past it. */}
+        <p className="text-muted max-w-full text-sm [overflow-wrap:anywhere]">
+          {state.phase === "invalid" ? (
+            <>{state.message} Chiedi a chi ti ha invitato di generarne uno nuovo.</>
+          ) : (
+            <>
+              Account{" "}
+              <strong className="text-foreground">
+                <BreakableEmail email={state.email} />
+              </strong>
+            </>
+          )}
+        </p>
+      </div>
 
-        {state.phase === "ready" && (
-          <>
-            <div className="space-y-4">
-              <div>
-                <TextField type="password" value={password} onChange={setPassword} autoFocus>
-                  <Label>Password</Label>
-                  <Input autoComplete="new-password" />
-                </TextField>
-                <FieldHint>Almeno 8 caratteri. Il link funziona una volta sola.</FieldHint>
-              </div>
-              <TextField type="password" value={confirm} onChange={setConfirm}>
-                <Label>Conferma password</Label>
-                <Input
-                  autoComplete="new-password"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") save();
-                  }}
-                />
+      {state.phase === "ready" && (
+        <>
+          <div className="space-y-4">
+            <div>
+              <TextField type="password" value={password} onChange={setPassword} autoFocus>
+                <Label>Password</Label>
+                <Input autoComplete="new-password" />
               </TextField>
+              <FieldHint>Almeno 8 caratteri. Il link funziona una volta sola.</FieldHint>
             </div>
-            <Button variant="primary" className="w-full" isPending={saving} isDisabled={githubPending} onPress={save}>
-              {state.kind === "reset" ? "Salva la password" : "Crea l'account"}
-            </Button>
-          </>
-        )}
-
-        {(offerGithub || (githubError && state.phase === "ready")) && (
-          <div className="space-y-3">
-            {offerGithub && (
-              <>
-                <OrDivider />
-                <GithubButton isPending={githubPending} isDisabled={saving} onPress={() => void acceptWithGithub()}>
-                  Accedi con GitHub
-                </GithubButton>
-              </>
-            )}
-            {/* Under the button it is about: what went wrong on the way back from GitHub. */}
-            {githubError && (
-              <p role="alert" className="text-danger text-sm">
-                {githubError}
-                {githubElsewhere && (
-                  <>
-                    {" "}
-                    <a href={githubElsewhere} className="text-accent font-medium hover:underline">
-                      Apri il pannello da lì
-                    </a>
-                  </>
-                )}
-              </p>
-            )}
-            {offerGithub && (
-              <FieldHint className="mt-0 text-center">
-                Senza password: il tuo account GitHub viene collegato a questo, ed entrerai con quello. Potrai aggiungere
-                una password dalla pagina Account.
-              </FieldHint>
-            )}
+            <TextField type="password" value={confirm} onChange={setConfirm}>
+              <Label>Conferma password</Label>
+              <Input
+                autoComplete="new-password"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") save();
+                }}
+              />
+            </TextField>
           </div>
-        )}
-      </Panel>
-    </div>
+          <Button variant="primary" className="w-full" isPending={saving} isDisabled={githubPending} onPress={save}>
+            {state.kind === "reset" ? "Salva la password" : "Crea l'account"}
+          </Button>
+        </>
+      )}
+
+      {(offerGithub || (githubError && state.phase === "ready")) && (
+        <div className="space-y-3">
+          {offerGithub && (
+            <>
+              <OrDivider />
+              <GithubButton isPending={githubPending} isDisabled={saving} onPress={() => void acceptWithGithub()}>
+                Accedi con GitHub
+              </GithubButton>
+            </>
+          )}
+          {/* Under the button it is about: what went wrong on the way back from GitHub. */}
+          {githubError && (
+            <p role="alert" className="text-danger text-sm">
+              {githubError}
+              {githubElsewhere && (
+                <>
+                  {" "}
+                  <a href={githubElsewhere} className="text-accent font-medium hover:underline">
+                    Apri il pannello da lì
+                  </a>
+                </>
+              )}
+            </p>
+          )}
+          {offerGithub && (
+            <FieldHint className="mt-0 text-center">
+              Senza password: il tuo account GitHub viene collegato a questo, ed entrerai con quello. Potrai aggiungere
+              una password dalla pagina Account.
+            </FieldHint>
+          )}
+        </div>
+      )}
+    </AuthCard>
   );
 }
