@@ -40,6 +40,7 @@ import * as panelHost from "./040-panel-host";
 import * as projectTasks from "./041-project-tasks";
 import * as backupEncryption from "./044-backup-encryption";
 import * as backupCopies from "./045-backup-copies";
+import * as pushDevices from "./049-push-devices";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -90,6 +91,7 @@ export const migrations: Record<string, Migration> = {
   "041-project-tasks": projectTasks,
   "044-backup-encryption": backupEncryption,
   "045-backup-copies": backupCopies,
+  "049-push-devices": pushDevices,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {
