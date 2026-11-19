@@ -59,12 +59,16 @@ export function UserMenu() {
   const { expert, setExpert } = useExpertMode();
   const { mode, setMode } = useThemeMode();
   const install = useInstall();
+  // The initials first: they are what the button shows, and whoever operates
+  // the page by voice says what is on screen (WCAG 2.5.3).
+  const initials = initialsOf(me.email);
+  const label = me.email ? `${initials}, account ${me.email}` : "Account senza email";
 
   return (
     <Dropdown>
-      <Button variant="ghost" size="sm" aria-label={`Account: ${me.email ?? "senza email"}`} className="h-9 gap-2 px-1.5">
+      <Button variant="ghost" size="sm" aria-label={label} className="h-9 gap-2 px-1.5">
         <span className="bg-surface-tertiary text-foreground border-border grid size-7 place-items-center rounded-full border text-[11px] font-semibold">
-          {initialsOf(me.email)}
+          {initials}
         </span>
         <Icon icon="solar:alt-arrow-down-linear" width={12} className="text-muted hidden sm:block" aria-hidden />
       </Button>

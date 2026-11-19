@@ -149,7 +149,7 @@ export function ListRow({
           {badges}
         </div>
         {description && <p className="text-muted mt-0.5 truncate text-xs">{description}</p>}
-        {meta && <p className="text-muted/80 mt-0.5 truncate text-meta">{meta}</p>}
+        {meta && <p className="text-muted mt-0.5 truncate text-meta">{meta}</p>}
       </div>
       {(action || menu) && (
         <div className="flex shrink-0 items-center gap-1.5 max-md:relative max-md:z-10">

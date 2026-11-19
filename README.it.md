@@ -15,7 +15,10 @@ o da un Dockerfile, con il build in diretta, database su richiesta e backup che 
 
 <br>
 
-<img src=".github/assets/overview.png" alt="Panoramica di RunPanel: avvisi, risorse dell'host e progetti raggruppati in cartelle" width="100%">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/overview-dark.webp">
+  <img src=".github/assets/overview-light.webp" alt="Panoramica di RunPanel: lo stato a colpo d'occhio, le risorse dell'host, l'attività recente e i progetti raggruppati in cartelle" width="100%">
+</picture>
 
 </div>
 
@@ -164,35 +167,65 @@ Premi **Deploy** e il log del build scorre nel browser mentre succede: installaz
 
 ## 💻 Il pannello
 
+> [!NOTE]
+> Le schermate mostrano il pannello vero, con i progetti di uno studio inventato su un server di prova, nel tema chiaro o scuro come il tuo GitHub. `node scripts/readme-screenshots.mjs` le rifà da una build nuova.
+
 <table>
 <tr>
 <td width="50%" valign="top">
-<img src=".github/assets/projects.png" alt="Elenco dei progetti">
-<p align="center"><b>Progetti</b>: stato, runtime, porta e ultimo deploy</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/projects-dark.webp">
+  <img src=".github/assets/projects-light.webp" alt="Elenco dei progetti, raggruppati in cartelle">
+</picture>
+<p align="center"><b>Progetti</b>: cartelle, stato, runtime, porta e ultimo deploy</p>
 </td>
 <td width="50%" valign="top">
-<img src=".github/assets/project-detail.png" alt="Dettaglio di un progetto">
-<p align="center"><b>Dettaglio progetto</b>: risorse, log, deploy, variabili, file</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/project-dark.webp">
+  <img src=".github/assets/project-light.webp" alt="Dettaglio di un progetto">
+</picture>
+<p align="center"><b>Dettaglio progetto</b>: risorse, uptime, log, deploy, variabili, file</p>
 </td>
 </tr>
 <tr>
 <td valign="top">
-<img src=".github/assets/services.png" alt="Servizi gestiti">
-<p align="center"><b>Servizi</b>: database gestiti e collegamenti ai progetti</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/variables-dark.webp">
+  <img src=".github/assets/variables-light.webp" alt="Le variabili d'ambiente di un progetto">
+</picture>
+<p align="center"><b>Variabili</b>: cifrate, nascoste finché non le mostri, salvate e ridistribuite in un colpo</p>
 </td>
 <td valign="top">
-<img src=".github/assets/backups.png" alt="Backup">
-<p align="center"><b>Backup</b>: pianificazioni, destinazioni, cronologia</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/backups-dark.webp">
+  <img src=".github/assets/backups-light.webp" alt="Backup">
+</picture>
+<p align="center"><b>Backup</b>: pianificazioni, più destinazioni, cronologia</p>
 </td>
 </tr>
 <tr>
 <td valign="top">
-<img src=".github/assets/monitor.png" alt="Monitor">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/monitor-dark.webp">
+  <img src=".github/assets/monitor-light.webp" alt="Monitor">
+</picture>
 <p align="center"><b>Monitor</b>: CPU, memoria e uptime di ogni processo</p>
 </td>
 <td valign="top">
-<img src=".github/assets/user-detail.png" alt="Permessi di un utente">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/user-detail-dark.webp">
+  <img src=".github/assets/user-detail-light.webp" alt="Permessi di un utente">
+</picture>
 <p align="center"><b>Accessi</b>: livelli per cartella, progetto e servizio</p>
+</td>
+</tr>
+<tr>
+<td colspan="2" valign="top">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/phone-dark.webp">
+  <img src=".github/assets/phone-light.webp" alt="RunPanel su un telefono: la panoramica, i progetti e un progetto">
+</picture>
+<p align="center"><b>Sul telefono</b>: la barra delle schede sotto il pollice, «Altro» per il resto, i dialog come fogli dal basso; si installa come un'app</p>
 </td>
 </tr>
 </table>
