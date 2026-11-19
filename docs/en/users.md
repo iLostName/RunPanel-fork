@@ -12,6 +12,36 @@ With [several servers](multi-server.md) the accounts are the same everywhere and
 
 You sign in with email and password. The panel sends no email: the address is only your login name.
 
+Where the owner has set it up, **Accedi con GitHub** (sign in with GitHub) is there too: see [Signing in with GitHub](#signing-in-with-github).
+
+## Signing in with GitHub
+
+People can sign in with their GitHub account instead of the password. A GitHub account never creates a user: it is **linked** to one that already exists, and only then signs it in. Someone whose GitHub account is linked to nobody is told to ask the owner for an invitation.
+
+**Setting it up** is the owner's, in **Impostazioni › Generale › Accesso con GitHub**, once for the whole panel. The section walks through it:
+
+1. On GitHub, **Settings › Developer settings › OAuth Apps › New OAuth App** (the **Apri GitHub** button opens it). Any name, for example "RunPanel".
+2. **Homepage URL** and **Authorization callback URL** are copied from the panel, which shows them with a copy button. The callback is `https://<the panel's address>/api/auth/github/callback` and must be identical. It comes from the panel's **Indirizzo pubblico** (public address) when one is set, otherwise from the address the page is open at. The panel refuses plain http, except on the machine itself (`http://localhost`, `http://127.0.0.1`): GitHub would send the sign-in code back unencrypted. Put the panel on HTTPS first (**Metti il pannello su HTTPS**).
+3. On the app's page, **Generate a new client secret**, and paste the **Client ID** and the secret into the panel. The secret is stored encrypted with the panel's secret key and never shown again.
+4. **Verifica** (verify) asks GitHub whether it accepts the Client ID and the secret.
+5. **Consenti l'accesso con GitHub** (allow sign-in with GitHub) turns it on; it applies at once.
+
+The callback URL is also the address sign-ins must start from: on another address of the same panel the button says where to go instead. If the panel's address changes, the section says so: update the URL on GitHub, then **Usa il nuovo indirizzo**.
+
+**Linking an account**: in **Impostazioni › Account › Accesso con GitHub**, **Collega GitHub**, then your password, then GitHub asks you to authorize the app and brings you back. The link is made on GitHub's numeric user id, which never changes, never on the login name or the email. One GitHub account links to one user, and a user has at most one. **Scollega GitHub** removes it.
+
+**Invitations**: an invitation link can also be accepted with **Accedi con GitHub** instead of choosing a password. The account then signs in only with GitHub; it can add a password from **Impostazioni › Account**, within ten minutes of signing in (afterwards the page offers to sign in with GitHub again first). A link to choose a new password cannot be used with GitHub.
+
+**What GitHub does not change**:
+
+- Two-step verification is asked for after GitHub exactly as after the password, and **Ricorda questo dispositivo** works the same way.
+- A disabled account is refused, sessions are the panel's own, the same limits apply to attempts, and every sign-in, link, unlink and refusal is in the activity log.
+- The panel asks GitHub only for `read:user`, uses the token once to read the account's id and login, then revokes it at GitHub and keeps nothing. Each sign-in is protected by a `state` bound to a short-lived cookie of the browser it started in, and by PKCE (S256); after it the browser is only ever sent to a page of the panel.
+
+**Turning it off**: the owner switches it off in the same section (or removes the app). Linked users then sign in with their password; the links stay, and work again when it is switched back on. Users who sign in only with GitHub would be locked out, so the panel refuses to switch off while there are any, and names them: each can set a password from their account page, or you send them a link to choose one from their page in **Team › Utenti** (their badge there reads GitHub with no password). It can still be switched off anyway, after a confirmation.
+
+**Team › Utenti** shows the GitHub account of each user who has one. With [several servers](multi-server.md) all of this is per panel, like two-step verification: each panel has its own OAuth App, and accounts are linked on each panel separately.
+
 ## Two-step verification
 
 With **Verifica in due passaggi** (two-step verification) on, signing in also asks for the 6-digit code an authenticator app on your phone shows, a new one every 30 seconds: a stolen password alone does not get in.
@@ -53,9 +83,9 @@ It finds the database like the panel does: `RUNPANEL_DB_DRIVER`, `RUNPANEL_DATA_
 
 ## Inviting someone
 
-In **Accessi › Utenti › Invita utente** (access, users, invite user) type the email and choose how long the link lasts: 1 hour, 24 hours, 7 days or any duration up to 30 days. The panel shows the link **once** and you send it to the person yourself. The link works once: the person picks a password and is in.
+In **Accessi › Utenti › Invita utente** (access, users, invite user) type the email and choose how long the link lasts: 1 hour, 24 hours, 7 days or any duration up to 30 days. The panel shows the link **once** and you send it to the person yourself. The link works once: the person picks a password, or uses **Accedi con GitHub** where [sign-in with GitHub](#signing-in-with-github) is on, and is in.
 
-From an account's page you generate a new link: an invitation if the account has no password yet, otherwise a link to choose a new one (that is how a forgotten password is solved). Every new link voids the unused ones, and using one signs that account out of every device.
+From an account's page you generate a new link: an invitation if the account has not accepted one yet, otherwise a link to choose a new password (that is how a forgotten password is solved, and how an account that signs in only with GitHub gets one). Every new link voids the unused ones, and using one signs that account out of every device.
 
 ## What an account can do
 
