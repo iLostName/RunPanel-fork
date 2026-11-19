@@ -21,6 +21,7 @@ Everything lives in `.env` in the panel's folder; `.env.example` is the commente
 | `RUNPANEL_DISABLE_SCHEDULERS` | off | `1`, `true` or `yes`: turns timers and access gates off. See below |
 | `RUNPANEL_SETUP_TOKEN` | issued at each boot | Pins the first-run token, which also guards [linking the server to a cluster](multi-server.md). Not validated |
 | `RUNPANEL_DEV_ORIGINS` | — | `next dev` only: extra hosts, comma-separated, with `*` and `**` wildcards (no CIDR). Not validated |
+| `RUNPANEL_PUSH_SERVICES` | — | Extra push services for [push notifications](notifications.md#on-your-phone-and-computer), comma-separated hosts: for a browser that uses a push service of its own. On these hosts the panel also accepts http and any port. Not validated |
 
 **The secret key.** It encrypts project variables, service credentials, registries, backup destinations, the GitHub token, the notification channels' secrets and the mail server's password. If it changes or is lost, all of these become unreadable: keep it with your backups. With [several servers](multi-server.md) each install has its own; the shared GitHub token is encrypted again by each server.
 

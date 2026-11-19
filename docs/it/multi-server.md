@@ -49,7 +49,7 @@ Utenti, permessi, accessi e cartelle sono replicati su tutti i server e si modif
 
 Si condivide anche il token GitHub: ogni server clona con le stesse credenziali, e le cifra con la propria chiave. I canali di notifica no: ogni server ha i suoi, da configurare con quel server selezionato (un bot Telegram configurato prima che esistessero i canali è stato copiato nell'elenco di ogni server con l'aggiornamento).
 
-Restano di ogni server: le sessioni (si entra su ogni pannello separatamente), i link di invito (si aprono sul pannello che li ha generati), il registro attività, backup e destinazioni, registry, indirizzo pubblico, intervallo del controllo periodico, impostazioni di aggiornamento, i canali di notifica e le notifiche della campanella, la [pagina di stato pubblica](operations.md#pagina-di-stato-pubblica), che però può mostrare progetti di tutti i server.
+Restano di ogni server: le sessioni (si entra su ogni pannello separatamente), i link di invito (si aprono sul pannello che li ha generati), il registro attività, backup e destinazioni, registry, indirizzo pubblico, intervallo del controllo periodico, impostazioni di aggiornamento, i canali di notifica e le notifiche della campanella, i dispositivi con le [notifiche push](notifications.md#sul-telefono-e-sul-computer) (ogni pannello manda le sue), la [pagina di stato pubblica](operations.md#pagina-di-stato-pubblica), che però può mostrare progetti di tutti i server.
 
 ## Backup da un server all'altro
 

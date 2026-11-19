@@ -22,6 +22,7 @@ For people already using the panel: where things moved and what was added. Nothi
 - **Sheets from the bottom**: confirmations and forms open as sheets rising from the edge, with their buttons under the thumb, and close by dragging them down (not once something has been typed). The "⋯" menus become a full-width list of actions.
 - Tabs scroll sideways and keep the open one in view, fields no longer zoom the page on an iPhone, and toasts no longer end up under the bar.
 - **Always live**: the app never shows stale data. With no network it says so, and after a panel update it offers **Aggiorna** (update) instead of reloading by itself.
+- **Push notifications**: in **Account › Notifiche push** everyone turns them on on their own devices, chooses for each which events to receive and tries it with one tap. They arrive with the panel closed too, only for what the account may see, one per project, and open the right page; the app's icon shows the number of unread notifications. On iPhone, from the home-screen app. See [On your phone and computer](notifications.md#on-your-phone-and-computer).
 
 ## New project
 
