@@ -15,11 +15,13 @@ import {
   verifySecondFactor,
 } from "@/lib/two-factor";
 import { getUser, recordLogin } from "@/lib/users";
+import { markGithubSignIn } from "@/lib/github-login";
 import { isNodeOnly } from "@/services/cluster/state";
 
 /**
- * The second step of signing in: the token the password step handed out, and
- * a code from the authenticator app or a recovery code.
+ * The second step of signing in: the token the password step handed out — or
+ * the GitHub one, `/api/auth/github/continue` — and a code from the
+ * authenticator app or a recovery code.
  *
  * Public like the password step, and limited three ways. The challenge allows
  * five wrong codes before the password has to be typed again; the account
@@ -105,17 +107,21 @@ export async function POST(request: NextRequest) {
   await createSession(user.id, meta);
   await recordLogin(user.id);
   if (remember === true) await rememberDevice(user.id, meta);
+  // A sign-in that began with GitHub rather than the password (lib/github-login.ts).
+  const viaGithub = challenge.via === "github";
+  if (viaGithub) await markGithubSignIn(user.id);
 
   const recovery = result.method === "recovery";
+  const how = recovery
+    ? `con un codice di recupero, ne restano ${result.recoveryCodesLeft}`
+    : `con la verifica in due passaggi${remember === true ? ", dispositivo ricordato" : ""}`;
   await audit({
     userId: user.id,
     category: "security",
     action: "auth.login",
     scope: "user",
     scopeId: user.id,
-    detail: recovery
-      ? `con un codice di recupero, ne restano ${result.recoveryCodesLeft}`
-      : `con la verifica in due passaggi${remember === true ? ", dispositivo ricordato" : ""}`,
+    detail: viaGithub ? `con GitHub e ${how.replace(/^con /, "")}` : how,
     request,
   });
   return NextResponse.json({

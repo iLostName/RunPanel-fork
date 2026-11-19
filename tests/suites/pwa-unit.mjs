@@ -44,12 +44,31 @@ function networkResponse(body, status = 200) {
   return response;
 }
 
+/** A window of the panel as the worker sees it, recording what is done to it. */
+function fakeWindow(path, { focused = false, visibilityState = "hidden" } = {}) {
+  const win = {
+    url: new URL(path, ORIGIN).href,
+    focused,
+    visibilityState,
+    focusedByWorker: false,
+    messages: [],
+    focus: async () => {
+      win.focusedByWorker = true;
+      return win;
+    },
+    postMessage: (message) => void win.messages.push(message),
+  };
+  return win;
+}
+
 /** The worker in a sandbox with fake caches and a fake network, and a way to send it events. */
 function bootWorker(source) {
   const listeners = {};
   const stores = new Map();
-  const network = { calls: [], offline: false, status: 200 };
+  const network = { calls: [], requests: [], offline: false, status: 200 };
   const flags = { skipped: false, claimed: false, preloadEnabled: false };
+  // What the notification APIs were asked to do.
+  const notes = { shown: [], windows: [], opened: [], badge: null, subscribed: [] };
 
   const cacheFor = (name) => {
     if (!stores.has(name)) stores.set(name, new Map());
@@ -68,8 +87,31 @@ function bootWorker(source) {
   const sandbox = {
     self: {
       location: new URL(`${ORIGIN}/sw.js`),
-      registration: { navigationPreload: { enable: async () => void (flags.preloadEnabled = true) } },
-      clients: { claim: async () => void (flags.claimed = true) },
+      registration: {
+        navigationPreload: { enable: async () => void (flags.preloadEnabled = true) },
+        showNotification: async (title, options) => void notes.shown.push({ title, options }),
+        getNotifications: async ({ tag } = {}) =>
+          notes.shown.filter((note) => !tag || note.options.tag === tag).map((note) => ({ data: note.options.data })),
+        pushManager: {
+          subscribe: async (options) => {
+            notes.subscribed.push(options);
+            return {
+              endpoint: "https://fcm.googleapis.com/fcm/send/renewed",
+              options: { applicationServerKey: new Uint8Array([4, 1, 2]).buffer },
+              toJSON: () => ({ endpoint: "https://fcm.googleapis.com/fcm/send/renewed", keys: { p256dh: "B", auth: "A" } }),
+            };
+          },
+        },
+      },
+      clients: {
+        claim: async () => void (flags.claimed = true),
+        matchAll: async () => notes.windows,
+        openWindow: async (url) => void notes.opened.push(url),
+      },
+      navigator: {
+        setAppBadge: async (count) => void (notes.badge = count),
+        clearAppBadge: async () => void (notes.badge = 0),
+      },
       skipWaiting: () => void (flags.skipped = true),
       addEventListener: (type, fn) => void (listeners[type] = fn),
     },
@@ -78,16 +120,21 @@ function bootWorker(source) {
       keys: async () => [...stores.keys()],
       delete: async (name) => stores.delete(name),
     },
-    fetch: async (request) => {
+    fetch: async (request, init) => {
       const url = typeof request === "string" ? request : request.url;
       network.calls.push(url);
+      network.requests.push({ url, init });
       if (network.offline) throw new TypeError("Failed to fetch");
+      if (url === "/api/notifications/read") return Response.json({ ok: true, unread: 0 });
       return networkResponse(`network ${url}`, network.status);
     },
     Response,
     URL,
     Promise,
     JSON,
+    Uint8Array,
+    String,
+    btoa,
     console,
   };
   vm.createContext(sandbox);
@@ -111,7 +158,19 @@ function bootWorker(source) {
     return { url: new URL(path, origin).href, method, mode };
   }
 
-  return { dispatch, request, stores, network, flags, listeners };
+  return { dispatch, request, stores, network, flags, listeners, notes };
+}
+
+/** A push as the browser hands it to the worker. */
+function pushEvent(payload) {
+  return {
+    data:
+      payload === undefined
+        ? null
+        : {
+            json: () => (typeof payload === "string" ? JSON.parse(payload) : payload),
+          },
+  };
 }
 
 export async function run({ repoRoot }) {
@@ -125,7 +184,7 @@ export async function run({ repoRoot }) {
   // --- the worker's text ---------------------------------------------------------
   const source = sw.serviceWorkerSource("build-42");
   r.check("the build is stamped into the worker", source.includes('"build-42"'));
-  r.check("no placeholder is left behind", !/__[A-Z]+__/.test(source));
+  r.check("no placeholder is left behind", !/__[A-Z_]+__/.test(source));
   r.check("a new build is a different worker", sw.serviceWorkerSource("build-43") !== source);
   r.check("it is valid JavaScript", (() => {
     try {
@@ -205,6 +264,95 @@ export async function run({ repoRoot }) {
     cachedPaths.every((path) => path.startsWith("/_next/static/") || path.startsWith("/icons/") || path === "/icon.svg"),
     cachedPaths.join(", ")
   );
+
+  // --- notifications on the device ----------------------------------------------------------------
+  const { PUSH_ICON, PUSH_BADGE } = await loadTs(repoRoot, "lib", "push-rules.ts");
+  const pushed = bootWorker(source);
+  await pushed.dispatch(
+    "push",
+    pushEvent({
+      v: 1,
+      title: "Deploy fallito — api",
+      body: "Deploy automatico da GitHub. Il motivo e il log sono nella pagina del progetto.",
+      url: "/projects/p1",
+      tag: "project:p1",
+      level: "danger",
+      unread: 3,
+      ids: ["n1"],
+      at: 1_700_000_000_000,
+      icon: PUSH_ICON,
+      badge: PUSH_BADGE,
+    })
+  );
+  let note = pushed.notes.shown[0];
+  r.check("a push is shown, with its title and body", note?.title === "Deploy fallito — api" && note?.options.body.startsWith("Deploy automatico"), JSON.stringify(note));
+  r.check("tagged by what it is about, so a newer one replaces it", note?.options.tag === "project:p1");
+  r.check("with the panel's icon and status-bar badge", note?.options.icon === PUSH_ICON && note?.options.badge === PUSH_BADGE);
+  r.check("it remembers the page to open and the notification to mark read", note?.options.data.url === "/projects/p1" && note?.options.data.ids.join() === "n1");
+  r.check("and puts the unread count on the app's icon", pushed.notes.badge === 3, String(pushed.notes.badge));
+
+  await pushed.dispatch("push", pushEvent({ title: "L'app non risponde — api", body: "…", url: "/projects/p1", tag: "project:p1", ids: ["n2"], unread: 4 }));
+  note = pushed.notes.shown[1];
+  r.check("a second one about the same project, moments later, replaces it without sounding again", note?.options.renotify === false, JSON.stringify(note?.options));
+  r.check("and pressing it marks both read", note?.options.data.ids.join() === "n1,n2", JSON.stringify(note?.options.data));
+  await pushed.dispatch("push", pushEvent({ title: "Docker non risponde", tag: "event:docker.down", unread: 0 }));
+  r.check("one about something else does sound", pushed.notes.shown[2]?.options.renotify === true);
+  r.check("an unread count of zero clears the badge", pushed.notes.badge === 0);
+
+  await pushed.dispatch("push", pushEvent({ title: "x", url: "https://evil.example/", icon: "https://tracker.example/pixel.png", tag: "t" }));
+  note = pushed.notes.shown[3];
+  r.check("a notification never opens another site", note?.options.data.url === "/notifications", note?.options.data.url);
+  r.check("nor fetches a picture from one", note?.options.icon === PUSH_ICON, note?.options.icon);
+  await pushed.dispatch("push", pushEvent());
+  r.check("a push with nothing in it is still shown, as RunPanel", pushed.notes.shown[4]?.title === "RunPanel");
+  await pushed.dispatch("push", pushEvent("not json"));
+  r.check("and so is one that is not JSON", pushed.notes.shown.length === 6);
+
+  // Pressing it, with the panel already open in a window.
+  const statusPage = fakeWindow("/status/abc", { visibilityState: "visible" });
+  const panelWindow = fakeWindow("/home");
+  pushed.notes.windows.push(statusPage, panelWindow);
+  pushed.notes.badge = null;
+  let closed = false;
+  await pushed.dispatch("notificationclick", { notification: { data: { url: "/projects/p1", ids: ["n1", "n2"] }, close: () => void (closed = true) } });
+  r.check("pressing it closes it", closed);
+  r.check("and focuses the panel's window, not the public status page", panelWindow.focusedByWorker && !statusPage.focusedByWorker);
+  r.check(
+    "which is asked to show the page itself, with its router",
+    JSON.stringify(panelWindow.messages) === JSON.stringify([{ type: "runpanel:open", url: "/projects/p1" }]),
+    JSON.stringify(panelWindow.messages)
+  );
+  r.check("no second window is opened", pushed.notes.opened.length === 0);
+  const read = pushed.network.requests.find((entry) => entry.url === "/api/notifications/read");
+  r.check(
+    "what it stood for is marked read",
+    read?.init?.method === "POST" && JSON.parse(read.init.body).ids.join() === "n1,n2" && read.init.credentials === "same-origin",
+    JSON.stringify(read)
+  );
+  r.check("and the badge follows the answer", pushed.notes.badge === 0, String(pushed.notes.badge));
+
+  pushed.notes.windows.length = 0;
+  pushed.notes.windows.push(fakeWindow("/status/abc", { focused: true }));
+  await pushed.dispatch("notificationclick", { notification: { data: { url: "/backups" }, close: () => {} } });
+  r.check("with no window of the panel, it opens one on the page", pushed.notes.opened.join() === `${ORIGIN}/backups`, pushed.notes.opened.join());
+  await pushed.dispatch("notificationclick", { notification: { data: { url: "//evil.example" }, close: () => {} } });
+  r.check("and never on another site", pushed.notes.opened[1] === `${ORIGIN}/notifications`, pushed.notes.opened[1]);
+
+  // The push service replaced the subscription.
+  pushed.network.requests.length = 0;
+  await pushed.dispatch("pushsubscriptionchange", {
+    oldSubscription: { endpoint: "https://fcm.googleapis.com/fcm/send/old", options: { applicationServerKey: new Uint8Array([4, 1, 2]).buffer } },
+    newSubscription: null,
+  });
+  const renewed = pushed.network.requests.find((entry) => entry.url === "/api/account/push/devices");
+  const renewal = renewed ? JSON.parse(renewed.init.body) : null;
+  r.check("a replaced subscription subscribes again with the same key", pushed.notes.subscribed.length === 1 && pushed.notes.subscribed[0].userVisibleOnly === true);
+  r.check(
+    "and tells the panel, naming the endpoint it replaces so the device keeps its name",
+    renewal?.previousEndpoint === "https://fcm.googleapis.com/fcm/send/old" && renewal?.subscription?.endpoint === "https://fcm.googleapis.com/fcm/send/renewed",
+    JSON.stringify(renewal)
+  );
+  r.check("with the key it used, so a stale one is refused", renewal?.applicationServerKey === "BAEC", renewal?.applicationServerKey);
 
   // --- the manifest ------------------------------------------------------------------------------
   const manifest = buildManifest();

@@ -21,6 +21,12 @@ const PUBLIC = new Set([
   "auth/login/two-factor/route.ts",
   "auth/logout/route.ts",
   "auth/invite/route.ts",
+  // Signing in with GitHub. Leaving needs no session (linking checks its own,
+  // with the password); the return's credential is the state and this
+  // browser's cookie; finishing it, the cookie the return left.
+  "auth/github/start/route.ts",
+  "auth/github/callback/route.ts",
+  "auth/github/continue/route.ts",
   "webhooks/github/[projectId]/route.ts",
   // A fresh install joining the cluster: its one-time token is the credential.
   "cluster/join/route.ts",
@@ -36,6 +42,9 @@ const OWN_ORIGIN_CHECK = [
   "auth/two-factor/route.ts",
   "auth/logout/route.ts",
   "auth/invite/route.ts",
+  "auth/github/route.ts",
+  "auth/github/start/route.ts",
+  "auth/github/continue/route.ts",
   "upload/route.ts",
   "nodes/[nodeId]/[...path]/route.ts",
 ];

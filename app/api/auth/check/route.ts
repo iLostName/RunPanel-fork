@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession, isFirstRun } from "@/lib/auth";
+import { githubLoginAvailable } from "@/lib/github-login";
 import { clusterState, listMembers } from "@/services/cluster/state";
 import { setupTokenHint } from "@/lib/setup-hint";
 
@@ -19,6 +20,8 @@ export async function GET() {
     firstRun,
     emailRequired: session !== null && session.user.email === null,
     role: cluster?.role ?? null,
+    // Whether the sign-in page offers "Accedi con GitHub" (lib/github-login.ts).
+    github: !firstRun && cluster?.role !== "node" && (await githubLoginAvailable()),
     ...(managedBy ? { managedBy } : {}),
     // Where the setup token is, while there is one to find.
     ...(firstRun ? { setupHint: setupTokenHint() } : {}),

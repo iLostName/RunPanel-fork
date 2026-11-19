@@ -8,6 +8,7 @@ import { useExpertMode, useThemeMode } from "@/components/Providers";
 import { useMe } from "@/lib/hooks/useMe";
 import { useServerHref } from "@/lib/hooks/useNode";
 import { startInstall, useInstall } from "@/lib/pwa/install";
+import { forgetThisDevice } from "@/lib/pwa/push";
 import { cn } from "@/lib/utils";
 import type { ThemeMode } from "@/lib/theme-mode";
 
@@ -25,10 +26,17 @@ export function initialsOf(email: string | null): string {
   return letters.toUpperCase();
 }
 
-/** Signs out and goes to the login page; shared with the phone's "Altro" sheet. */
+/**
+ * Signs out and goes to the login page; shared with the phone's "Altro" sheet.
+ *
+ * This browser's notifications go first, while the session can still remove
+ * them: whoever signs in here next must not receive this account's. Given a
+ * few seconds at most, so a slow push service never holds up leaving.
+ */
 export function useLogout(): () => Promise<void> {
   const router = useRouter();
   return useCallback(async () => {
+    await Promise.race([forgetThisDevice().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 3_000))]);
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
   }, [router]);

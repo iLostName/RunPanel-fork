@@ -83,6 +83,8 @@ The panel installs on a phone and on a computer as an app: it opens from its own
 
 A long press on the icon (Android) or a right click (computer) offers the shortcuts **Progetti**, **Backup** and **Nuovo progetto**.
 
+**Notifications on the device.** In **Account › Notifiche push** every account turns them on for the phone or computer it opened the panel from: they arrive with the app closed too, only for what the account may see, and tapping one opens its page. The app's icon shows the number of unread notifications, the bell's own. On iPhone and iPad they reach only the app added to the home screen (iOS 16.4 or later), and they need HTTPS and the browser's permission: the section says what is missing. See [Notifications](notifications.md#on-your-phone-and-computer).
+
 The app always shows live data: pages and API calls come from the server every time, and only the panel's own files, which are renamed with every version, and the icons are kept, so that it opens quickly. With no network, or with the server not answering (for example while it restarts after an update), a page says so and reloads by itself as soon as the server is back. When the panel is updated, the open app shows **Nuova versione del pannello** (new version of the panel) with **Aggiorna**: it reloads only when you press it, so a half-filled form is never lost. Links to other sites open in the browser.
 
 ## Notifications

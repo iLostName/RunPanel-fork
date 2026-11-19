@@ -293,8 +293,12 @@ export async function forgiveCodeAttempts(userId: string): Promise<void> {
  * The password was right and a code is due: a token for the page to send back
  * with it. Kept apart from sessions on purpose — nothing that reads a session
  * can mistake one of these for being signed in.
+ *
+ * `via: "github"` when GitHub was the first step instead of the password
+ * (lib/github-login.ts): the same token then also carries a GitHub sign-in to
+ * its end, with or without a code, and the activity log says how it began.
  */
-export async function issueLoginChallenge(userId: string): Promise<string> {
+export async function issueLoginChallenge(userId: string, via: "github" | null = null): Promise<string> {
   const token = crypto.randomBytes(32).toString("base64url");
   const now = Date.now();
   const db = await getDb();
@@ -308,19 +312,29 @@ export async function issueLoginChallenge(userId: string): Promise<string> {
       attempts: 0,
       created_at: new Date(now).toISOString(),
       expires_at: new Date(now + CHALLENGE_TTL_MS).toISOString(),
+      via,
     })
     .execute();
   return token;
 }
 
 /** The challenge a token names, while it is live and has tries left; its account must still be allowed in. */
-export async function readLoginChallenge(token: unknown): Promise<{ id: string; userId: string } | null> {
+export async function readLoginChallenge(
+  token: unknown
+): Promise<{ id: string; userId: string; via: "github" | null } | null> {
   if (typeof token !== "string" || token.length < 20 || token.length > 128) return null;
   const db = await getDb();
   const row = await db
     .selectFrom("login_challenges")
     .innerJoin("users", "users.id", "login_challenges.user_id")
-    .select(["login_challenges.id", "login_challenges.user_id", "login_challenges.attempts", "login_challenges.expires_at", "users.disabled"])
+    .select([
+      "login_challenges.id",
+      "login_challenges.user_id",
+      "login_challenges.attempts",
+      "login_challenges.expires_at",
+      "login_challenges.via",
+      "users.disabled",
+    ])
     .where("login_challenges.token_hash", "=", hashToken(token))
     .executeTakeFirst();
   if (!row || row.disabled === 1) return null;
@@ -328,7 +342,7 @@ export async function readLoginChallenge(token: unknown): Promise<{ id: string; 
     await db.deleteFrom("login_challenges").where("id", "=", row.id).execute();
     return null;
   }
-  return { id: row.id, userId: row.user_id };
+  return { id: row.id, userId: row.user_id, via: row.via === "github" ? "github" : null };
 }
 
 /** One more wrong code; the challenge is dropped when it has none left. */

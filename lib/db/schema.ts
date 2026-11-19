@@ -635,6 +635,33 @@ export interface NotificationReadMarksTable {
   read_before: string;
 }
 
+/** A browser or an installed app that receives its account's notifications — see migration 049. */
+export interface PushDevicesTable {
+  id: string;
+  user_id: string;
+  name: string;
+  /** SHA-256 of the endpoint, hex. Unique. */
+  endpoint_hash: string;
+  /** Encrypted JSON `{ endpoint, p256dh, auth }` (purpose `push`). */
+  subscription: string;
+  /** The panel's VAPID public key the browser subscribed with. */
+  vapid_key: string;
+  push_host: string;
+  origin: string | null;
+  user_agent: string | null;
+  /** JSON map of event key → on/off, as a channel's. */
+  events: string;
+  /** `all` | `problems` */
+  filter: string;
+  /** 0 | 1 */
+  enabled: number;
+  last_ok_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Two-step sign-in of one account, on this panel only — see migration 035. */
 export interface UserTwoFactorTable {
   user_id: string;
@@ -669,13 +696,45 @@ export interface TrustedDevicesTable {
   expires_at: string;
 }
 
-/** A sign-in whose password was right, waiting for the code. */
+/** A sign-in whose first step was right — the password, or GitHub — waiting for the code. */
 export interface LoginChallengesTable {
   id: string;
   user_id: string;
   /** SHA-256 of the token the sign-in page holds for the second step. */
   token_hash: string;
   attempts: number;
+  created_at: string;
+  expires_at: string;
+  /** `github` when the first step was GitHub; null for the password (migration 050). */
+  via: string | null;
+}
+
+/** The GitHub account a user may sign in with, on this panel only — see migration 050. */
+export interface UserGithubTable {
+  user_id: string;
+  /** GitHub's numeric user id, as decimal text: the only thing a sign-in is matched on. */
+  github_id: string;
+  /** The login as last seen. For showing only: GitHub lets people rename. */
+  github_login: string;
+  linked_at: string;
+  last_used_at: string | null;
+}
+
+/** A sign-in with GitHub between leaving for GitHub and coming back (migration 050). */
+export interface GithubLoginStatesTable {
+  id: string;
+  /** SHA-256 of the `state` sent to GitHub. */
+  state_hash: string;
+  /** SHA-256 of the value in the browser's httpOnly cookie. */
+  binding_hash: string;
+  /** `login` | `link` | `invite` */
+  intent: string;
+  /** The signed-in user a link is for. */
+  user_id: string | null;
+  /** The PKCE verifier and an invitation's token, sealed with the panel key. */
+  sealed: string;
+  redirect_uri: string;
+  next_path: string | null;
   created_at: string;
   expires_at: string;
 }
@@ -1011,6 +1070,7 @@ export interface Database {
   notifications: NotificationsTable;
   notification_reads: NotificationReadsTable;
   notification_read_marks: NotificationReadMarksTable;
+  push_devices: PushDevicesTable;
   users: UsersTable;
   user_permissions: UserPermissionsTable;
   user_grants: UserGrantsTable;
@@ -1019,6 +1079,8 @@ export interface Database {
   user_recovery_codes: UserRecoveryCodesTable;
   trusted_devices: TrustedDevicesTable;
   login_challenges: LoginChallengesTable;
+  user_github: UserGithubTable;
+  github_login_states: GithubLoginStatesTable;
   audit_log: AuditLogTable;
   rate_limits: RateLimitsTable;
   cluster_members: ClusterMembersTable;

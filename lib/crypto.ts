@@ -63,9 +63,9 @@ export function decrypt(encoded: string, purpose?: string): string {
  * many rows to make a decision, rather than serving one value to a user, want
  * to carry on rather than fail the whole pass.
  */
-export function tryDecrypt(encoded: string): string | null {
+export function tryDecrypt(encoded: string, purpose?: string): string | null {
   try {
-    return decrypt(encoded);
+    return decrypt(encoded, purpose);
   } catch {
     return null;
   }

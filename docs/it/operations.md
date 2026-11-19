@@ -83,6 +83,8 @@ Il pannello si installa sul telefono e sul computer come un'app: si apre dalla s
 
 Tenendo premuta l'icona (su Android) o con il tasto destro (sul computer) ci sono le scorciatoie **Progetti**, **Backup** e **Nuovo progetto**.
 
+**Le notifiche sul dispositivo.** In **Account › Notifiche push** ogni account le attiva sul telefono o sul computer da cui ha aperto il pannello: arrivano anche ad app chiusa, solo per quello che l'account può vedere, e toccandone una si apre la sua pagina. Sull'icona dell'app compare il numero di notifiche da leggere, lo stesso della campanella. Su iPhone e iPad arrivano solo all'app aggiunta alla schermata Home (iOS 16.4 o successivo), e servono HTTPS e il permesso del browser: la sezione spiega cosa manca. Vedi [Notifiche](notifications.md#sul-telefono-e-sul-computer).
+
 L'app mostra sempre dati dal vivo: pagine e API arrivano ogni volta dal server, e restano in memoria solo i file del pannello, che cambiano nome a ogni versione, e le icone, perché si apra in fretta. Senza rete, o con il server che non risponde (per esempio mentre si riavvia dopo un aggiornamento), compare una pagina che lo dice e che si ricarica da sola appena il server torna. Quando il pannello viene aggiornato, l'app aperta mostra **Nuova versione del pannello** con **Aggiorna**: ricarica solo quando lo premi, così un modulo compilato a metà non si perde. I link ad altri siti si aprono nel browser.
 
 ## Notifiche

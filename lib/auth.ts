@@ -245,6 +245,21 @@ export function isClusterSession(sessionId: string | undefined): boolean {
   return sessionId !== undefined && sessionId.startsWith("cluster:");
 }
 
+/**
+ * Whether a browser session was opened in the last `ms` — that is, whoever
+ * holds it has just signed in, with every step the account asks for.
+ *
+ * The stand-in for "type your current password" where there is none: an
+ * account that signs in only with GitHub choosing its first password. A
+ * session left open on a shared machine is old by then. A token or a cluster
+ * call has no row here, so it is never fresh.
+ */
+export async function isFreshSession(sessionId: string, ms: number): Promise<boolean> {
+  const db = await getDb();
+  const row = await db.selectFrom("sessions").select("created_at").where("id", "=", sessionId).executeTakeFirst();
+  return row !== undefined && Date.now() - new Date(row.created_at).getTime() <= ms;
+}
+
 export async function destroySession(): Promise<void> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;

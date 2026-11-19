@@ -154,5 +154,28 @@ export async function run({ repoRoot }) {
   const repoMessage = repoUrlSchema.safeParse("http://github.com/a/b").error?.issues[0]?.message ?? "";
   r.check("a repository address that is not https is refused in Italian", repoMessage.startsWith("L'indirizzo del repository"), repoMessage);
 
+  // --- signing in with GitHub: the OAuth App and the start of a sign-in ----------
+  const { githubLoginSettingsSchema, githubLoginActionSchema, githubStartSchema } = await import(
+    pathToFileURL(join(repoRoot, "lib", "validation.ts")).href
+  );
+  const app = (body) => githubLoginSettingsSchema.safeParse(body);
+  r.check("a Client ID and a secret as GitHub issues them pass", app({ clientId: "Ov23liAbCdEf0123456", clientSecret: "0123456789abcdef0123456789abcdef01234567" }).success);
+  r.check("the pasted values are trimmed", app({ clientId: "  Ov23liAbCdEf0123456 " }).data?.clientId === "Ov23liAbCdEf0123456");
+  r.check("an empty secret keeps the stored one", app({ clientId: "Ov23liAbCdEf0123456", clientSecret: "" }).success);
+  r.check(
+    "a Client ID with a space, a URL or a line of the page is refused in Italian",
+    ["Client ID Ov23li", "https://github.com/settings/applications/1", "Ov23"].every((clientId) => app({ clientId }).error?.issues[0]?.message.startsWith("Il Client ID"))
+  );
+  r.check("a secret that is too short or has spaces is refused", !app({ clientId: "Ov23liAbCdEf0123456", clientSecret: "short" }).success && !app({ clientId: "Ov23liAbCdEf0123456", clientSecret: "0123456789 abcdef0123456789" }).success);
+  r.check("switching it on or off alone is a save", app({ enabled: false, force: true }).success && app({ enabled: true }).success);
+  r.check("an empty body is not", !app({}).success && !app({ force: true }).success);
+  r.check("an unknown field is refused", !app({ enabled: true, scope: "repo" }).success);
+  r.check("the actions are verify and clear", githubLoginActionSchema.safeParse({ action: "verify" }).success && githubLoginActionSchema.safeParse({ action: "clear", force: true }).success && !githubLoginActionSchema.safeParse({ action: "rotate" }).success);
+  const start = (body) => githubStartSchema.safeParse(body).success;
+  r.check("a sign-in starts with or without a next page", start({ intent: "login" }) && start({ intent: "login", next: "/projects" }));
+  r.check("a link needs the password", start({ intent: "link", password: "x" }) && !start({ intent: "link" }) && !start({ intent: "link", password: "" }));
+  r.check("an invitation needs its token", start({ intent: "invite", token: "A".repeat(43) }) && !start({ intent: "invite" }) && !start({ intent: "invite", token: "short" }));
+  r.check("nothing else starts, and nothing extra rides along", !start({ intent: "signup" }) && !start({ intent: "login", userId: "u1" }) && !start({ intent: "link", password: "x", userId: "u1" }));
+
   return r.result();
 }

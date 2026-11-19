@@ -118,6 +118,11 @@ export default function NotificationsPage() {
         description="Quello che è successo su questo server, tra ciò che puoi vedere. Restano qui 30 giorni."
         actions={
           <>
+            {/* This panel's Account, whatever server is selected: a browser subscribes to the address it is on. */}
+            <Link href="/account?open=push" className="text-muted hover:text-foreground inline-flex items-center gap-1.5 text-sm">
+              <Icon icon="solar:smartphone-2-linear" width={16} aria-hidden />
+              Su questo dispositivo
+            </Link>
             {canManage && (
               <Link
                 href={href("/settings?open=notifications")}

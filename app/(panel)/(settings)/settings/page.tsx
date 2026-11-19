@@ -24,6 +24,7 @@ import {
 import { useNode, useNodeApi } from "@/lib/hooks/useNode";
 import { PanelHttpsSection } from "./_components/PanelHttps";
 import { StatusPageSection } from "./_components/StatusPageSettings";
+import { GithubLoginSection } from "./_components/GithubLoginSettings";
 
 /**
  * What the panel does for everyone, as opposed to Account, which is yours.
@@ -64,7 +65,8 @@ export default function PanelSettingsPage() {
   const canRegistries = useCan("registries");
   // `?open=notifications` comes from the bell's "Dove ricevere gli avvisi",
   // `?open=status-page` from the uptime card and the page's own preview,
-  // `?open=https` from "Installa l'app" on a panel served over plain HTTP.
+  // `?open=https` from "Installa l'app" on a panel served over plain HTTP,
+  // `?open=github-login` from the owner's Account, while GitHub sign-in is not set up.
   const openSection = useSearchParams()?.get("open") ?? null;
 
   const [pollingInterval, setPollingInterval] = useState("5");
@@ -301,6 +303,9 @@ export default function PanelSettingsPage() {
 
         {/* The owner's: it decides what anyone on the internet reads about the projects. */}
         {me.isOwner && <StatusPageSection defaultExpanded={openSection === "status-page"} />}
+
+        {/* The owner's: who may sign in, and how. Below HTTPS, which it needs. */}
+        {me.isOwner && <GithubLoginSection defaultExpanded={openSection === "github-login"} />}
 
         {/* The owner's alone: the same server will carry password resets. */}
         {me.isOwner && (

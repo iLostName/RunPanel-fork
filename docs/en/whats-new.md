@@ -22,6 +22,7 @@ For people already using the panel: where things moved and what was added. Nothi
 - **Sheets from the bottom**: confirmations and forms open as sheets rising from the edge, with their buttons under the thumb, and close by dragging them down (not once something has been typed). The "⋯" menus become a full-width list of actions.
 - Tabs scroll sideways and keep the open one in view, fields no longer zoom the page on an iPhone, and toasts no longer end up under the bar.
 - **Always live**: the app never shows stale data. With no network it says so, and after a panel update it offers **Aggiorna** (update) instead of reloading by itself.
+- **Push notifications**: in **Account › Notifiche push** everyone turns them on on their own devices, chooses for each which events to receive and tries it with one tap. They arrive with the panel closed too, only for what the account may see, one per project, and open the right page; the app's icon shows the number of unread notifications. On iPhone, from the home-screen app. See [On your phone and computer](notifications.md#on-your-phone-and-computer).
 
 ## New project
 
@@ -80,6 +81,7 @@ Alerts by email, Telegram, Discord, Slack, ntfy or a signed webhook: each channe
 ## Account and security
 
 - **Two-step sign-in** with an authenticator app and recovery codes, "remember this device", sessions listed and closable.
+- **Sign in with GitHub**: the owner sets up a GitHub OAuth App once (**Impostazioni › Generale › Accesso con GitHub**, a step-by-step guide with the callback URL to copy and a **Verifica** button); each user then links their GitHub account from **Impostazioni › Account**, or accepts an invitation with GitHub. A GitHub account never creates a user, two-step verification is still asked for, and before it is turned off the panel names whoever signs in only with GitHub and would be locked out. See [Signing in with GitHub](users.md#signing-in-with-github).
 - **`scripts/reset-owner.mjs`** resets the owner's password (and, if needed, two-step sign-in) from the server's terminal. See [Users and permissions](users.md).
 - **Activity log** filterable by user, resource and action, and exportable as CSV.
 - **AI e API › API**: a reference of every API with `curl` examples.

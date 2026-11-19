@@ -51,6 +51,8 @@ import {
   cleanText,
   entryKey,
 } from "./status-page";
+import { NOTIFY_EVENTS, NOTIFY_FILTERS } from "./notify-events";
+import { PUSH_DEVICE_NAME_MAX, isPushAuthSecret, isPushPublicKey } from "./push-rules";
 
 
 
@@ -789,6 +791,60 @@ export const panelPublicUrlSchema = z
       });
     }
   });
+
+/**
+ * Signing in with GitHub (lib/github-login.ts): the owner's OAuth App, and the
+ * start of one sign-in.
+ *
+ * GitHub's shapes, loosely: a Client ID is 20 characters today (`Ov23li…`, or
+ * 20 hex digits on older apps), a client secret 40 hex digits. Checked against
+ * what gets pasted by mistake — a space, a URL, a whole line of GitHub's page —
+ * rather than to the character, so a change of format at GitHub does not lock
+ * the form.
+ */
+export const GITHUB_CLIENT_ID_RULE = "Il Client ID dell'app GitHub: lettere, cifre, punti e trattini, senza spazi";
+export const GITHUB_CLIENT_SECRET_RULE = "Il Client secret dell'app GitHub: almeno 20 tra lettere e cifre, senza spazi";
+
+export const githubClientIdSchema = z
+  .string()
+  .trim()
+  .min(8, GITHUB_CLIENT_ID_RULE)
+  .max(64, GITHUB_CLIENT_ID_RULE)
+  .regex(/^[A-Za-z0-9._-]+$/, GITHUB_CLIENT_ID_RULE);
+
+/** Empty keeps the stored one: the secret is write-only, like every other. */
+export const githubClientSecretSchema = z
+  .string()
+  .trim()
+  .max(128, GITHUB_CLIENT_SECRET_RULE)
+  .regex(/^(?:[A-Za-z0-9_-]{20,128})?$/, GITHUB_CLIENT_SECRET_RULE);
+
+export const githubLoginSettingsSchema = z
+  .object({
+    clientId: githubClientIdSchema.optional(),
+    clientSecret: githubClientSecretSchema.optional(),
+    enabled: z.boolean().optional(),
+    /** Turn it off even though some users have no password to fall back on. */
+    force: z.boolean().optional(),
+  })
+  .strict()
+  .refine((body) => body.clientId !== undefined || body.enabled !== undefined, "Niente da salvare");
+
+export const githubLoginActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("verify") }).strict(),
+  z.object({ action: z.literal("clear"), force: z.boolean().optional() }).strict(),
+]);
+
+/**
+ * `login` from the sign-in page; `link` from the account page, with the
+ * password again; `invite` from an invitation, with its token. `next` is
+ * checked by `safeNextPath` and dropped, not refused, when it is not a page.
+ */
+export const githubStartSchema = z.discriminatedUnion("intent", [
+  z.object({ intent: z.literal("login"), next: z.string().max(512).optional() }).strict(),
+  z.object({ intent: z.literal("link"), password: z.string().min(1).max(128) }).strict(),
+  z.object({ intent: z.literal("invite"), token: z.string().min(20).max(128) }).strict(),
+]);
 
 /**
  * A service name is concatenated into a Docker container name and a Docker
@@ -1874,3 +1930,68 @@ export const statusPageSchema = z
   .strict();
 
 export type StatusPageInput = z.infer<typeof statusPageSchema>;
+
+// --- Notifications on a person's own devices (Web Push) ----------------------------
+
+const pushDeviceNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Dai un nome al dispositivo")
+  .max(PUSH_DEVICE_NAME_MAX, `Il nome è troppo lungo: al massimo ${PUSH_DEVICE_NAME_MAX} caratteri`);
+
+const pushEventsSchema = z
+  .array(z.enum(NOTIFY_EVENTS, { message: "Uno degli eventi non esiste più: ricarica la pagina" }))
+  .max(NOTIFY_EVENTS.length * 2);
+
+const pushFilterSchema = z.enum(NOTIFY_FILTERS, { message: "Scegli «Tutto» o «Solo quando qualcosa va storto»" });
+
+const pushEndpointSchema = z
+  .string()
+  .trim()
+  .min(1, "Manca l'indirizzo del servizio push")
+  .max(2048, "L'indirizzo del servizio push è troppo lungo");
+
+/**
+ * A browser turning notifications on: what `PushSubscription.toJSON()` gives,
+ * the name the list will show, and what it should receive. Which push
+ * services are accepted is decided by the route (`pushEndpointProblem` in
+ * lib/push-rules.ts), since the operator can add one in the environment.
+ *
+ * `previousEndpoint` is the subscription this browser had before, when it
+ * subscribed again: its row is kept. `applicationServerKey` is the panel key
+ * the browser used, so a page loaded before the panel's keys changed is told
+ * to subscribe again instead of storing a subscription nothing can reach.
+ */
+export const pushSubscribeSchema = z
+  .object({
+    subscription: z.object({
+      endpoint: pushEndpointSchema,
+      expirationTime: z.number().nullable().optional(),
+      keys: z.object({
+        p256dh: z.string().max(200).refine(isPushPublicKey, "La chiave che il browser ha dato per le notifiche non è valida"),
+        auth: z.string().max(100).refine(isPushAuthSecret, "Il segreto che il browser ha dato per le notifiche non è valido"),
+      }),
+    }),
+    name: pushDeviceNameSchema,
+    events: pushEventsSchema.optional(),
+    filter: pushFilterSchema.optional(),
+    previousEndpoint: pushEndpointSchema.nullable().optional(),
+    applicationServerKey: z.string().max(200).optional(),
+  })
+  .strict();
+
+export type PushSubscribeInput = z.infer<typeof pushSubscribeSchema>;
+
+/** Renaming a device, choosing what it receives, switching it off: at least one of them. */
+export const pushDeviceUpdateSchema = z
+  .object({
+    name: pushDeviceNameSchema.optional(),
+    events: pushEventsSchema.optional(),
+    filter: pushFilterSchema.optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict()
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), "Non c'è niente da modificare");
+
+/** A browser asking which device it is, by the endpoint only it and the panel know. */
+export const pushSyncSchema = z.object({ endpoint: pushEndpointSchema }).strict();

@@ -4,12 +4,13 @@
 
 # Notifications
 
-The panel says what happened in two places:
+The panel says what happened in three places:
 
 - **the bell** in the top bar, and the **Notifiche** page it opens: every account has one, and sees in it only what it may see;
+- **push notifications**, on a phone or a computer, even with the panel closed: every account turns them on for itself, on its own devices, and receives only what it may see;
 - **channels**, which send the same events outside the panel: email, Telegram, Discord, Slack, ntfy, or a signed webhook to a service of yours.
 
-Everything below concerns the server selected in the bar: with [several servers](multi-server.md) each one keeps its own notifications and its own channels.
+The bell and the channels concern the server selected in the bar: with [several servers](multi-server.md) each one keeps its own notifications and its own channels. Push notifications concern the panel you have open (see below).
 
 ## The bell
 
@@ -22,6 +23,26 @@ Every event is filed here, whatever the channels are set to. Who sees it:
 Read and unread are per account. Following a notification marks it read; **Segna tutte come lette** clears the count on every tab where the account is open. The bell updates live (Server-Sent Events, one connection per tab, given up while the tab is in the background); if a proxy buffers the stream, it falls back to checking every minute.
 
 The **Notifiche** page filters by unread, topic and severity. Notifications are kept 30 days, and never more than the latest 5000.
+
+## On your phone and computer
+
+In **Account › Notifiche push**, which **Su questo dispositivo** on the Notifiche page also opens, as does the link at the bottom of the bell for whoever does not manage the channels. Every account turns them on for itself, whatever its permissions, on each of its devices: in the browser or the installed app press **Attiva le notifiche**, answer **Allow** to the browser, and a test arrives at once. The device appears under **I tuoi dispositivi** with a name you can change ("Marco's iPhone").
+
+- **What arrives.** For each device you choose the events and what to send, as for a channel, from **Modifica** in its menu. Only what that account may see arrives, by the bell's rules, checked when the event happens and again when the notification leaves.
+- **What it says.** A title and one plain sentence: "Deploy fallito — api", "Il motivo e il log sono nella pagina del progetto". Never an error, a log line, a commit message or a path, because a notification is read on a lock screen too: the details stay in the panel. Tapping it opens its page, in the panel's window if one is open, and marks it read.
+- **One per project.** A new notification about the same project or service takes the place of the old one, without sounding again if the old one is less than two minutes old. Notifications close together are joined as on the channels, and to a phone that was off the push service delivers, where it can, only the latest one per project.
+- **The number on the icon.** The installed app's icon shows how many notifications you have unread, the bell's own count: it follows the bell and every push, and goes away when everything is read. Chrome and Edge on a computer, Safari on a Mac and the home-screen app on iPhone and iPad show it; on Android the icon has the notification dot.
+- **Invia una prova** on every row; **Spegni** stops a device without removing it; **Rimuovi** removes it. **Esci** also removes the device you sign out from, so whoever signs in next in that browser does not get your notifications. A browser receives one account's notifications: if another account signs in there, the previous one's stop arriving there.
+
+What it needs, and the section says so when something is missing:
+
+- **HTTPS.** Browsers send notifications only to an address with the padlock (or `localhost`). On `http://<ip>:3000` the section explains why and leads to **Impostazioni › Generale › Metti il pannello su HTTPS**.
+- **On iPhone and iPad** they reach only the app added to the home screen, from iOS 16.4 on; never the browser. The section shows the three steps to add it, and they are turned on from the app.
+- **The permission.** Once denied, the browser does not ask again: the section says where to unblock it in that browser (the site settings, or on iPhone Settings › Notifications › RunPanel).
+
+How it works: the panel uses Web Push (VAPID signatures and `aes128gcm` encryption, RFC 8292 and 8291) with no service besides the browser's own — Google for Chrome and Android, Mozilla for Firefox, Apple for Safari, Microsoft for Edge on Windows — which forwards the encrypted message without being able to read it. The panel's keys are made the first time and stored encrypted with its key, like every device's subscription. A device its push service no longer knows (a 404 or 410 answer) leaves the list. If the panel's key changes (a backup restored elsewhere), devices show as **Da riattivare** and renew themselves the first time the panel is opened on them. The panel sends only to known push services; a browser with a service of its own is added with `RUNPANEL_PUSH_SERVICES` (see [Configuration](configuration.md)).
+
+**With several servers**, each panel pushes its own events to the devices that turned notifications on at its address, and the number on the icon counts its bell. For a linked server with the Panel role, turn them on there too, opening it at its own address. A node has no interface: its events stay in its bell (with that server selected) and in its channels, so to get them on a phone add a channel, ntfy for instance, with that server selected.
 
 ## Channels
 
@@ -141,12 +162,12 @@ The check runs every five minutes, the first 90 seconds after start, on the data
 ## So that it does not become noise
 
 - **Once per quarter of an hour** for the same event about the same subject (a project, a disk, a policy): a project that keeps falling does not hide another, and the next message says how many times it happened in between. Deploys, backups and scheduled restarts are never held back, nor are the two app-health alerts, which already wait before warning and before giving the all-clear. The bell counts the repeats on the notification that announced them.
-- **Bursts are joined** per channel: the first message goes out at once, what follows within a minute (two for email) arrives as one message listing them. When Docker stops, twenty services stopping with it are one message, not twenty.
+- **Bursts are joined** per channel and per device: the first message goes out at once, what follows within a minute (two for email) arrives as one message listing them. When Docker stops, twenty services stopping with it are one message, not twenty.
 - **One retry** after a temporary failure (timeout, 5xx, 429 honouring its wait).
 
 ## When a notification does not go out
 
-Nothing is blocked: a deploy does not fail because a channel does not answer. The reason is on the channel's row and in the panel's log, explained where the service is cryptic: with Telegram, `chat not found` usually means you have not written to the bot yet; with email, see the mail server above.
+Nothing is blocked: a deploy does not fail because a channel does not answer. The reason is on the channel's row and in the panel's log, explained where the service is cryptic: with Telegram, `chat not found` usually means you have not written to the bot yet; with email, see the mail server above. For a push notification, the device's row in Account says it; if nothing arrives despite "Ultimo invio riuscito", check that the browser's notifications are not turned off in the system settings or by "Do not disturb".
 
 ## Upgrading from Telegram-only
 
