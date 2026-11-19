@@ -986,10 +986,10 @@ async function runDeploy(
               .where("id", "=", project.id)
               .execute();
           });
-          appendLog(`\n=== ${label} successful ===`);
           logFile.flush();
           projectEvents.emit(project.id, { type: "deploy:status", deploymentId, status: "running" });
         },
+        label,
       });
 
       // Only now, as on the ordinary path: proved good, and ours.

@@ -163,6 +163,8 @@ export interface ReleaseDeps {
   switchUpstream(port: number, commit: () => Promise<void>): Promise<UpstreamSwitch>;
   /** Record the deploy as done and `port` as the live one, in one go. */
   commit(port: number): Promise<void>;
+  /** The deploy counts as done: said in its log before the drain. */
+  committed?(): void;
   /** The drain: how long the old container keeps answering what it already has. */
   drain(): Promise<void>;
   /** The new container answers to the live name: the log viewers follow it from here. */
@@ -239,6 +241,7 @@ export async function releaseWithoutDowntime(deps: ReleaseDeps, input: ReleaseIn
     }
     deps.log(moved.message);
     phase = "committed";
+    deps.committed?.();
   } catch (err) {
     if (failureOutcome(phase, stuck).removeCandidate) {
       try {

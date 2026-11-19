@@ -162,6 +162,8 @@ export interface ZeroDowntimeRelease {
   contract: DeployContract;
   /** The app's own port, inside its container. */
   port: number;
+  /** "Deploy" or "Re-Build", for the line that says it worked. */
+  label: string;
   signal?: AbortSignal;
   log(line: string): void;
   checkpoint(): void;
@@ -238,6 +240,9 @@ export async function runZeroDowntimeRelease(ctx: ZeroDowntimeRelease): Promise<
         beforeSwitch: ctx.beforeSwitch,
         switchUpstream: (port, commit) => switchProjectUpstream(project.id, port, commit),
         commit: ctx.commit,
+        // The line the deploy's progress reads as "done" — before the drain,
+        // which is housekeeping once the new version is the live one.
+        committed: () => ctx.log(`\n=== ${ctx.label} successful ===`),
         drain: async () => {
           const seconds = contract.zeroDowntime.drainSec;
           ctx.log("\n--- Drain ---");

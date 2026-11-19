@@ -233,6 +233,7 @@ export async function run({ repoRoot }) {
         return { ok: true, message: "nginx ora manda le richieste alla nuova versione" };
       },
       commit: async (port) => events.push(`commit:${port}`),
+      committed: () => events.push("committed"),
       drain: async () => {
         liveAt("drain");
         events.push(`drain:${sim.container(OLD)?.state ?? "-"}`);
@@ -258,6 +259,7 @@ export async function run({ repoRoot }) {
     r.check("the live one still serves, untouched, when nginx moves", run.events.includes("switch:D1/running"));
     r.check("the post-deploy commands run once the new one answers, before nginx moves", order("health:21001", "post-deploy") && order("post-deploy", "switch:21001"));
     r.check("the deploy is committed by the switch", order("switch:21001", "commit:21001"));
+    r.check("and said to be done before the drain, which is only housekeeping", order("commit:21001", "committed") && order("committed", "drain:running"));
     r.check("nothing touched the old container before the commit", run.touchedLive.length === 0 || run.events.indexOf("commit:21001") < run.events.findIndex((e) => e.startsWith(`docker rename ${LIVE}`)));
     r.check("the new one takes the live name before the drain", order("commit:21001", "promoted") && order("promoted", "drain:D2/running"));
     r.check("the old one drains while still running, under the old name", run.events.includes("drain:running"));
@@ -275,7 +277,10 @@ export async function run({ repoRoot }) {
     r.check("its logs are in the deploy log", run.lines.includes("Error: listen EADDRINUSE"));
     r.check("it is removed", !run.sim.container(NEXT));
     r.check("the old one is never touched", run.touchedLive.length === 0 && run.sim.container(LIVE)?.state === "running" && run.sim.container(LIVE).labels["runpanel.deployment"] === "D1");
-    r.check("nginx is never asked, nothing is committed", !run.events.some((e) => e.startsWith("switch:") || e.startsWith("commit:")));
+    r.check(
+      "nginx is never asked, nothing is committed",
+      !run.events.some((e) => e.startsWith("switch:") || e.startsWith("commit:") || e === "committed")
+    );
   }
 
   {
