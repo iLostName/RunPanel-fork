@@ -94,6 +94,13 @@ export interface Project {
   oneTimeCommands: OneTimeCommand[];
   /** The names nginx serves it on, minus any an apply left out. Optional for the same reason as `permission`. */
   hosts?: { hostname: string; url: string; locked: boolean }[];
+  /**
+   * Deployed without downtime: the loopback port its live container is
+   * published on, which nginx proxies to. Null for every other project.
+   */
+  live_port?: number | null;
+  /** What the settings need to say whether a deploy without downtime can work here. */
+  zeroDowntime?: { proxyReady: boolean };
   /** Who may reach the published port, and whether the gate enforcing it is up. */
   access: AccessValue;
   gate: GateValue;

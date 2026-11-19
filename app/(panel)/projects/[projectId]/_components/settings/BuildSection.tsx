@@ -19,6 +19,7 @@ import type { RegisterPendingSave } from "../pending-saves";
 import type { Project } from "../types";
 import type { DeployForm } from "./useDeployForm";
 import { HealthcheckPanel } from "./HealthcheckPanel";
+import { ZeroDowntimePanel } from "./ZeroDowntimePanel";
 
 interface Preset {
   id: string;
@@ -235,6 +236,9 @@ export function BuildSection({
       />
 
       <HealthcheckPanel form={form} releasesSupported={project.releases?.supported ?? false} />
+
+      {/* After the health check, which it depends on: it is what says when the new version can take over. */}
+      <ZeroDowntimePanel form={form} project={project} />
     </div>
   );
 }

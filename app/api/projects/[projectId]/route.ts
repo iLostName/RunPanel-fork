@@ -41,7 +41,7 @@ import { moveLogPath } from "@/services/project-repo";
 import { busyMessage, tryLock } from "@/services/project-lock";
 import { syncAutoDeploy } from "@/services/webhook-manage";
 import { processLogHub } from "@/services/process-logs";
-import { applyProxy, applyProxySoon, forgetCertificate } from "@/services/proxy";
+import { applyProxy, applyProxySoon, canApply, forgetCertificate, proxyProbe } from "@/services/proxy";
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
@@ -147,6 +147,10 @@ export async function GET(_request: NextRequest, { params }: Params) {
       url: `${host.status === "active" ? "https" : "http"}://${host.hostname}`,
       locked: host.auth_hash !== null,
     })),
+    // Whether nginx can take the switch of a deploy without downtime, for the
+    // settings to say before anyone turns it on. Docker only, the one runtime
+    // it is for, so no other project pays for the probe.
+    zeroDowntime: { proxyReady: project.runtime_type === "docker" ? canApply(await proxyProbe()) : false },
   });
 }
 

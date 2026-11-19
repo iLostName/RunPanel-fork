@@ -57,6 +57,14 @@ export function NetworkSection({
             <Input type="number" placeholder="3000" />
           </TextField>
           <PortHint runtimeType={runtimeType} />
+          {/* Deployed without downtime the port stays the app's own, inside its
+              container; on the server it is published elsewhere, on loopback. */}
+          {project.live_port ? (
+            <FieldHint>
+              Con il deploy senza interruzioni l&apos;app ascolta su questa porta dentro il suo container; sul server non è
+              aperta e la raggiungi dai suoi indirizzi.
+            </FieldHint>
+          ) : null}
         </div>
       </Panel>
 
