@@ -36,7 +36,12 @@ export function PageHeader({
           </Link>
         )}
         <div className="min-w-0">
-          <h1 className="text-foreground truncate text-2xl font-semibold tracking-tight">{title}</h1>
+          {/* Whole on a phone, on two lines if it must: an email or a long
+              project name cut to "marco.ferretti-collaboratore-e…" was the
+              one place the page said which one it is. */}
+          <h1 className="text-foreground truncate text-2xl font-semibold tracking-tight max-md:whitespace-normal max-md:[overflow-wrap:anywhere]">
+            {title}
+          </h1>
           {description && <p className="text-muted mt-1 text-sm">{description}</p>}
         </div>
       </div>

@@ -2,7 +2,9 @@
 
 import { Button, Popover, Tooltip } from "@heroui/react";
 import { Icon } from "@iconify/react";
+import { Pressable } from "react-aria-components";
 import { cn } from "@/lib/utils";
+import { TOUCH_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
 
 /**
  * How the panel explains something without it being on screen at all times.
@@ -90,7 +92,13 @@ export function Tip({
   );
 }
 
-/** The same for text that explains itself on hover: a truncated value, an abbreviation. */
+/**
+ * The same for text that explains itself on hover: a truncated value, an abbreviation.
+ *
+ * A touch screen has no hover, and React Aria does not open a tooltip on a tap,
+ * so on one the explanation opens as a popover when the text is pressed, and
+ * the dotted underline says there is one to open.
+ */
 export function TipText({
   content,
   children,
@@ -100,6 +108,25 @@ export function TipText({
   children: React.ReactNode;
   className?: string;
 }) {
+  const touch = useMediaQuery(TOUCH_QUERY);
+  if (touch) {
+    return (
+      <Popover>
+        <Pressable>
+          <span
+            role="button"
+            tabIndex={0}
+            className={cn("inline cursor-pointer underline decoration-dotted underline-offset-2", className)}
+          >
+            {children}
+          </span>
+        </Pressable>
+        <Popover.Content className="max-w-xs">
+          <Popover.Dialog className="text-muted text-xs leading-relaxed">{content}</Popover.Dialog>
+        </Popover.Content>
+      </Popover>
+    );
+  }
   return (
     <Tooltip delay={350} closeDelay={0}>
       <Tooltip.Trigger className={cn("inline cursor-default", className)}>{children}</Tooltip.Trigger>

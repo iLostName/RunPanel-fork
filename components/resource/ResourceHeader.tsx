@@ -131,7 +131,9 @@ export function ResourceHeader({
               </form>
             ) : (
               <>
-                <h1 className="text-foreground truncate text-2xl font-semibold tracking-tight">{name}</h1>
+                <h1 className="text-foreground truncate text-2xl font-semibold tracking-tight max-md:whitespace-normal max-md:[overflow-wrap:anywhere]">
+                  {name}
+                </h1>
                 {onRename && (
                   <button
                     type="button"
@@ -153,13 +155,28 @@ export function ResourceHeader({
       </div>
 
       {(actions || ordered.length > 0) && (
-        <div className="flex flex-wrap items-center gap-2">
+        /*
+          On a phone the actions are one row of equal tiles, the icon over a
+          short label, the way an app lays out the actions of a contact or a
+          place: as buttons they wrapped onto a second line, "Altro" alone
+          under three others. CSS on the children, so the callers' buttons
+          stay the buttons they are on a desktop. Four fit a 360px screen; a
+          caller with more moves the rarest into the menu there.
+        */
+        <div
+          className={cn(
+            "flex flex-wrap items-center gap-2",
+            "max-md:grid max-md:auto-cols-fr max-md:grid-flow-col",
+            "max-md:*:h-auto max-md:*:min-h-14 max-md:*:w-full max-md:*:min-w-0 max-md:*:flex-col max-md:*:justify-center max-md:*:gap-1",
+            "max-md:*:px-1 max-md:*:py-2 max-md:*:text-center max-md:*:text-xs max-md:*:leading-tight max-md:*:whitespace-normal"
+          )}
+        >
           {actions}
           {ordered.length > 0 && phone && (
             <>
               <Button variant="outline" size="sm" aria-label={menuLabel} onPress={() => setSheetOpen(true)}>
                 <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />
-                <span className="hidden sm:inline">Altro</span>
+                Altro
               </Button>
               <ActionSheet isOpen={sheetOpen} onOpenChange={setSheetOpen} title={`${menuLabel}: ${name}`} actions={ordered} />
             </>
@@ -168,7 +185,8 @@ export function ResourceHeader({
             <Dropdown>
               <Button variant="outline" size="sm" aria-label={menuLabel}>
                 <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />
-                <span className="hidden sm:inline">Altro</span>
+                {/* Named on a phone too, where it is a tile like the others. */}
+                Altro
               </Button>
               <Dropdown.Popover placement="bottom end">
                 <Dropdown.Menu

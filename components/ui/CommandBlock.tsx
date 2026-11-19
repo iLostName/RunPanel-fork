@@ -48,7 +48,10 @@ export function CommandBlock({
         <Icon icon={copied ? "solar:check-read-linear" : "solar:copy-linear"} width={15} aria-hidden />
         {copied ? "Copiati" : "Copia"}
       </Button>
-      <pre className="text-muted text-meta overflow-x-auto p-3 pr-24 leading-relaxed whitespace-pre">
+      {/* Wrapped on a phone: scrolled sideways inside a card that itself sits
+          on a page that scrolls the other way, a command was read a screen at
+          a time. The copy button takes it verbatim either way. */}
+      <pre className="text-muted text-meta overflow-x-auto p-3 pr-24 leading-relaxed whitespace-pre max-md:whitespace-pre-wrap max-md:[overflow-wrap:anywhere]">
         {text}
       </pre>
       <span className="sr-only" role="status">
