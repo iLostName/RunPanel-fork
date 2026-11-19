@@ -414,7 +414,10 @@ function CopyRow({
       <span className="bg-surface-secondary text-muted grid size-8 shrink-0 place-items-center rounded-lg">
         <Icon icon={copy.local ? "solar:server-linear" : "solar:cloud-storage-linear"} width={17} aria-hidden />
       </span>
-      <div className="min-w-0 flex-1">
+      {/* On a phone the retry goes under the text, which keeps the width:
+          beside the button a provider's error ran down the card a word a line,
+          and a long one ran out of it. */}
+      <div className="min-w-0 flex-1 max-md:basis-[calc(100%-2.75rem)]">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-foreground min-w-0 truncate text-sm font-medium">{copy.destinationName}</span>
           <StatusBadge status={COPY_STATUS[copy.status]} />
@@ -426,7 +429,9 @@ function CopyRow({
           )}
         </div>
         <p className="text-muted mt-0.5 text-xs">{copyLine(copy)}</p>
-        {copy.errorMessage && copy.status === "failed" && <p className="text-danger mt-0.5 text-xs">{copy.errorMessage}</p>}
+        {copy.errorMessage && copy.status === "failed" && (
+          <p className="text-danger mt-0.5 text-xs [overflow-wrap:anywhere]">{copy.errorMessage}</p>
+        )}
         {copy.ref && (
           <Technical>
             <p className="text-muted mt-0.5 truncate font-mono text-meta">{copy.ref}</p>
@@ -434,7 +439,7 @@ function CopyRow({
         )}
       </div>
       {canRetry && (
-        <Button size="sm" variant="secondary" onPress={onRetry} isPending={retrying}>
+        <Button size="sm" variant="secondary" className="max-md:ml-11" onPress={onRetry} isPending={retrying}>
           <Icon icon="solar:refresh-linear" width={15} aria-hidden />
           Riprova la copia
         </Button>

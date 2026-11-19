@@ -18,6 +18,7 @@ import { Technical } from "@/components/ui/Technical";
 import { useExpertMode } from "@/components/Providers";
 import { ServerBadge } from "@/components/cluster/ServerBits";
 import { useMe } from "@/lib/hooks/useMe";
+import { useIsPhone } from "@/lib/hooks/useMediaQuery";
 import { useMemberApi, useServerHref } from "@/lib/hooks/useNode";
 import { formatBytes } from "@/lib/format";
 import type { Located } from "@/lib/cluster-merge";
@@ -90,6 +91,7 @@ export function DestinationsPanel({
   const href = useServerHref();
   const router = useRouter();
   const me = useMe();
+  const phone = useIsPhone();
   const { expert } = useExpertMode();
   // The provider's own code and words: for whoever turned expert mode on.
   const technical = (text: string | null) => (expert && text ? text : undefined);
@@ -319,9 +321,11 @@ export function DestinationsPanel({
                 }
                 meta={usageLine(row)}
                 action={
+                  // In the ⋯ on a phone: beside it the name was cut to two words.
                   <Button
                     size="sm"
                     variant="secondary"
+                    className="max-md:hidden"
                     onPress={() => check(row)}
                     isPending={busy === `check:${row.id}`}
                   >
@@ -332,6 +336,17 @@ export function DestinationsPanel({
                   <RowMenu
                     label={`Altre azioni per ${row.name}`}
                     actions={[
+                      ...(phone
+                        ? [
+                            {
+                              id: "check",
+                              label: busy === `check:${row.id}` ? "Verifico…" : "Verifica",
+                              icon: "solar:shield-check-linear",
+                              disabled: busy === `check:${row.id}`,
+                              onAction: () => void check(row),
+                            },
+                          ]
+                        : []),
                       ...(me.isOwner
                         ? [
                             {

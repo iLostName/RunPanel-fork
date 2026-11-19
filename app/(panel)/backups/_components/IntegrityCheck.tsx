@@ -98,7 +98,9 @@ export function IntegrityCheck({
           verification?.status === "ok" ? "text-success" : verification?.status === "failed" ? "text-danger" : "text-muted"
         )}
       />
-      <div className="min-w-0 flex-1 text-sm">
+      {/* On a phone the button goes under the text, lined up with it: beside
+          it the explanation was a column of two words a line. */}
+      <div className="min-w-0 flex-1 text-sm max-md:basis-[calc(100%-1.875rem)]">
         <p className="text-foreground font-medium">
           {running
             ? "Verifica dell'integrità in corso…"
@@ -147,7 +149,7 @@ export function IntegrityCheck({
           )}
         </Technical>
       </div>
-      <Button size="sm" variant="secondary" onPress={start} isPending={starting} isDisabled={running}>
+      <Button size="sm" variant="secondary" className="max-md:ml-[1.875rem]" onPress={start} isPending={starting} isDisabled={running}>
         <Icon icon="solar:shield-check-linear" width={15} aria-hidden />
         Verifica integrità
       </Button>
