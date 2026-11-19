@@ -2,11 +2,12 @@ import { panelBaseUrl } from "@/lib/panel-url";
 import { channelWants } from "@/lib/notify-events";
 import { Cooldown } from "@/lib/notify-throttle";
 import { generateId } from "@/lib/utils";
-import { clusterState, getMember } from "@/services/cluster/state";
 import { describe, escapeHtml, withRepeats, type NotifyEvent, type NotifyMessage } from "./messages";
 import { hasReadyChannel, listChannels, type ChannelRecord } from "./channels";
 import { noteRepeat, recordNotification, resolveSubject, type Subject } from "./center";
 import { deliver, dispatch } from "./deliver";
+import { pushToDevices } from "./push";
+import { serverName } from "./server-name";
 import type { Delivery, SendResult } from "./transports";
 
 /**
@@ -26,7 +27,9 @@ import type { Delivery, SendResult } from "./transports";
  *     quarter of an hour, and the repeats are counted;
  *  2. the panel's own record, the notification centre behind the bell, which
  *     gets every event and decides per reader who may see it (`center.ts`);
- *  3. every channel that asked for this event at this level, through
+ *  3. the devices people turned notifications on in, each told only what its
+ *     account may see (`push.ts`);
+ *  4. every channel that asked for this event at this level, through
  *     `deliver.ts`, which joins bursts, retries once and writes down how it
  *     went.
  *
@@ -110,20 +113,6 @@ function rememberRow(key: string, id: string): void {
 }
 
 /**
- * In a cluster every server notifies on its own, so each message starts with
- * the name of the server that sent it. Null in solo mode.
- */
-async function serverName(): Promise<string | null> {
-  try {
-    const state = await clusterState();
-    if (!state) return null;
-    return (await getMember(state.selfId))?.name ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * A link back into the panel, when it knows its own address.
  *
  * Only when `panel_public_url` is set: everywhere else in the panel an absolute
@@ -182,6 +171,9 @@ export async function notify(event: NotifyEvent): Promise<void> {
     const subject = await resolveSubject(event);
     const id = await recordNotification(event.key, message, subject);
     if (id && key) rememberRow(key, id);
+
+    // Before the channels, which may be none: a device does not need one.
+    void pushToDevices(event, message, subject, id);
 
     const fields = event as unknown as { key: string } & Record<string, unknown>;
     const channels = (await listChannels()).filter(
