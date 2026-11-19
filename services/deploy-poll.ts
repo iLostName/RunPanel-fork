@@ -3,6 +3,7 @@ import type { ProjectsTable } from "@/lib/db/schema";
 import { githubRequest, githubToken, parseRepoSlug, type RepoSlug } from "@/lib/github";
 import { getSetting } from "@/lib/settings";
 import { DEFAULT_POLL_INTERVAL, POLL_INTERVAL_SETTING } from "@/lib/polling";
+import { parsePreviewSettings } from "@/lib/previews";
 import { enqueueDeploy } from "./deploy-queue";
 import { isPanelClosing } from "./project-lock";
 
@@ -118,13 +119,34 @@ function isDue(project: ProjectsTable, now: Date, intervalMs: number): boolean {
   return now.getTime() - last >= intervalMs - TICK_MS / 2;
 }
 
+/**
+ * Production projects on polling with previews on: their pull requests are
+ * asked for too, whether or not auto-deploy is, and pinned or not — a pin
+ * holds production, not its previews.
+ */
+async function previewProjects(): Promise<ProjectsTable[]> {
+  const db = await getDb();
+  const rows = await db
+    .selectFrom("projects")
+    .selectAll()
+    .where("source_type", "=", "github")
+    .where("deploy_trigger", "=", "poll")
+    .where("environment_of", "is", null)
+    .where("preview_settings", "is not", null)
+    .execute();
+  return rows.filter((row) => parsePreviewSettings(row.preview_settings).enabled);
+}
+
+/** When each project's pull requests were last asked for: in memory, like the ETags. */
+const previewsCheckedAt = new Map<string, number>();
+
 /** Exported so a test can drive a tick without waiting a minute for one. */
 export async function pollTick(now = new Date()): Promise<PollTickResult> {
   const result: PollTickResult = { considered: 0, checked: 0, deployed: 0, failed: 0 };
 
   try {
-    const projects = await pollableProjects();
-    if (projects.length === 0) return result;
+    const [projects, withPreviews] = await Promise.all([pollableProjects(), previewProjects()]);
+    if (projects.length === 0 && withPreviews.length === 0) return result;
 
     const token = await githubToken();
     if (!token) {
@@ -134,6 +156,18 @@ export async function pollTick(now = new Date()): Promise<PollTickResult> {
     }
 
     const intervalMs = (await pollIntervalSeconds()) * 1000;
+
+    if (withPreviews.length > 0 && !isPanelClosing()) {
+      // Loaded here: the previews module reaches the deploy queue and the
+      // webhook manager, which reaches this file.
+      const { pollPreviews } = await import("./previews");
+      for (const project of withPreviews) {
+        const last = previewsCheckedAt.get(project.id) ?? 0;
+        if (now.getTime() - last < intervalMs - TICK_MS / 2) continue;
+        previewsCheckedAt.set(project.id, now.getTime());
+        await pollPreviews(project, token).catch((err) => console.error(`[poll] Anteprime di ${project.slug}:`, err));
+      }
+    }
 
     for (const project of projects) {
       result.considered++;

@@ -188,16 +188,31 @@ export function mentionsReference(value: string): boolean {
 
 // --- precedence -------------------------------------------------------------
 
-/** Where an effective variable comes from. */
+/**
+ * Where an effective variable comes from.
+ *
+ * `inherited` is the own variable of the project an environment inherits
+ * from — production, or for a preview its staging — and `environment` says
+ * which (lib/environments.ts); `previews` is one of the variables production
+ * sets for all its previews (lib/previews.ts). A group reached that way carries `via`, the
+ * name of that project: the group is the same one, received through it.
+ */
 export type EnvSource =
   | { kind: "own" }
-  | { kind: "group"; id: string; name: string }
+  | { kind: "group"; id: string; name: string; via?: string }
+  | { kind: "inherited"; id: string; name: string; environment: "production" | "staging" | "previews" }
   | { kind: "database"; id: string; name: string }
   | { kind: "panel" };
 
 export interface GroupLayer {
   id: string;
   name: string;
+  vars: readonly EnvPair[];
+}
+
+/** A layer under the groups, inherited from another project: see `mergeLayers`. */
+export interface InheritedLayer {
+  source: EnvSource;
   vars: readonly EnvPair[];
 }
 
@@ -225,8 +240,17 @@ export interface EffectiveVar {
  * this (`applyInjected`), as they always have: an enabled link is an explicit
  * choice of a value for one name, and projects already rely on it replacing a
  * stale `DATABASE_URL` of their own.
+ *
+ * An environment also receives what it inherits, under everything it sets
+ * itself: `inherited` is that, lowest first — production's groups, then its
+ * own variables (and for a preview, staging's after them). Whatever the
+ * environment says wins over whatever it inherits.
  */
-export function mergeLayers(groups: readonly GroupLayer[], own: readonly EnvPair[]): EffectiveVar[] {
+export function mergeLayers(
+  groups: readonly GroupLayer[],
+  own: readonly EnvPair[],
+  inherited: readonly InheritedLayer[] = []
+): EffectiveVar[] {
   const byKey = new Map<string, EffectiveVar>();
   const define = (pair: EnvPair, source: EnvSource) => {
     const previous = byKey.get(pair.key);
@@ -240,6 +264,9 @@ export function mergeLayers(groups: readonly GroupLayer[], own: readonly EnvPair
       problem: null,
     });
   };
+  for (const layer of inherited) {
+    for (const pair of layer.vars) define(pair, layer.source);
+  }
   for (const group of groups) {
     for (const pair of group.vars) define(pair, { kind: "group", id: group.id, name: group.name });
   }
@@ -356,7 +383,9 @@ function resolveRaw(raw: string, where: { group: string; key: string } | null, s
 }
 
 function ownerOf(v: Pick<EffectiveVar, "key" | "source">): string {
-  return v.source.kind === "group" ? `La variabile ${v.key} del gruppo «${v.source.name}»` : `La variabile ${v.key}`;
+  if (v.source.kind === "group") return `La variabile ${v.key} del gruppo «${v.source.name}»`;
+  if (v.source.kind === "inherited") return `La variabile ${v.key} ereditata da «${v.source.name}»`;
+  return `La variabile ${v.key}`;
 }
 
 /** The sentence for a failure: what was read, through what, and why it stops there. */

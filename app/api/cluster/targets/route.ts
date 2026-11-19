@@ -48,7 +48,9 @@ export async function GET() {
   const db = await getDb();
   const [folders, projects, services, vf, vp, vs] = await Promise.all([
     db.selectFrom("folders").select(["id", "name"]).orderBy("name").execute(),
-    db.selectFrom("projects").select(["id", "name"]).orderBy("name").execute(),
+    // Not the environments: their production's grants decide (lib/principal.ts),
+    // so a grant on one would be a grant that does nothing.
+    db.selectFrom("projects").select(["id", "name"]).where("environment_of", "is", null).orderBy("name").execute(),
     db.selectFrom("services").select(["id", "name", "display_name", "project_id"]).orderBy("name").execute(),
     visibleFolderIds(denied.principal),
     visibleProjectIds(denied.principal),

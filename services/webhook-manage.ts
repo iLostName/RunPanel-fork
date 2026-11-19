@@ -11,6 +11,12 @@ import {
   type HookProblem,
 } from "./github-hooks";
 import { primePollBaseline } from "./deploy-poll";
+import { parsePreviewSettings } from "@/lib/previews";
+
+/** Previews of pull requests need the hook too, and its pull request events. */
+function previewsOn(project: ProjectsTable): boolean {
+  return !project.environment_of && parsePreviewSettings(project.preview_settings).enabled;
+}
 
 /**
  * Register, test and retire a project's webhook on GitHub.
@@ -82,6 +88,7 @@ export async function connectWebhook(
     secret: project.webhook_secret,
     origin: base.origin,
     knownHookId: project.github_hook_id,
+    events: previewsOn(project) ? ["push", "pull_request"] : ["push"],
   });
 
   if (!result.ok) return no(result.reason, result.message);
@@ -182,7 +189,9 @@ export async function syncAutoDeploy(
   // already says so under "Nessun token GitHub".
   if (!(await githubToken())) return null;
 
-  const enabled = Boolean(project.auto_deploy);
+  // The hook stays while previews are on, auto-deploy or not: a push with
+  // auto-deploy off is filed as ignored, a pull request makes its preview.
+  const enabled = Boolean(project.auto_deploy) || previewsOn(project);
   const polling = project.deploy_trigger === "poll";
 
   try {

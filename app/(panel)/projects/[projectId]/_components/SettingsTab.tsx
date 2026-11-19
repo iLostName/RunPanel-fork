@@ -7,6 +7,9 @@ import type { LogLine } from "@/components/ui/LogViewer";
 import { SelectField } from "@/components/ui/SelectField";
 import { StickySaveBar } from "@/components/ui/StickySaveBar";
 import { AccessPanel } from "@/components/users/AccessPanel";
+import { Hint } from "@/components/ui/Hint";
+import { LinkButton } from "@/components/ui/LinkButton";
+import { useServerHref } from "@/lib/hooks/useNode";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { cn } from "@/lib/utils";
 import { BackupSection } from "./BackupSection";
@@ -19,6 +22,7 @@ import { NetworkSection } from "./settings/NetworkSection";
 import { ResourcesSection } from "./settings/ResourcesSection";
 import { SourceSection } from "./settings/SourceSection";
 import { useDeployForm } from "./settings/useDeployForm";
+import { PreviewsSection } from "./settings/PreviewsSection";
 import type { Project, SettingsSectionId } from "./types";
 
 const SECTIONS: { id: SettingsSectionId; label: string; icon: string }[] = [
@@ -29,6 +33,7 @@ const SECTIONS: { id: SettingsSectionId; label: string; icon: string }[] = [
   { id: "network", label: "Rete", icon: "solar:routing-linear" },
   { id: "resources", label: "Risorse", icon: "solar:cpu-bolt-linear" },
   { id: "automations", label: "Automazioni", icon: "solar:calendar-linear" },
+  { id: "previews", label: "Anteprime", icon: "solar:eye-scan-linear" },
   { id: "backup", label: "Backup", icon: "solar:safe-square-linear" },
   { id: "advanced", label: "Avanzate", icon: "solar:tuning-square-linear" },
   { id: "permissions", label: "Permessi", icon: "solar:users-group-rounded-linear" },
@@ -38,7 +43,12 @@ const SECTIONS: { id: SettingsSectionId; label: string; icon: string }[] = [
 const SECTION_IDS = SECTIONS.map((s) => s.id);
 
 /** Which menu entry a section that saves on its own (see pending-saves.ts) belongs to. */
-const PENDING_SECTION: Record<string, SettingsSectionId> = { backup: "backup", "one-time": "build" };
+const PENDING_SECTION: Record<string, SettingsSectionId> = {
+  backup: "backup",
+  "one-time": "build",
+  previews: "previews",
+  "preview-env": "previews",
+};
 
 /**
  * Project settings: a side menu, one section at a time, one save bar.
@@ -68,6 +78,7 @@ export function SettingsTab({
   /** What a files move or a mount apply is saying, live. */
   operationLines: LogLine[];
 }) {
+  const href = useServerHref();
   const [section, setSection] = useUrlTab(SECTION_IDS, "general", "section");
   const [saving, setSaving] = useState(false);
   // Merged rather than replaced: the save answers with the row, and what only
@@ -128,6 +139,9 @@ export function SettingsTab({
   }
 
   const show = (id: SettingsSectionId) => ({ hidden: section !== id });
+  // Previews are production's, and follow a repository.
+  const hasPreviews = !project.environment_of && project.source_type === "github" && Boolean(project.source_url);
+  const sections = SECTIONS.filter((s) => s.id !== "previews" || hasPreviews);
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
@@ -137,12 +151,12 @@ export function SettingsTab({
           label="Sezione"
           value={section}
           onChange={(value) => setSection(value as SettingsSectionId)}
-          options={SECTIONS.map((s) => ({ value: s.id, label: `${s.label}${dirtyMenu.has(s.id) ? " •" : ""}` }))}
+          options={sections.map((s) => ({ value: s.id, label: `${s.label}${dirtyMenu.has(s.id) ? " •" : ""}` }))}
         />
       </div>
       <nav aria-label="Sezioni delle impostazioni" className="hidden lg:block">
         <ul className="sticky top-4 space-y-0.5">
-          {SECTIONS.map((s) => (
+          {sections.map((s) => (
             <li key={s.id}>
               <button
                 type="button"
@@ -185,6 +199,11 @@ export function SettingsTab({
         <div {...show("automations")}>
           <AutomationsSection project={project} onProjectChange={onProjectChange} />
         </div>
+        {hasPreviews && (
+          <div {...show("previews")}>
+            <PreviewsSection project={project} registerPending={registerPending} />
+          </div>
+        )}
         <div {...show("backup")}>
           <BackupSection
             project={project}
@@ -196,7 +215,22 @@ export function SettingsTab({
           <AdvancedSection form={form} project={project} onRefresh={onRefresh} operationLines={operationLines} />
         </div>
         <div {...show("permissions")}>
-          <AccessPanel kind="project" id={project.id} />
+          {/* An environment's grants are production's: lib/principal.ts reads them, never its own. */}
+          {project.environment_of ? (
+            <Hint icon="solar:users-group-rounded-linear" title="Permessi del progetto di produzione">
+              <p>Questo ambiente segue i permessi del progetto di produzione: chi può gestire quel progetto gestisce anche questo.</p>
+              <LinkButton
+                href={href(`/projects/${project.environment_of}?tab=settings&section=permissions`)}
+                variant="secondary"
+                size="sm"
+                className="mt-2"
+              >
+                Apri i permessi di produzione
+              </LinkButton>
+            </Hint>
+          ) : (
+            <AccessPanel kind="project" id={project.id} />
+          )}
         </div>
         <div {...show("danger")}>
           <DangerSection project={project} />

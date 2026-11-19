@@ -167,6 +167,11 @@ async function announce(project: Project, deploymentId: string): Promise<void> {
     if (!row || (row.status !== "running" && row.status !== "failed")) return;
 
     const ok = row.status === "running";
+    // A preview's commit status follows its deploy, whatever the notification
+    // settings say. Loaded when needed: the previews module reaches the queue,
+    // which reaches this file.
+    void import("./previews").then((m) => m.previewDeployFinished(project, ok, row.commit_sha)).catch(() => undefined);
+
     const trigger = (row.trigger_type ?? "manual") as DeployTrigger;
     if (!shouldAnnounceDeploy(trigger, ok)) return;
 

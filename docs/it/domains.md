@@ -137,6 +137,10 @@ Un progetto che non ha ancora indirizzi ne può avere uno subito, da **Impostazi
 
 Per qualsiasi cosa vera, dai al progetto un dominio suo. Un indirizzo di prova si rimuove come gli altri; se l'IP del server cambia continua a puntare al vecchio, quindi rimuovilo e creane uno nuovo. Il dominio del server (`203-0-113-7.sslip.io`) compare nella pagina **Domini**, senza record da creare. Un nome sotto sslip.io che aveva già il suo certificato prima di questa versione lo tiene e continua a rinnovarlo — un rinnovo non conta su quel limite — ma non se ne chiedono di nuovi.
 
+## Indirizzi dello staging e delle anteprime
+
+Allo staging viene proposto un indirizzo accanto a quello della produzione sullo stesso dominio — `negozio-staging.esempio.it` vicino a `negozio.esempio.it` — che il record wildcard copre già. Le anteprime delle pull request si chiamano `pr-<numero>.<dominio>` sul dominio scelto in **Impostazioni › Anteprime**, sempre sotto il suo record wildcard, oppure ricevono un indirizzo di prova sslip.io (`pr-12-negozio.203-0-113-7.sslip.io`, solo HTTP) se non scegli un dominio. L'indirizzo di un'anteprima se ne va con lei quando la pull request si chiude. Vedi [Staging e anteprime delle pull request](environments.md).
+
 ## Cosa viene rifiutato
 
 - Un nome già servito da un altro blocco di nginx: nginx ne terrebbe uno solo e vincerebbe quello gestito, quindi il pannello lo lascia fuori e lo scrive sotto l'indirizzo.

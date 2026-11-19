@@ -199,6 +199,11 @@ interface EnsureInput {
   origin: string;
   /** Skips the list call when the caller already knows the id. */
   knownHookId?: string | null;
+  /**
+   * What GitHub delivers: pushes always, pull requests too while the
+   * project's previews are on (services/previews.ts).
+   */
+  events?: string[];
 }
 
 /**
@@ -213,7 +218,7 @@ interface EnsureInput {
 export async function ensureHook(
   input: EnsureInput
 ): Promise<HookResult<{ hook: HookInfo; created: boolean }>> {
-  const { slug, token, projectId, secret, origin, knownHookId } = input;
+  const { slug, token, projectId, secret, origin, knownHookId, events = ["push"] } = input;
 
   const config = {
     url: webhookUrl(origin, projectId),
@@ -245,8 +250,8 @@ export async function ensureHook(
     res = await githubRequest(path, token, {
       method: existing ? "PATCH" : "POST",
       body: existing
-        ? { active: true, events: ["push"], config }
-        : { name: "web", active: true, events: ["push"], config },
+        ? { active: true, events, config }
+        : { name: "web", active: true, events, config },
     });
   } catch {
     return fail("network", "Impossibile raggiungere GitHub.");

@@ -45,6 +45,12 @@ Tre passi, e il progetto viene creato solo alla fine: sorgente (GitHub o ZIP tra
 - **Attività pianificate** (Impostazioni › Automazioni): un comando con un orario, eseguito nel progetto («ogni notte alle 3 svuota la cache»), con storico, output ed esito di ogni esecuzione, «Esegui ora», un limite di tempo e un avviso se fallisce. Non parte mai due volte insieme né durante un deploy.
 - **Log**: ricerca, solo errori, pausa, download. Il pannello conserva il log di ogni app su disco, a rotazione, e lo si cerca anche dopo un riavvio.
 
+## Staging e anteprime delle pull request
+
+- **Staging** (**Altro › Crea staging**): una copia della produzione su un altro branch (`staging` o `develop`), creata in un passo con la sua porta, il suo indirizzo e le sue risorse. Eredita le variabili della produzione sotto le sue — mai quelle che leggono i database della produzione — e segue i permessi della produzione. La pagina del progetto mostra gli ambienti come un selettore in alto.
+- **Promuovi in produzione**: distribuisce in produzione esattamente il commit che lo staging esegue, dopo una conferma con il commit, autore, data e le variabili che i due non hanno in comune; con il deploy della produzione, il suo ritorno alla versione precedente e il deploy senza interruzioni.
+- **Anteprime delle pull request** (**Impostazioni › Anteprime**, spente di default): un'anteprima per ogni pull request aperta verso il branch della produzione, su `pr-<n>.<dominio>` o un indirizzo di prova, eliminata quando la pull request si chiude; al massimo 3 accese e ferme dopo 7 giorni senza attività, di default. Le pull request da un fork aspettano l'approvazione di ogni commit. La produzione non si elimina finché ha ambienti, a meno di eliminarli insieme. Vedi [Staging e anteprime delle pull request](environments.md).
+
 ## Variabili condivise
 
 - **Variabili condivise** (nel menu, accanto a Database): gruppi di variabili cifrate, con un nome — le credenziali SMTP, una chiave di un'API — che più progetti ricevono e che si cambiano in un posto solo. La pagina di un gruppo elenca i progetti che lo usano e, dopo una modifica, offre **Ridistribuisci i progetti interessati**.

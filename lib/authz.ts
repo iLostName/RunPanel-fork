@@ -66,7 +66,16 @@ export interface Access {
 
 export interface ProjectRef {
   id: string;
+  /** For an environment, its production's folder: see `parentId`. */
   folderId: string | null;
+  /**
+   * The production project an environment belongs to (migration 053). Its
+   * grants decide, never the environment's own: a staging copy or a preview
+   * runs production's code with production's variables, so whoever may not
+   * see production must not see them either, and whoever manages production
+   * manages them too. `lib/principal.ts` fills it, with production's folder.
+   */
+  parentId?: string | null;
 }
 
 /**
@@ -152,7 +161,7 @@ export function folderAccess(principal: Principal, folderId: string): Access {
 }
 
 export function projectAccess(principal: Principal, ref: ProjectRef): Access {
-  return accessFor(principal, [["all", null], ["folder", ref.folderId], ["project", ref.id]]);
+  return accessFor(principal, [["all", null], ["folder", ref.folderId], ["project", ref.parentId ?? ref.id]]);
 }
 
 export function serviceAccess(principal: Principal, ref: ServiceRef): Access {

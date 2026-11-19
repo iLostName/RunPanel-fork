@@ -44,6 +44,8 @@ import {
 } from "@/lib/project-folders";
 import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/Badge";
+import { ENVIRONMENT_LABEL } from "@/lib/environments";
 
 interface Project {
   id: string;
@@ -58,6 +60,8 @@ interface Project {
   last_deploy_at: string | null;
   access_mode: string | null;
   folder_id: string | null;
+  /** Staging or a preview of production's (migration 054); absent from older servers. */
+  environment?: "staging" | "preview" | null;
   permission?: Access;
   /** A last known copy: the server holding it did not answer. */
   unreachable?: boolean;
@@ -110,6 +114,11 @@ const ProjectRow = memo(function ProjectRow({
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-foreground max-w-full truncate text-sm font-medium">{project.name}</span>
           <StatusBadge status={project.status} />
+          {project.environment && (
+            <Badge tone="accent" icon="solar:test-tube-linear">
+              {ENVIRONMENT_LABEL[project.environment]}
+            </Badge>
+          )}
           {folderName !== undefined && <FolderChip name={folderName} hue={hue} />}
           <ServerBadge memberId={project.memberId} />
         </div>
@@ -234,7 +243,11 @@ export default function ProjectsPage() {
   // rather than a poll later, and goes back by itself if the move is refused.
   const [pendingMoves, setPendingMoves] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const projects = useMemo(() => {
-    const rows = withLastSeen(data ?? [], offline, { status: "unreachable", slug: "", deploy_count: 0, last_deploy_at: null, access_mode: null });
+    // The previews of pull requests come and go with them: they are listed on
+    // their production's page, not here among the projects people keep.
+    const rows = withLastSeen(data ?? [], offline, { status: "unreachable", slug: "", deploy_count: 0, last_deploy_at: null, access_mode: null }).filter(
+      (project) => project.environment !== "preview"
+    );
     if (pendingMoves.size === 0) return rows;
     return rows.map((project) => {
       const key = itemKey(project.memberId, project.id);

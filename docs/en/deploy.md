@@ -156,6 +156,10 @@ Over the API: `GET /api/projects/<id>/env/effective`, `GET`/`PUT /api/projects/<
 
 Variables prefixed `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` or `REACT_APP_` also reach the **build** (badge **usata nella build**), because frontends inline them into the bundle: anyone opening the site can read them, so no secrets there. Native runtimes' builds see every variable anyway; Docker gets these as `--build-arg`. The prefix list (`buildEnvPrefixes`) and extra keys (`buildEnv`) are set in the contract.
 
+## Staging and previews
+
+A project from GitHub can have a **Staging** environment (**Altro › Crea staging**) and a preview per open pull request (**Impostazioni › Anteprime**): sibling projects with their own branch, port, address and resources, which inherit production's variables but never its databases, follow production's permissions and change production only through **Promuovi in produzione**. The project page shows them as a switch at the top. See [Staging and pull request previews](environments.md).
+
 ## Logs
 
 The **Log** tab shows the build of the running or latest deploy, with its outcome, and the app's output.

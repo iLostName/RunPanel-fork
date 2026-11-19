@@ -44,6 +44,8 @@ export type OneTimeCommandStatus = "queued" | "claimed" | "done" | "failed";
 // Declared where the column semantics live, so the two cannot disagree.
 export type { AccessMode } from "../access-columns";
 import type { AccessMode } from "../access-columns";
+export type { EnvironmentKind } from "../environments";
+import type { EnvironmentKind } from "../environments";
 import type { TaskRunStatus, TaskRunsIn, TaskTrigger } from "../tasks-rules";
 import type { ColumnType } from "kysely";
 
@@ -163,8 +165,60 @@ export interface ProjectsTable {
    * every default, and is what every project created before migration 021 has.
    */
   backup_settings: string | null;
+  /**
+   * The production project this one is an environment of, or NULL for an
+   * ordinary project. No foreign key: see migration 053.
+   */
+  environment_of: string | null;
+  /** `'staging'` | `'preview'` with `environment_of`, NULL otherwise. */
+  environment: EnvironmentKind | null;
+  /** JSON — see `PreviewSettings` in lib/previews.ts; NULL means every default (off). Migration 054. */
+  preview_settings: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * `'waiting'` a fork's commit nobody approved; `'active'`; `'stopped'`;
+ * `'closing'` its pull request closed while the preview could not be removed
+ * (a deploy held it): the hourly sweep removes it then. See migration 054.
+ */
+export type PreviewState = "waiting" | "active" | "stopped" | "closing";
+export type PreviewStopReason = "limit" | "idle" | "manual";
+
+/** A pull request the panel knows of, and its preview project once there is one. */
+export interface ProjectPreviewsTable {
+  id: string;
+  production_id: string;
+  /** NULL while a fork's commit waits to be approved. No foreign key: see migration 054. */
+  project_id: string | null;
+  pr_number: number;
+  title: string;
+  author: string;
+  url: string;
+  head_ref: string;
+  head_sha: string;
+  head_repo: string | null;
+  /** 0 | 1 */
+  fork: number;
+  approved_sha: string | null;
+  state: PreviewState;
+  stopped_reason: PreviewStopReason | null;
+  last_activity_at: string;
+  address_problem: string | null;
+  status_problem: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** The variables every preview of a project receives over what it inherits. */
+export interface PreviewEnvVarsTable {
+  id: string;
+  project_id: string;
+  key: string;
+  /** AES-256-GCM ciphertext */
+  value: string;
+  created_at: string;
 }
 
 /**
@@ -1128,6 +1182,8 @@ export interface Database {
   env_groups: EnvGroupsTable;
   env_group_vars: EnvGroupVarsTable;
   project_env_groups: ProjectEnvGroupsTable;
+  project_previews: ProjectPreviewsTable;
+  preview_env_vars: PreviewEnvVarsTable;
   one_time_commands: OneTimeCommandsTable;
   services: ServicesTable;
   service_databases: ServiceDatabasesTable;

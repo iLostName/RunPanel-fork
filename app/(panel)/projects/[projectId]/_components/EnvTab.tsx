@@ -45,7 +45,7 @@ import { EnvLinkedVars, type LinkedService } from "./EnvLinkedVars";
 import { EnvGroupsPanel, type AttachedGroup } from "./EnvGroupsPanel";
 import { EnvEffective, type EnvPreview } from "./EnvEffective";
 import { useCan } from "@/lib/hooks/useMe";
-import { envSourceLabel } from "@/lib/copy";
+import { ENVIRONMENTS, envSourceLabel } from "@/lib/copy";
 
 /**
  * The env tab as the project page mounts it: the variables are fetched here,
@@ -431,6 +431,13 @@ export function EnvTab({
         <Hint tone="warn" title="Il prossimo deploy si fermerà">
           {preview.problems === 1 ? "Una variabile non si risolve" : `${preview.problems} variabili non si risolvono`}: le trovi
           in «Cosa riceve l&apos;app», qui sotto. Il deploy si ferma prima di toccare l&apos;app, e così il riavvio.
+        </Hint>
+      )}
+
+      {/* An environment's variables are mostly someone else's: said once, where they are edited. */}
+      {preview && preview.problems === 0 && (preview.inherits ?? []).length > 0 && (
+        <Hint icon="solar:layers-minimalistic-linear" title="Variabili ereditate">
+          {ENVIRONMENTS.inherits(preview.inherits![preview.inherits!.length - 1].name)}
         </Hint>
       )}
 

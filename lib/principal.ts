@@ -21,11 +21,26 @@ export async function loadPrincipal(user: SessionUser): Promise<Principal> {
   return { userId: user.id, isOwner: false, permissions: new Set(access.permissions), grants: access.grants };
 }
 
-/** Only what decides access — the folder a project is filed in. */
+/**
+ * What decides access to one project: its folder, or for an environment its
+ * production's id and folder (see `ProjectRef.parentId`). An environment whose
+ * production is gone answers for itself, like the ordinary project it now is.
+ */
+function refOf(
+  row: { id: string; folder_id: string | null; environment_of: string | null },
+  parent: { id: string; folder_id: string | null } | null | undefined
+): ProjectRef {
+  return row.environment_of && parent
+    ? { id: row.id, folderId: parent.folder_id, parentId: parent.id }
+    : { id: row.id, folderId: row.folder_id };
+}
+
+/** Only what decides access — the folder a project is filed in, or its production's. */
 export async function projectRefs(): Promise<Map<string, ProjectRef>> {
   const db = await getDb();
-  const rows = await db.selectFrom("projects").select(["id", "folder_id"]).execute();
-  return new Map(rows.map((r) => [r.id, { id: r.id, folderId: r.folder_id }]));
+  const rows = await db.selectFrom("projects").select(["id", "folder_id", "environment_of"]).execute();
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return new Map(rows.map((r) => [r.id, refOf(r, r.environment_of ? byId.get(r.environment_of) : null)]));
 }
 
 export async function serviceRefs(projects?: Map<string, ProjectRef>): Promise<Map<string, ServiceRef>> {
@@ -42,8 +57,14 @@ export async function serviceRefs(projects?: Map<string, ProjectRef>): Promise<M
 
 export async function projectRef(projectId: string): Promise<ProjectRef | null> {
   const db = await getDb();
-  const row = await db.selectFrom("projects").select(["id", "folder_id"]).where("id", "=", projectId).executeTakeFirst();
-  return row ? { id: row.id, folderId: row.folder_id } : null;
+  const row = await db
+    .selectFrom("projects")
+    .leftJoin("projects as parent", "parent.id", "projects.environment_of")
+    .select(["projects.id", "projects.folder_id", "projects.environment_of", "parent.id as parent_id", "parent.folder_id as parent_folder_id"])
+    .where("projects.id", "=", projectId)
+    .executeTakeFirst();
+  if (!row) return null;
+  return refOf(row, row.parent_id ? { id: row.parent_id, folder_id: row.parent_folder_id ?? null } : null);
 }
 
 export async function serviceRef(serviceId: string): Promise<ServiceRef | null> {
@@ -51,14 +72,29 @@ export async function serviceRef(serviceId: string): Promise<ServiceRef | null> 
   const row = await db
     .selectFrom("services")
     .leftJoin("projects", "projects.id", "services.project_id")
-    .select(["services.id", "services.folder_id", "services.project_id", "projects.folder_id as project_folder_id"])
+    // A database linked to an environment follows production's grants too.
+    .leftJoin("projects as parent", "parent.id", "projects.environment_of")
+    .select([
+      "services.id",
+      "services.folder_id",
+      "services.project_id",
+      "projects.folder_id as project_folder_id",
+      "projects.environment_of as project_environment_of",
+      "parent.id as parent_id",
+      "parent.folder_id as parent_folder_id",
+    ])
     .where("services.id", "=", serviceId)
     .executeTakeFirst();
   if (!row) return null;
   return {
     id: row.id,
     folderId: row.folder_id,
-    project: row.project_id ? { id: row.project_id, folderId: row.project_folder_id ?? null } : null,
+    project: row.project_id
+      ? refOf(
+          { id: row.project_id, folder_id: row.project_folder_id ?? null, environment_of: row.project_environment_of ?? null },
+          row.parent_id ? { id: row.parent_id, folder_id: row.parent_folder_id ?? null } : null
+        )
+      : null,
   };
 }
 

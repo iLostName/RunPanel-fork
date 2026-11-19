@@ -39,6 +39,8 @@ import {
 } from "@/lib/overview-groups";
 import { PROJECT_ACTIONS, SERVICE_ACTIONS, rowAllows, type Access } from "@/lib/authz";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/Badge";
+import { ENVIRONMENT_LABEL } from "@/lib/environments";
 import { useCan, useMe } from "@/lib/hooks/useMe";
 import { useIsPhone } from "@/lib/hooks/useMediaQuery";
 import { serviceDisplayName } from "@/lib/service-name";
@@ -79,6 +81,8 @@ interface Project {
   services: Service[];
   /** Where it answers; absent from servers that do not send it yet. */
   hosts?: { hostname: string; url: string }[];
+  /** Staging or a preview of production's; absent from older servers. */
+  environment?: "staging" | "preview" | null;
   permission?: Access;
   /** A last known copy: the server holding it did not answer. */
   unreachable?: boolean;
@@ -171,6 +175,11 @@ const ProjectCard = memo(function ProjectCard({
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <h3 className="text-foreground max-w-full truncate text-sm font-medium">{project.name}</h3>
               <StatusBadge status={project.status} />
+              {project.environment && (
+                <Badge tone="accent" icon="solar:test-tube-linear">
+                  {ENVIRONMENT_LABEL[project.environment]}
+                </Badge>
+              )}
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-2">
               {showServer && <ServerBadge memberId={project.memberId} />}
@@ -490,8 +499,13 @@ export default function HomePage() {
   const folders = useMemo(() => uniqueFolders(folderRows ?? []), [folderRows]);
   // What the page shows; `folders` keeps the real names for the rename dialog.
   const namedFolders = useMemo(() => distinctFolderNames(folders), [folders]);
+  // The previews of pull requests are listed on their production's page: they
+  // come and go with the pull requests, and would crowd the projects people keep.
   const shownProjects = useMemo(
-    () => withLastSeen(projects ?? [], offlineProjects, { status: "unreachable", deploy_count: 0, services: [] }),
+    () =>
+      withLastSeen(projects ?? [], offlineProjects, { status: "unreachable", deploy_count: 0, services: [] }).filter(
+        (project) => project.environment !== "preview"
+      ),
     [projects, offlineProjects]
   );
   const shownServices = useMemo(

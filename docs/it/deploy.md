@@ -154,6 +154,10 @@ Via API: `GET /api/projects/<id>/env/effective`, `GET`/`PUT /api/projects/<id>/e
 
 Le variabili con prefisso `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` o `REACT_APP_` arrivano anche al **build** (badge **usata nella build**), perché i frontend le incorporano nel bundle: chiunque apra il sito può leggerle, quindi niente segreti lì. Nei runtime nativi il build vede comunque tutte le variabili; per Docker arrivano come `--build-arg`. L'elenco dei prefissi (`buildEnvPrefixes`) e le chiavi aggiuntive (`buildEnv`) si cambiano nel contratto.
 
+## Staging e anteprime
+
+Un progetto da GitHub può avere un ambiente di **Staging** (**Altro › Crea staging**) e un'anteprima per ogni pull request aperta (**Impostazioni › Anteprime**): progetti fratelli con il loro branch, porta, indirizzo e risorse, che ereditano le variabili della produzione ma mai i suoi database, seguono i permessi della produzione e cambiano la produzione solo con **Promuovi in produzione**. La pagina del progetto li mostra come un selettore in alto. Vedi [Staging e anteprime delle pull request](environments.md).
+
 ## Log
 
 La scheda **Log** mostra il build del deploy in corso o dell'ultimo, con il suo esito, e l'output dell'app.

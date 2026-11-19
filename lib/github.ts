@@ -132,4 +132,7 @@ export interface GitHubPushPayload {
   ref?: string;
   head_commit?: { id: string; message: string } | null;
   sender?: { login: string };
+  /** A `pull_request` delivery: what happened, and the pull request, read by `parsePullRequest` (lib/previews.ts). */
+  action?: string;
+  pull_request?: unknown;
 }

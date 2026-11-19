@@ -137,6 +137,10 @@ It is served **over HTTP only**, and the dialog says so before it is created:
 
 For anything real, give the project a domain of its own. A test address is removed like any other; if the server's IP changes it keeps pointing at the old one, so remove it and create a new one. The server's domain row (`203-0-113-7.sslip.io`) shows on the **Domini** page with no record to create. A name under sslip.io that already had its certificate before this version keeps it and keeps renewing it — a renewal does not count against that limit — but no new one is asked for.
 
+## Addresses of staging and previews
+
+A staging environment is offered an address next to production's on the same domain — `shop-staging.example.com` beside `shop.example.com` — which the wildcard record already covers. Pull request previews are named `pr-<number>.<domain>` on the domain chosen in **Impostazioni › Anteprime**, again under its wildcard record, or get an instant sslip.io address (`pr-12-shop.203-0-113-7.sslip.io`, HTTP only) when no domain is chosen. A preview's address goes with it when its pull request closes. See [Staging and pull request previews](environments.md).
+
 ## What is refused
 
 - A name already served by another nginx block: nginx would keep only one of the two, and the managed one would win, so the panel leaves it out and says so under the address.

@@ -196,6 +196,11 @@ export async function register() {
   const { startDeployPoller } = await import("./services/deploy-poll");
   startDeployPoller();
 
+  // Previews of pull requests idle past their project's days are stopped,
+  // once an hour: they share this server with everything else.
+  const { startPreviewSweeper } = await import("./services/previews");
+  startPreviewSweeper();
+
   // The same question asked about the panel itself. It only ever *asks*: an
   // update is applied when somebody presses the button, never on a timer, since
   // nobody asks for the thing they are looking at to restart underneath them.

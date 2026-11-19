@@ -104,6 +104,101 @@ export interface Project {
   /** Who may reach the published port, and whether the gate enforcing it is up. */
   access: AccessValue;
   gate: GateValue;
+  /**
+   * The production project this one is an environment of (migration 053), and
+   * which kind. Optional: a server on an older release does not send them.
+   */
+  environment_of?: string | null;
+  environment?: "staging" | "preview" | null;
+}
+
+/** One member of a project's family — `GET /api/projects/{id}/environments`. */
+export interface EnvironmentBrief {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  environment: "staging" | "preview" | null;
+  branch: string;
+  pinnedSha: string | null;
+  url: string | null;
+  /** The commit of its live deployment, when one worked. */
+  liveCommit: string | null;
+  createdAt: string;
+  /** For a preview: its pull request (migration 054). */
+  pr?: { number: number; title: string; author: string; url: string; fork: boolean } | null;
+}
+
+export interface Family {
+  production: EnvironmentBrief;
+  staging: EnvironmentBrief | null;
+  previews: EnvironmentBrief[];
+}
+
+export type AddressOffer =
+  | { kind: "domain"; domainId: string; subdomain: string; hostname: string }
+  | { kind: "instant"; label: string; hostname: string };
+
+/** What creating a staging copy would do, for its dialog. */
+export interface StagingOffer {
+  blocker: string | null;
+  branch: string;
+  branches: string[] | null;
+  address: AddressOffer | null;
+  addressNote: string | null;
+  databases: { id: string; name: string; envKey: string }[];
+}
+
+export interface EnvironmentsResponse {
+  kind: "production" | "staging" | "preview";
+  family: Family | null;
+  offer: StagingOffer | null;
+}
+
+/** One pull request and its preview — `GET /api/projects/{id}/previews`. */
+export interface PreviewRow {
+  id: string;
+  prNumber: number;
+  title: string;
+  author: string;
+  url: string;
+  headRef: string;
+  headSha: string;
+  fork: boolean;
+  approvedSha: string | null;
+  needsApproval: boolean;
+  state: "waiting" | "active" | "stopped" | "closing";
+  stoppedReason: "limit" | "idle" | "manual" | null;
+  lastActivityAt: string;
+  addressProblem: string | null;
+  statusProblem: string | null;
+  project: { id: string; name: string; status: string; url: string | null; pinnedSha: string | null } | null;
+}
+
+export interface PreviewsResponse {
+  settings: { enabled: boolean; maxPreviews: number; idleDays: number; domainId: string | null; commitStatus: boolean };
+  previews: PreviewRow[];
+  usage: { running: number; memoryBytes: number | null; cpuPercent: number | null };
+  transport: { ok: boolean; problem: string | null };
+  domains: { id: string; name: string }[];
+}
+
+/** What "Promuovi in produzione" would deploy — `GET /api/projects/{id}/promote`. */
+export interface PromotionPreview {
+  staging: { id: string; name: string; branch: string };
+  production: {
+    id: string;
+    name: string;
+    branch: string;
+    status: string;
+    pinnedSha: string | null;
+    autoDeploy: boolean;
+    rollback: boolean;
+    zeroDowntime: boolean;
+  } | null;
+  commit: { sha: string; message: string | null; author: string | null; date: string | null } | null;
+  blocker: string | null;
+  variables: { key: string; change: "added" | "changed" | "removed" }[];
 }
 
 /** One entry of the branch's timeline, as the version picker renders it. */
@@ -169,6 +264,7 @@ export type SettingsSectionId =
   | "network"
   | "resources"
   | "automations"
+  | "previews"
   | "backup"
   | "advanced"
   | "permissions"

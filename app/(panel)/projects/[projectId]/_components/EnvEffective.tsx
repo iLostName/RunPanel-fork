@@ -13,9 +13,13 @@ import { useNodeApi } from "@/lib/hooks/useNode";
 import { cn } from "@/lib/utils";
 
 export interface EnvSourceRef {
-  kind: "own" | "group" | "database" | "panel";
+  kind: "own" | "group" | "inherited" | "database" | "panel";
   id?: string;
   name?: string;
+  /** A group received through the project an environment inherits from. */
+  via?: string;
+  /** Whose own variable an inherited one is; `previews` for production's variables of its previews. */
+  environment?: "production" | "staging" | "previews";
 }
 
 /** A row of `GET /api/projects/{id}/env/effective`. */
@@ -34,12 +38,16 @@ export interface EnvPreview {
   origin: "host" | "container";
   vars: EnvPreviewVar[];
   problems: number;
+  /** Optional: a server on an older release does not send them. */
+  inherits?: { id: string; name: string; environment: "production" | "staging" | "previews" }[];
+  withheld?: { key: string; source: EnvSourceRef; reason: string }[];
 }
 
-const SOURCE_TONE = { own: "neutral", group: "accent", database: "warning", panel: "neutral" } as const;
+const SOURCE_TONE = { own: "neutral", group: "accent", inherited: "accent", database: "warning", panel: "neutral" } as const;
 const SOURCE_ICON = {
   own: "solar:folder-linear",
   group: "solar:key-square-linear",
+  inherited: "solar:layers-minimalistic-linear",
   database: "solar:database-linear",
   panel: "solar:settings-linear",
 } as const;
@@ -116,6 +124,16 @@ export function EnvEffective({ projectId, preview }: { projectId: string; previe
         {SHARED_VARS.precedence} I riferimenti sono già risolti
         {preview.origin === "container" ? ", con gli indirizzi come li vede un container." : ", con gli indirizzi come li vede l'host."}
       </FieldHint>
+      {(preview.withheld ?? []).length > 0 && (
+        <ul className="border-warning/30 bg-warning/5 my-2 space-y-1.5 rounded-[var(--radius)] border p-3">
+          {(preview.withheld ?? []).map((v) => (
+            <li key={v.key} className="text-meta flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 leading-relaxed">
+              <Code>{v.key}</Code>
+              <span className="text-muted">{v.reason}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <ul className="divide-separator divide-y">
         {vars.map((v) => (
           <EffectiveRow key={v.key} v={v} shown={shown.has(v.key)} value={values?.get(v.key) ?? null} busy={loading} onToggle={() => void toggle(v.key)} />
@@ -208,6 +226,7 @@ function EffectiveRow({
 function lockedReason(v: EnvPreviewVar): string {
   if (v.source.kind === "database") return "Per vederlo serve il permesso di vedere le credenziali del database.";
   if (v.source.kind === "group") return "Per vederla serve il permesso «Variabili condivise», e di poter leggere quello che usa.";
+  if (v.source.kind === "inherited") return "Per vederla serve il permesso di gestire il progetto di produzione.";
   if (v.refs.length > 0) return "Per vederla serve poter leggere ogni cosa che usa: i gruppi, i database, i progetti.";
   return "Per vederla serve il permesso di gestire il progetto.";
 }

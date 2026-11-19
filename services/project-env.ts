@@ -7,14 +7,17 @@ import {
   type DbRef,
   type EffectiveVar,
   type EnvPair,
+  type EnvSource,
   type GroupLayer,
+  type InheritedLayer,
   type ProjectRef,
   type RefLookup,
   type RefTarget,
   type Resolution,
 } from "@/lib/env-refs";
+import { environmentKindOf, inheritanceChain, readsDatabaseOf } from "@/lib/environments";
 import { buildConnectionString, serviceEndpoint, serviceEnvKey, serviceLabel, type ConnectionOrigin } from "@/lib/service-env";
-import { attachedGroupIds, loadGroups, loadOwnVars, type LoadedGroup } from "./env-groups";
+import { attachedGroupIds, loadGroups, loadOwnVars, loadPreviewVars, type LoadedGroup } from "./env-groups";
 import { internalPort } from "./service-provisioner";
 
 /**
@@ -75,6 +78,25 @@ interface ProjectRow {
   port: number | null;
   folder_id: string | null;
   runtime_type: string;
+  environment_of: string | null;
+  environment: string | null;
+}
+
+/** One project an environment inherits from, with what it would hand down. */
+export interface InheritedSource {
+  /** `previews`: production's variables for its previews, over staging's and under the preview's own. */
+  project: { id: string; name: string; slug: string; environment: "production" | "staging" | "previews" };
+  /** Its groups, first to last. */
+  groups: LoadedGroup[];
+  own: EnvPair[];
+  ownUnreadable: string[];
+}
+
+/** An inherited variable not handed down, and why. */
+export interface WithheldVar {
+  key: string;
+  source: EnvSource;
+  reason: string;
 }
 
 const CONTAINER_RUNTIMES = new Set(["docker", "compose"]);
@@ -96,6 +118,14 @@ export interface EnvSnapshot {
   links: ServiceRow[];
   /** Names the panel sets over whatever the variables say: PORT, when the project has one. */
   panelKeys: string[];
+  /**
+   * What an environment inherits, lowest first (lib/environments.ts): its
+   * production, and for a preview its staging after it. Empty for an
+   * ordinary project.
+   */
+  inherited: InheritedSource[];
+  /** The slug of the production an environment belongs to: what it inherits never reads that project's databases. */
+  productionSlug: string | null;
 }
 
 export async function loadSnapshot(projectId: string): Promise<EnvSnapshot> {
@@ -108,19 +138,46 @@ export async function loadSnapshot(projectId: string): Promise<EnvSnapshot> {
       .selectFrom("services")
       .select(["id", "name", "display_name", "type", "port", "credentials", "container_name", "project_id", "inject_env", "env_key"])
       .execute(),
-    db.selectFrom("projects").select(["id", "name", "slug", "port", "folder_id", "runtime_type"]).execute(),
+    db.selectFrom("projects").select(["id", "name", "slug", "port", "folder_id", "runtime_type", "environment_of", "environment"]).execute(),
   ]);
   const byId = new Map(groups.map((g) => [g.id, g]));
+  const groupsOf = (ids: readonly string[]) => ids.map((id) => byId.get(id)).filter((g): g is LoadedGroup => g !== undefined);
   const self = projects.find((p) => p.id === projectId);
+  const chain = self ? inheritanceChain(self, projects) : [];
+  const inherited = await Promise.all(
+    chain.map(async (project, index): Promise<InheritedSource> => {
+      const [vars, ids] = await Promise.all([loadOwnVars(project.id), attachedGroupIds(project.id)]);
+      return {
+        project: { id: project.id, name: project.name, slug: project.slug, environment: index === 0 ? "production" : "staging" },
+        groups: groupsOf(ids),
+        own: vars.vars,
+        ownUnreadable: vars.unreadable,
+      };
+    })
+  );
+  // A preview also receives what production sets for all its previews, over
+  // what it inherits and under what it says itself.
+  const production = chain[0];
+  if (self && production && environmentKindOf(self) === "preview") {
+    const overrides = await loadPreviewVars(production.id);
+    inherited.push({
+      project: { id: production.id, name: production.name, slug: production.slug, environment: "previews" },
+      groups: [],
+      own: overrides.vars,
+      ownUnreadable: overrides.unreadable,
+    });
+  }
   return {
     own: own.vars,
     ownUnreadable: own.unreadable,
     groups,
-    attached: attachedIds.map((id) => byId.get(id)).filter((g): g is LoadedGroup => g !== undefined),
+    attached: groupsOf(attachedIds),
     services: services as ServiceRow[],
     projects,
     links: (services as ServiceRow[]).filter((s) => s.project_id === projectId && s.inject_env === 1),
     panelKeys: self && (listeningPort(self) ?? 0) > 0 ? ["PORT"] : [],
+    inherited,
+    productionSlug: inherited[0]?.project.slug ?? null,
   };
 }
 
@@ -222,29 +279,60 @@ export function lookupFor(snap: EnvSnapshot, origin: ConnectionOrigin): RefLooku
   };
 }
 
+/** A value that cannot be decrypted still sets its name: it is marked, so the layer under it does not quietly take its place. */
+const withUnreadable = (vars: readonly EnvPair[], unreadable: readonly string[]): EnvPair[] => [
+  ...vars,
+  ...unreadable.map((key) => ({ key, value: "" })),
+];
+
+/** Whether a variable was handed down rather than set by the project itself. */
+export function isInherited(source: EnvSource): boolean {
+  return source.kind === "inherited" || (source.kind === "group" && source.via !== undefined);
+}
+
 /** The layers merged, unreadable values turned into problems rather than left out. */
 export function effectiveVars(snap: EnvSnapshot): EffectiveVar[] {
-  const layers: GroupLayer[] = snap.attached.map((g) => ({
-    id: g.id,
-    name: g.name,
-    // A value that cannot be decrypted still sets its name: it is marked
-    // below, so the layer under it does not quietly take its place.
-    vars: [...g.vars, ...g.unreadable.map((key) => ({ key, value: "" }))],
-  }));
-  const own = [...snap.own, ...snap.ownUnreadable.map((key) => ({ key, value: "" }))];
-  return mergeLayers(layers, own).map((v) => {
+  const layers: GroupLayer[] = snap.attached.map((g) => ({ id: g.id, name: g.name, vars: withUnreadable(g.vars, g.unreadable) }));
+  const own = withUnreadable(snap.own, snap.ownUnreadable);
+  const inherited: InheritedLayer[] = snap.inherited.flatMap((from) => [
+    ...from.groups.map((g) => ({
+      source: { kind: "group" as const, id: g.id, name: g.name, via: from.project.name },
+      vars: withUnreadable(g.vars, g.unreadable),
+    })),
+    {
+      source: { kind: "inherited" as const, id: from.project.id, name: from.project.name, environment: from.project.environment },
+      vars: withUnreadable(from.own, from.ownUnreadable),
+    },
+  ]);
+  return mergeLayers(layers, own, inherited).map((v) => {
+    const source = v.source;
     const unreadable =
-      v.source.kind === "own"
+      source.kind === "own"
         ? snap.ownUnreadable.includes(v.key)
-        : v.source.kind === "group" && snap.attached.find((g) => g.id === (v.source as { id: string }).id)?.unreadable.includes(v.key);
+        : source.kind === "inherited"
+          ? snap.inherited.find((from) => from.project.id === source.id && from.project.environment === source.environment)?.ownUnreadable.includes(v.key)
+          : source.kind === "group" && snap.groups.find((g) => g.id === source.id)?.unreadable.includes(v.key);
     if (!unreadable) return v;
-    const where = v.source.kind === "group" ? ` del gruppo «${v.source.name}»` : "";
+    const where = source.kind === "group" ? ` del gruppo «${source.name}»` : source.kind === "inherited" ? ` di «${source.name}»` : "";
     return { ...v, problem: `La variabile ${v.key}${where} non si può leggere con la chiave di questo pannello: salvala di nuovo.` };
   });
 }
 
-/** Resolve for one viewpoint. Values a database link replaces are not resolved: they never reach the app. */
-export function resolveFor(snap: EnvSnapshot, origin: ConnectionOrigin): Resolution {
+/** A resolution, plus what an environment was not handed down. */
+export interface ProjectResolution extends Resolution {
+  withheld: WithheldVar[];
+}
+
+/**
+ * Resolve for one viewpoint. Values a database link replaces are not resolved: they never reach the app.
+ *
+ * An environment's inherited variable that reads one of production's
+ * databases is held back, before it can reach the app and whatever it
+ * resolves to: a staging copy writing into production's data is the one
+ * mistake an environment exists to prevent. Its own variables are not held
+ * back — writing that reference there is the explicit choice.
+ */
+export function resolveFor(snap: EnvSnapshot, origin: ConnectionOrigin): ProjectResolution {
   const vars = effectiveVars(snap);
   const broken = vars.filter((v) => v.problem !== null);
   const skip = new Set([...snap.links.map((s) => serviceEnvKey(s)), ...snap.panelKeys]);
@@ -253,13 +341,35 @@ export function resolveFor(snap: EnvSnapshot, origin: ConnectionOrigin): Resolut
     lookupFor(snap, origin),
     { skip }
   );
+
+  const production = snap.productionSlug;
+  const held = new Set(
+    production
+      ? resolution.vars
+          // Written for the previews, on purpose: the explicit choice, like an environment's own.
+          .filter((v) => !(v.source.kind === "inherited" && v.source.environment === "previews"))
+          .filter((v) => isInherited(v.source) && !skip.has(v.key) && readsDatabaseOf(v.refs, production))
+          .map((v) => v.key)
+      : []
+  );
+  const withheld: WithheldVar[] = resolution.vars
+    .filter((v) => held.has(v.key))
+    .map((v) => ({
+      key: v.key,
+      source: v.source,
+      reason: `Non ereditata: legge un database di «${snap.inherited[0]?.project.name ?? production}». Collega un database a questo ambiente, oppure scrivi la variabile qui se vuoi davvero usare quello.`,
+    }));
+  const env = { ...resolution.env };
+  for (const key of held) delete env[key];
+
   return {
-    vars: [...resolution.vars, ...broken].sort((a, b) => a.key.localeCompare(b.key)),
-    env: resolution.env,
+    vars: [...resolution.vars.filter((v) => !held.has(v.key)), ...broken].sort((a, b) => a.key.localeCompare(b.key)),
+    env,
     problems: [
       ...broken.filter((v) => !skip.has(v.key)).map((v) => ({ key: v.key, source: v.source, message: v.problem as string })),
-      ...resolution.problems,
+      ...resolution.problems.filter((p) => !held.has(p.key)),
     ],
+    withheld,
   };
 }
 
@@ -312,6 +422,15 @@ export async function loadProjectEnv(
       `Variabili condivise: ${snap.attached.map((g) => `${g.name} (${g.vars.length})`).join(", ")}. ` +
         "Dove due gruppi hanno lo stesso nome vince il più in basso; le variabili del progetto vincono sui gruppi."
     );
+  }
+  for (const from of snap.inherited) {
+    const count = from.own.length + from.groups.reduce((n, g) => n + g.vars.length, 0);
+    const whose = from.project.environment === "previews" ? `«${from.project.name}» per le anteprime` : `«${from.project.name}»`;
+    summary.push(`Variabili ereditate da ${whose}: ${count}. Quelle di questo ambiente vincono.`);
+  }
+  const withheld = resolved.get(origins[0])?.withheld ?? [];
+  if (withheld.length > 0) {
+    summary.push(`Non ereditate, perché leggono un database di produzione: ${withheld.map((v) => v.key).join(", ")}`);
   }
   const withRefs = (resolved.get(origins[0])?.vars ?? []).filter((v) => v.refs.length > 0).map((v) => v.key);
   if (withRefs.length > 0) summary.push(`Riferimenti risolti: ${withRefs.join(", ")}`);

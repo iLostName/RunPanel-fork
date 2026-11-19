@@ -45,10 +45,37 @@ export const SHARED_VARS = {
   attachNeedsPermission: "Per collegare un gruppo serve il permesso «Variabili condivise»: chi lo collega ne legge i valori.",
 } as const;
 
-/** "progetto", "gruppo «smtp»", "database «main»", "RunPanel": where a variable comes from. */
-export function envSourceLabel(source: { kind: string; name?: string }): string {
-  if (source.kind === "group") return `gruppo «${source.name}»`;
+/**
+ * "progetto", "gruppo «smtp»", "database «main»", "RunPanel": where a variable comes from.
+ *
+ * An environment's inherited ones say whose they are: "produzione «Negozio»",
+ * "staging «Negozio (staging)»", and a group received that way "gruppo «smtp»
+ * di «Negozio»".
+ */
+export function envSourceLabel(source: { kind: string; name?: string; via?: string; environment?: string }): string {
+  if (source.kind === "group") return source.via ? `gruppo «${source.name}» di «${source.via}»` : `gruppo «${source.name}»`;
+  if (source.kind === "inherited") {
+    if (source.environment === "previews") return `anteprime di «${source.name}»`;
+    return `${source.environment === "staging" ? "staging" : "produzione"} «${source.name}»`;
+  }
   if (source.kind === "database") return `database «${source.name}»`;
   if (source.kind === "panel") return "RunPanel";
   return "progetto";
 }
+
+/**
+ * The words of environments (lib/environments.ts).
+ *
+ * - **Ambiente**: production, its staging, the preview of a pull request.
+ * - **Staging**: kept in English, as the people who use one say it; "di prova"
+ *   would collide with the instant test addresses.
+ * - **Anteprima**: the environment of a pull request, never "preview".
+ * - **Promuovi in produzione**: deploy on production what staging runs.
+ * - An environment **eredita** production's variables; its own **vincono**.
+ */
+export const ENVIRONMENTS = {
+  inherits: (production: string) =>
+    `Riceve le variabili di «${production}»: quelle che scrivi qui vincono. Quelle che leggono un database di produzione non arrivano.`,
+  permissions: (production: string) => `Segue i permessi di «${production}»: chi può gestire quel progetto gestisce anche questo.`,
+  promote: "Promuovi in produzione",
+} as const;

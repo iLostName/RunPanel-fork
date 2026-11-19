@@ -12,9 +12,10 @@ import { runtimeLabel } from "@/lib/labels";
 import { useServerHref } from "@/lib/hooks/useNode";
 import { exportProjectConfig, projectHasSource } from "./project-facts";
 import { DuplicateDialog } from "./DuplicateDialog";
+import { StagingDialog } from "./StagingDialog";
 import { useCan } from "@/lib/hooks/useMe";
 import { useIsPhone } from "@/lib/hooks/useMediaQuery";
-import type { Project, SettingsSectionId, TabId } from "./types";
+import type { Family, Project, SettingsSectionId, TabId } from "./types";
 
 /**
  * Title, identity and the controls that act on the whole project.
@@ -26,6 +27,7 @@ import type { Project, SettingsSectionId, TabId } from "./types";
  */
 export const ProjectHeader = memo(function ProjectHeader({
   project,
+  family,
   busy,
   onDeploy,
   onControl,
@@ -35,6 +37,8 @@ export const ProjectHeader = memo(function ProjectHeader({
   onGoTo,
 }: {
   project: Project;
+  /** Production, its staging and its previews, when it has any. */
+  family: Family | null;
   busy: boolean;
   onDeploy: (mode: "deploy" | "rebuild") => void;
   onControl: (action: "start" | "stop" | "restart") => void;
@@ -46,6 +50,7 @@ export const ProjectHeader = memo(function ProjectHeader({
   const href = useServerHref();
   const [stopOpen, setStopOpen] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [stagingOpen, setStagingOpen] = useState(false);
   // The copy is a new project running the same code: both permissions, as the server checks.
   const canCreate = useCan("projects.create");
   const canHost = useCan("host");
@@ -64,6 +69,11 @@ export const ProjectHeader = memo(function ProjectHeader({
   const canStart = (project.status === "stopped" || project.status === "error") && Boolean(project.last_success_at);
   const canPickVersion = project.source_type === "github" && Boolean(project.source_url);
   const address = project.hosts?.[0] ?? null;
+  // An environment is not duplicated: its variables are mostly production's,
+  // and a copy would get only its own. Production is what to copy.
+  const isEnvironment = Boolean(project.environment_of);
+  // Production from GitHub with no staging yet; the server says why not otherwise.
+  const canAddStaging = !isEnvironment && canPickVersion && !family?.staging;
 
   /*
     A queue nobody is reminded of is a queue that runs weeks later, on a
@@ -92,7 +102,10 @@ export const ProjectHeader = memo(function ProjectHeader({
           : []),
         ...(canManage
           ? [
-              ...(canCreate && canHost
+              ...(canCreate && canHost && canAddStaging
+                ? [{ id: "staging", label: "Crea staging", icon: "solar:test-tube-linear", onAction: () => setStagingOpen(true) }]
+                : []),
+              ...(canCreate && canHost && !isEnvironment
                 ? [{ id: "duplicate", label: "Duplica", icon: "solar:copy-linear", onAction: () => setDuplicateOpen(true) }]
                 : []),
               { id: "export", label: "Esporta configurazione", icon: "solar:download-minimalistic-linear", onAction: () => exportProjectConfig(project) },
@@ -224,6 +237,7 @@ export const ProjectHeader = memo(function ProjectHeader({
       />
 
       {duplicateOpen && <DuplicateDialog project={project} isOpen={duplicateOpen} onOpenChange={setDuplicateOpen} />}
+      {stagingOpen && <StagingDialog project={project} isOpen={stagingOpen} onOpenChange={setStagingOpen} />}
 
       <ConfirmDialog
         isOpen={stopOpen}
