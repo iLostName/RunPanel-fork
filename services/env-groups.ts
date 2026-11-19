@@ -119,8 +119,36 @@ export interface Reader {
  * attaching `smtp` anywhere, and editing `smtp` then changes every project
  * that has `base`.
  */
-export async function groupUsage(group: { id: string; name: string }, groups?: readonly LoadedGroup[]): Promise<GroupUsage> {
+/** The projects side of `groupUsage`, read once for a page that asks about every group. */
+export interface UsageContext {
+  projects: ProjectBrief[];
+  links: { project_id: string; group_id: string; position: number }[];
+  ownByProject: Map<string, { key: string; value: string }[]>;
+}
+
+export async function loadUsageContext(): Promise<UsageContext> {
   const db = await getDb();
+  const [projects, links, own] = await Promise.all([
+    db.selectFrom("projects").select(["id", "name", "slug", "status", "runtime_type", "builder_config"]).orderBy("name").execute(),
+    db.selectFrom("project_env_groups").select(["project_id", "group_id", "position"]).execute(),
+    db.selectFrom("env_vars").select(["project_id", "key", "value"]).execute(),
+  ]);
+  const ownByProject = new Map<string, { key: string; value: string }[]>();
+  for (const row of own) {
+    const value = tryDecrypt(row.value);
+    if (value === null) continue;
+    const list = ownByProject.get(row.project_id) ?? [];
+    list.push({ key: row.key, value });
+    ownByProject.set(row.project_id, list);
+  }
+  return { projects, links, ownByProject };
+}
+
+export async function groupUsage(
+  group: { id: string; name: string },
+  groups?: readonly LoadedGroup[],
+  context?: UsageContext
+): Promise<GroupUsage> {
   const all = groups ?? (await loadGroups());
   const read = sharedReader(all);
   const touches = (values: readonly string[]) => [...sharedClosure(values, read)].some((node) => node.startsWith(`${group.name}.`));
@@ -136,20 +164,7 @@ export async function groupUsage(group: { id: string; name: string }, groups?: r
     }
   }
 
-  const [projects, links, own] = await Promise.all([
-    db.selectFrom("projects").select(["id", "name", "slug", "status", "runtime_type", "builder_config"]).orderBy("name").execute(),
-    db.selectFrom("project_env_groups").select(["project_id", "group_id", "position"]).execute(),
-    db.selectFrom("env_vars").select(["project_id", "key", "value"]).execute(),
-  ]);
-
-  const ownByProject = new Map<string, { key: string; value: string }[]>();
-  for (const row of own) {
-    const value = tryDecrypt(row.value);
-    if (value === null) continue;
-    const list = ownByProject.get(row.project_id) ?? [];
-    list.push({ key: row.key, value });
-    ownByProject.set(row.project_id, list);
-  }
+  const { projects, links, ownByProject } = context ?? (await loadUsageContext());
 
   const attached: GroupUsage["attached"] = [];
   const referencing: ProjectBrief[] = [];

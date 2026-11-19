@@ -5,7 +5,7 @@ import { getDb, nowIso } from "@/lib/db";
 import { encrypt } from "@/lib/crypto";
 import { generateId } from "@/lib/utils";
 import { createEnvGroupSchema, envVarsIssueText } from "@/lib/validation";
-import { groupUsage, loadGroups } from "@/services/env-groups";
+import { groupUsage, loadGroups, loadUsageContext } from "@/services/env-groups";
 import { checkReferences, issuesResponse } from "@/services/env-ref-access";
 import { loadSnapshot } from "@/services/project-env";
 import { hostGuardForGroup } from "@/services/env-group-guard";
@@ -23,7 +23,9 @@ export async function GET() {
   if (isDenied(denied)) return denied;
 
   const groups = await loadGroups();
-  const usage = await Promise.all(groups.map((group) => groupUsage(group, groups)));
+  // The projects and their variables read once, not once per group.
+  const context = await loadUsageContext();
+  const usage = await Promise.all(groups.map((group) => groupUsage(group, groups, context)));
   return NextResponse.json(
     groups.map((group, i) => ({
       id: group.id,
