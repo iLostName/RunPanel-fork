@@ -255,6 +255,34 @@ export interface EnvVarsTable {
   created_at: string;
 }
 
+/** A named set of encrypted variables several projects can receive — migration 051. */
+export interface EnvGroupsTable {
+  id: string;
+  /** How a reference finds it: `${{ shared.<name>.KEY }}`. Unique on this server. */
+  name: string;
+  description: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EnvGroupVarsTable {
+  id: string;
+  group_id: string;
+  key: string;
+  /** AES-256-GCM ciphertext */
+  value: string;
+  created_at: string;
+}
+
+/** A group a project receives; a higher `position` wins over a lower one. */
+export interface ProjectEnvGroupsTable {
+  project_id: string;
+  group_id: string;
+  position: number;
+  created_at: string;
+}
+
 export interface ServicesTable {
   id: string;
   /**
@@ -1091,6 +1119,9 @@ export interface Database {
   folders: FoldersTable;
   deployments: DeploymentsTable;
   env_vars: EnvVarsTable;
+  env_groups: EnvGroupsTable;
+  env_group_vars: EnvGroupVarsTable;
+  project_env_groups: ProjectEnvGroupsTable;
   one_time_commands: OneTimeCommandsTable;
   services: ServicesTable;
   service_databases: ServiceDatabasesTable;
