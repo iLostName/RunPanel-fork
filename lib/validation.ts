@@ -791,6 +791,60 @@ export const panelPublicUrlSchema = z
   });
 
 /**
+ * Signing in with GitHub (lib/github-login.ts): the owner's OAuth App, and the
+ * start of one sign-in.
+ *
+ * GitHub's shapes, loosely: a Client ID is 20 characters today (`Ov23li…`, or
+ * 20 hex digits on older apps), a client secret 40 hex digits. Checked against
+ * what gets pasted by mistake — a space, a URL, a whole line of GitHub's page —
+ * rather than to the character, so a change of format at GitHub does not lock
+ * the form.
+ */
+export const GITHUB_CLIENT_ID_RULE = "Il Client ID dell'app GitHub: lettere, cifre, punti e trattini, senza spazi";
+export const GITHUB_CLIENT_SECRET_RULE = "Il Client secret dell'app GitHub: almeno 20 tra lettere e cifre, senza spazi";
+
+export const githubClientIdSchema = z
+  .string()
+  .trim()
+  .min(8, GITHUB_CLIENT_ID_RULE)
+  .max(64, GITHUB_CLIENT_ID_RULE)
+  .regex(/^[A-Za-z0-9._-]+$/, GITHUB_CLIENT_ID_RULE);
+
+/** Empty keeps the stored one: the secret is write-only, like every other. */
+export const githubClientSecretSchema = z
+  .string()
+  .trim()
+  .max(128, GITHUB_CLIENT_SECRET_RULE)
+  .regex(/^(?:[A-Za-z0-9_-]{20,128})?$/, GITHUB_CLIENT_SECRET_RULE);
+
+export const githubLoginSettingsSchema = z
+  .object({
+    clientId: githubClientIdSchema.optional(),
+    clientSecret: githubClientSecretSchema.optional(),
+    enabled: z.boolean().optional(),
+    /** Turn it off even though some users have no password to fall back on. */
+    force: z.boolean().optional(),
+  })
+  .strict()
+  .refine((body) => body.clientId !== undefined || body.enabled !== undefined, "Niente da salvare");
+
+export const githubLoginActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("verify") }).strict(),
+  z.object({ action: z.literal("clear"), force: z.boolean().optional() }).strict(),
+]);
+
+/**
+ * `login` from the sign-in page; `link` from the account page, with the
+ * password again; `invite` from an invitation, with its token. `next` is
+ * checked by `safeNextPath` and dropped, not refused, when it is not a page.
+ */
+export const githubStartSchema = z.discriminatedUnion("intent", [
+  z.object({ intent: z.literal("login"), next: z.string().max(512).optional() }).strict(),
+  z.object({ intent: z.literal("link"), password: z.string().min(1).max(128) }).strict(),
+  z.object({ intent: z.literal("invite"), token: z.string().min(20).max(128) }).strict(),
+]);
+
+/**
  * A service name is concatenated into a Docker container name and a Docker
  * volume name, so it has to be legal there. Unvalidated, a name with a space or
  * a slash passed every check here and died as a 500 carrying a raw Docker

@@ -119,7 +119,11 @@ export async function recordLogin(userId: string): Promise<void> {
   await db.updateTable("users").set({ last_login_at: nowIso() }).where("id", "=", userId).execute();
 }
 
-/** A new account with no password and no access. Null when the email is taken. */
+/**
+ * A new account with no password and no access. Null when the email is taken.
+ * The invitation it comes with is accepted by choosing a password, or by
+ * linking a GitHub account where sign-in with GitHub is on.
+ */
 export async function createInvitedUser(email: string, createdBy: string): Promise<UserRow | null> {
   const db = await getDb();
   const row: UserRow = {
@@ -401,19 +405,29 @@ export async function listUsers(): Promise<Array<{
   createdAt: string;
   lastLoginAt: string | null;
   inviteExpiresAt: string | null;
+  /** False for an invitation not yet accepted, and for an account that signs in only with GitHub. */
+  hasPassword: boolean;
+  /** The GitHub account it may sign in with on this panel (lib/github-login.ts), or null. */
+  githubLogin: string | null;
 }>> {
   const db = await getDb();
-  const [users, invites] = await Promise.all([
+  const [users, invites, links] = await Promise.all([
     db.selectFrom("users").selectAll().orderBy("created_at", "asc").execute(),
     db.selectFrom("user_invites").select(["user_id", "expires_at"]).where("used_at", "is", null).execute(),
+    db.selectFrom("user_github").select(["user_id", "github_login"]).execute(),
   ]);
   const pending = new Map(invites.map((i) => [i.user_id, i.expires_at]));
+  const github = new Map(links.map((l) => [l.user_id, l.github_login]));
   const now = Date.now();
   return users.map((u) => {
     const inviteExpiresAt = pending.get(u.id) ?? null;
+    const githubLogin = github.get(u.id) ?? null;
     let status: UserStatus = "active";
     if (u.disabled === 1) status = "disabled";
-    else if (!u.password_hash) status = inviteExpiresAt && new Date(inviteExpiresAt).getTime() > now ? "invited" : "invite_expired";
+    // An invitation accepted with GitHub leaves no password, and is accepted all the same.
+    else if (!u.password_hash && !githubLogin) {
+      status = inviteExpiresAt && new Date(inviteExpiresAt).getTime() > now ? "invited" : "invite_expired";
+    }
     return {
       id: u.id,
       email: u.email,
@@ -422,6 +436,8 @@ export async function listUsers(): Promise<Array<{
       createdAt: u.created_at,
       lastLoginAt: u.last_login_at,
       inviteExpiresAt,
+      hasPassword: Boolean(u.password_hash),
+      githubLogin,
     };
   });
 }
