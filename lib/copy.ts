@@ -21,3 +21,34 @@ export const MSG = {
   /** The request never reached the panel, as opposed to the panel refusing it. */
   unreachable: "Impossibile raggiungere il pannello",
 } as const;
+
+/**
+ * The words of shared variables, as the Variabili tab's glossary has them.
+ *
+ * - **Variabili condivise**: the page, and the feature. Not "variabili globali":
+ *   nothing reaches a project that was not attached to it or named by it.
+ * - **Gruppo**: a named set of them. "Collegare" a gruppo to a progetto, like a
+ *   database, and "scollegare" it.
+ * - **Riferimento**: `${{ … }}` in a value, which reads another value.
+ * - Where a variable comes from: **progetto**, **gruppo** «nome», **database**
+ *   «nome», **RunPanel** for what the panel sets itself.
+ *
+ * The precedence is said in one sentence, the same on every screen that has to.
+ */
+export const SHARED_VARS = {
+  title: "Variabili condivise",
+  precedence:
+    "Vince la variabile del progetto; tra i gruppi vince quello più in basso. Un database collegato vince su tutto.",
+  applies: "Vale dal prossimo deploy o riavvio dei progetti che lo usano.",
+  /** In a cluster: groups are not replicated. */
+  serverScope: (server: string) => `I gruppi sono di ${server}: un progetto usa quelli del server su cui gira.`,
+  attachNeedsPermission: "Per collegare un gruppo serve il permesso «Variabili condivise»: chi lo collega ne legge i valori.",
+} as const;
+
+/** "progetto", "gruppo «smtp»", "database «main»", "RunPanel": where a variable comes from. */
+export function envSourceLabel(source: { kind: string; name?: string }): string {
+  if (source.kind === "group") return `gruppo «${source.name}»`;
+  if (source.kind === "database") return `database «${source.name}»`;
+  if (source.kind === "panel") return "RunPanel";
+  return "progetto";
+}
