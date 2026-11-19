@@ -16,6 +16,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Badge } from "@/components/ui/Badge";
 import { useEventStream } from "@/lib/hooks/useEventStream";
 import { useResource } from "@/lib/hooks/useResource";
+import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatBytes, formatDuration, formatRelative, formatWhen } from "@/lib/format";
 import { copiesLabel, countCopies, readOrder } from "@/lib/backup-copies";
@@ -50,6 +51,8 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
     api(`/api/backups/runs/${runId}`),
     { intervalMs: poll4000 }
   );
+  // The trail and the phone's bar print what the heading does, not the id.
+  useCrumbLabel(runId, data ? (data.policyName ?? "Esecuzione manuale") : null);
 
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [retrying, setRetrying] = useState<string | null>(null);

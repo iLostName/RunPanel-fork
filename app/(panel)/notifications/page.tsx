@@ -13,6 +13,7 @@ import { SelectField } from "@/components/ui/SelectField";
 import { NotificationItem } from "@/components/notifications/NotificationItem";
 import { inboxQuery, useInbox, type InboxItem, type InboxPage } from "@/components/notifications/useInbox";
 import { NOTIFY_GROUPS } from "@/lib/notify-events";
+import { SUBPAGE_TITLES } from "@/lib/nav";
 import { useCan } from "@/lib/hooks/useMe";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { toast } from "@/lib/toast";
@@ -114,7 +115,7 @@ export default function NotificationsPage() {
   return (
     <>
       <PageHeader
-        title="Notifiche"
+        title={SUBPAGE_TITLES["/notifications"]}
         description="Quello che è successo su questo server, tra ciò che puoi vedere. Restano qui 30 giorni."
         actions={
           <>

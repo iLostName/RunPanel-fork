@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
-import { CRUMBS_WITHOUT_PAGE, NAV_SECTIONS, SEGMENT_LABELS, isActiveNav } from "@/lib/nav";
+import { CRUMBS_WITHOUT_PAGE, NAV_SECTIONS, isActiveNav, titleOfPath } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { SearchButton } from "@/components/SearchButton";
 import { UserMenu } from "@/components/UserMenu";
@@ -30,8 +30,9 @@ function buildCrumbs(pathname: string, named: ReadonlyMap<string, string>): Crum
 
   for (const segment of segments) {
     href += `/${segment}`;
-    // A page-provided name (a project's, a service's) wins over the raw id.
-    const known = named.get(segment) ?? SEGMENT_LABELS[segment];
+    // A name the page gave (a project's, a database's) first, then the shared
+    // title of the path — the one its heading prints — and the raw id last.
+    const known = named.get(segment) ?? titleOfPath(href);
     crumbs.push({
       label: known ?? decodeURIComponent(segment),
       href,

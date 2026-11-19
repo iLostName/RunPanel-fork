@@ -4,6 +4,11 @@ import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { DatabaseForm } from "./_components/DatabaseForm";
 import { useServerHref } from "@/lib/hooks/useNode";
+import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
+import { SUBPAGE_TITLES } from "@/lib/nav";
+
+/** The heading when the database is for a project: it is added to something. */
+const FOR_PROJECT = "Aggiungi un database";
 
 /**
  * A new database, on its own or for a project.
@@ -21,11 +26,13 @@ export default function NewServicePage() {
   const searchParams = useSearchParams();
   const href = useServerHref();
   const projectId = searchParams.get("projectId") ?? "";
+  // The same page under another heading: the phone's bar says what the <h1> says.
+  useCrumbLabel("new", projectId ? FOR_PROJECT : null);
 
   return (
     <>
       <PageHeader
-        title={projectId ? "Aggiungi un database" : "Nuovo database"}
+        title={projectId ? FOR_PROJECT : SUBPAGE_TITLES["/services/new"]}
         description="PostgreSQL, MySQL, Redis o MongoDB, con backup e console"
         back={
           projectId

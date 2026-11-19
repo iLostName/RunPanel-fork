@@ -10,7 +10,7 @@ import { Code, Hint } from "@/components/ui/Hint";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Segmented } from "@/components/ui/Segmented";
-import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
+import { SUBPAGE_TITLES } from "@/lib/nav";
 import type { RouteEntry } from "@/services/mcp/catalog";
 
 /**
@@ -88,7 +88,6 @@ const METHOD_FILTERS = [
 ] as const;
 
 export function ApiReference({ routes }: { routes: RouteEntry[] }) {
-  useCrumbLabel("api", "Riferimento API");
   const origin = useOrigin();
   const [search, setSearch] = useState("");
   const [method, setMethod] = useState<(typeof METHOD_FILTERS)[number]["value"]>("all");
@@ -115,7 +114,7 @@ export function ApiReference({ routes }: { routes: RouteEntry[] }) {
     <>
       <PageHeader
         back={{ href: "/mcp", label: "Torna a AI e API" }}
-        title="Riferimento API"
+        title={SUBPAGE_TITLES["/mcp/api"]}
         description={`${routes.length} endpoint: metodo, percorso, parametri e corpo di ognuno`}
       />
 

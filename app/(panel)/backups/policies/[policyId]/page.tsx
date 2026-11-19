@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadError } from "@/components/ui/LoadError";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { useResource } from "@/lib/hooks/useResource";
+import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
 import { PolicyForm } from "../../_components/PolicyForm";
 import type { PolicyView } from "@/components/backups/types";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
@@ -20,6 +21,8 @@ export default function EditBackupPolicyPage({
   const href = useServerHref();
   const { policyId } = use(params);
   const { data, loading, error, refresh } = useResource<PolicyView>(api(`/api/backups/policies/${policyId}`));
+  // The trail and the phone's bar print the name, not the id in the address.
+  useCrumbLabel(policyId, data?.name);
 
   if (loading && !data) {
     return (

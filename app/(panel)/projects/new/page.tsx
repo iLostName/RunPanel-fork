@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FormDialog } from "@/components/ui/FormDialog";
 import { FieldHint } from "@/components/ui/Hint";
 import { Technical } from "@/components/ui/Technical";
+import { SUBPAGE_TITLES } from "@/lib/nav";
 import { useCan } from "@/lib/hooks/useMe";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { DETECT_FILES } from "@/lib/app-detect";
@@ -96,7 +97,7 @@ export default function NewProjectPage() {
   if (!canCreate) {
     return (
       <>
-        <PageHeader title="Nuovo progetto" />
+        <PageHeader title={SUBPAGE_TITLES["/projects/new"]} />
         <EmptyState
           icon="solar:lock-linear"
           title="Non puoi creare progetti"
@@ -111,7 +112,7 @@ export default function NewProjectPage() {
   return (
     <>
       <PageHeader
-        title="Nuovo progetto"
+        title={SUBPAGE_TITLES["/projects/new"]}
         description={
           step === "source"
             ? "Scegli il codice: al resto pensa il pannello"

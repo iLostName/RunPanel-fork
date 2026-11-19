@@ -8,7 +8,7 @@ import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { ServerPicker } from "@/components/cluster/ServerBits";
 import { useCan } from "@/lib/hooks/useMe";
 import { useServerHref } from "@/lib/hooks/useNode";
-import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
+import { SUBPAGE_TITLES } from "@/lib/nav";
 import { useTabStrip } from "@/lib/hooks/useTabStrip";
 import { CATALOG, CATEGORY_LABEL, catalogCategories, filterCatalog, type CatalogCategory } from "@/lib/app-catalog";
 import { AppCard } from "./_components/AppCard";
@@ -22,7 +22,6 @@ import { CatalogLocked } from "./_components/CatalogLocked";
  * opens its install page; nothing is created until that page's button.
  */
 export default function CatalogPage() {
-  useCrumbLabel("catalog", "Catalogo");
   const href = useServerHref();
   const canCreate = useCan("projects.create");
   const canHost = useCan("host");
@@ -35,9 +34,9 @@ export default function CatalogPage() {
   return (
     <>
       <PageHeader
-        title="App pronte"
+        title={SUBPAGE_TITLES["/projects/new/catalog"]}
         description="Scegli un'app: la configuro, la metto online e ti dico cosa fare dopo"
-        back={{ href: href("/projects/new"), label: "Nuovo progetto" }}
+        back={{ href: href("/projects/new"), label: `Torna a ${SUBPAGE_TITLES["/projects/new"]}` }}
       />
 
       {!canCreate || !canHost ? (

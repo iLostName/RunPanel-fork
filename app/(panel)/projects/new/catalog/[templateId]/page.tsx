@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { useCan } from "@/lib/hooks/useMe";
 import { useServerHref } from "@/lib/hooks/useNode";
 import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
+import { SUBPAGE_TITLES } from "@/lib/nav";
 import { getTemplate, type CatalogInstallResponse } from "@/lib/app-catalog";
 import { CatalogLocked } from "../_components/CatalogLocked";
 import { InstallForm } from "../_components/InstallForm";
@@ -27,10 +28,9 @@ export default function InstallAppPage() {
   const canCreate = useCan("projects.create");
   const canHost = useCan("host");
   const [result, setResult] = useState<CatalogInstallResponse | null>(null);
-  useCrumbLabel("catalog", "Catalogo");
   useCrumbLabel(template?.id, template?.name);
 
-  const back = { href: href("/projects/new/catalog"), label: "Catalogo" };
+  const back = { href: href("/projects/new/catalog"), label: `Torna a ${SUBPAGE_TITLES["/projects/new/catalog"]}` };
 
   if (!template) {
     return (
