@@ -209,8 +209,10 @@ export async function runZeroDowntimeRelease(ctx: ZeroDowntimeRelease): Promise<
   // The old container's port too, until it is gone: the store lets go of it
   // at the commit, while the container still holds it for the drain.
   const previous = previousPort ? hold(previousPort) : null;
-  const next = await reserveLivePort(previousPort ?? project.live_port);
+  let next: PortHold | null = null;
   try {
+    next = await reserveLivePort(previousPort ?? project.live_port);
+    const port = next.port;
     return await releaseWithoutDowntime(
       {
         cli: dockerCli,
@@ -250,10 +252,10 @@ export async function runZeroDowntimeRelease(ctx: ZeroDowntimeRelease): Promise<
         // The log viewers follow the container under the live name: now the new one.
         promoted: () => projectEvents.emit(project.id, { type: "process:reset" }),
       },
-      { deploymentId: ctx.deploymentId, port: next.port, healthTimeoutSec: contract.healthcheck.timeoutSec }
+      { deploymentId: ctx.deploymentId, port, healthTimeoutSec: contract.healthcheck.timeoutSec }
     );
   } finally {
-    next.release();
+    next?.release();
     previous?.release();
   }
 }
