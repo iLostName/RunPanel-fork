@@ -32,7 +32,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       .executeTakeFirst();
 
     if (!service) {
-      return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+      return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
     }
 
     const { action } = parsed.data;

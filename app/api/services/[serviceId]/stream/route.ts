@@ -29,7 +29,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     .where("id", "=", serviceId)
     .executeTakeFirst();
 
-  if (!service) return new Response("Servizio non trovato", { status: 404 });
+  if (!service) return new Response("Database non trovato", { status: 404 });
 
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;

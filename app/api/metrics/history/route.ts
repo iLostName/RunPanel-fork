@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
     if (isDenied(denied)) return denied;
   } else {
     if (!parsed.data.id) {
-      return NextResponse.json({ error: "Manca l'id del progetto o del servizio" }, { status: 400 });
+      return NextResponse.json({ error: "Manca l'id del progetto o del database" }, { status: 400 });
     }
     const denied =
       scope === "project"

@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
           .selectAll()
           .where("id", "=", target.id)
           .executeTakeFirst();
-        if (!service) return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+        if (!service) return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
 
         const wanted = resolveAutostart("service", service).autostart ? "unless-stopped" : "no";
         await setRestartPolicy(service.container_name, wanted);
