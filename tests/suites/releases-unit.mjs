@@ -297,7 +297,12 @@ export async function run({ repoRoot }) {
     }
     r.check("a restore writes where the app reads", source("services", "backup", "restore.ts").includes("projectFileRoots(project.slug)"));
     r.check("a backup carries what only the running version holds", source("services", "backup", "project-export.ts").includes("unknownEntries(current.dir"));
-    r.check("deleting a project deletes its versions", source("app", "api", "projects", "[projectId]", "route.ts").includes("await removeProjectReleases(slug)"));
+    // The delete lives in services/project-delete.ts, shared by the route and the environments.
+    r.check(
+      "deleting a project deletes its versions",
+      source("services", "project-delete.ts").includes("await removeProjectReleases(slug)") &&
+        source("app", "api", "projects", "[projectId]", "route.ts").includes("await deleteProject(project,")
+    );
     r.check("so does removing its app", source("app", "api", "projects", "[projectId]", "app", "route.ts").includes("await removeProjectReleases(slug)"));
     r.check("the store keeps the rows a restart needs", /status", "in", \["running", "superseded"\]\)[\s\S]{0,120}\.limit\(2\)/.test(source("services", "docker", "gc.ts")));
   }
