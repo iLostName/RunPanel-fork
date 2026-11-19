@@ -10,6 +10,10 @@
 
 # testing
 /coverage
+# Playwright (tests/e2e): the owner's cookie of a run, traces and the report
+/tests/e2e/.auth/
+/tests/e2e/test-results/
+/tests/e2e/playwright-report/
 
 # next.js
 /.next/

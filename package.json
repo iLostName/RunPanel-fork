@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "icons": "node scripts/build-icons.mjs",
     "test": "node tests/run.mjs",
-    "test:quick": "node tests/run.mjs --no-docker"
+    "test:quick": "node tests/run.mjs --no-docker",
+    "test:e2e": "playwright test --config tests/e2e/playwright.config.ts"
   },
   "dependencies": {
     "@heroui/react": "^3.2.4",
