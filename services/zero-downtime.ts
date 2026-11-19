@@ -199,7 +199,12 @@ export async function runZeroDowntimeRelease(ctx: ZeroDowntimeRelease): Promise<
   // back to exactly one, under the live name, before a new one is started.
   const settled = await normalize(dockerCli, slug, await liveDeploymentId(project.id));
   const previousPort = settled.keep?.livePort ?? null;
-  if (settled.livePort !== undefined && settled.livePort !== project.live_port) await setLivePort(project.id, settled.livePort);
+  if (settled.livePort !== undefined && settled.livePort !== project.live_port) {
+    // The store named another port than the live container's: nginx follows
+    // the store, so it is put right too, whatever this deploy does next.
+    await setLivePort(project.id, settled.livePort);
+    applyProxySoon();
+  }
 
   // The old container's port too, until it is gone: the store lets go of it
   // at the commit, while the container still holds it for the drain.

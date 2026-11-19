@@ -184,7 +184,13 @@ async function restart(projectId: string): Promise<{ success: true } | { error: 
     the project takes it back to the ordinary publishing, and nginx with it.
   */
   const livePort =
-    project.runtime_type === "docker" && access.mode !== "restricted" && project.live_port ? project.live_port : undefined;
+    project.runtime_type === "docker" &&
+    access.mode !== "restricted" &&
+    // On the host network nothing is published at all, so there is no port to keep.
+    contract.docker.network !== "host" &&
+    project.live_port
+      ? project.live_port
+      : undefined;
 
   const startOpts = buildStartOpts({
     project,
