@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/db";
 import { parseContractJson } from "@/lib/deploy-contract";
-import { listenPort, type AccessRow } from "@/lib/access-columns";
+import { upstreamPort, type AccessRow } from "@/lib/access-columns";
 
 /**
  * Which apps the uptime check asks, and where.
@@ -42,6 +42,8 @@ export interface PlannableProject extends AccessRow {
   name: string;
   status: string;
   port: number | null;
+  /** Set for a project deployed without downtime: where its live container is published. */
+  live_port?: number | null;
   builder_config: string;
 }
 
@@ -68,7 +70,11 @@ export function planFor(project: PlannableProject, resolvedContract: string | nu
   const running = resolvedContract ? parseContractJson(resolvedContract).healthcheck : current;
 
   const path = current.path || "/";
-  const port = current.port ?? (project.port ? listenPort(project, project.port) : null);
+  // Deployed without downtime, the app is only on its live loopback port: a
+  // health check port can only be the project's own there (lib/zero-downtime.ts).
+  const port = project.live_port
+    ? project.live_port
+    : (current.port ?? (project.port ? upstreamPort(project, project.port) : null));
   const expectStatus = running.expectStatus;
   const base = { path, port, expectStatus };
 

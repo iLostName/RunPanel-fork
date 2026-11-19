@@ -155,7 +155,7 @@ export async function checkOnce(): Promise<number> {
 
   const projects = await db
     .selectFrom("projects")
-    .select(["id", "name", "status", "port", "builder_config", "access_mode", "access_allow", "access_port"])
+    .select(["id", "name", "status", "port", "live_port", "builder_config", "access_mode", "access_allow", "access_port"])
     .execute();
 
   const targets: UptimeTarget[] = [];

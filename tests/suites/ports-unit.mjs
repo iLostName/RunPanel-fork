@@ -23,6 +23,10 @@ export async function run({ repoRoot }) {
   const used = portsInUse([{ port: 5432 }, { port: null }, { port: 3000, access_port: 41234 }, {}]);
   r.check("public and loopback ports are both in use", used.has(5432) && used.has(3000) && used.has(41234));
   r.check("rows without a port add nothing", used.size === 3);
+  r.check(
+    "the loopback port of a project deployed without downtime is in use too",
+    portsInUse([{ port: 3000, live_port: 21004 }]).has(21004)
+  );
 
   return r.result();
 }

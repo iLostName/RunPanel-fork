@@ -88,7 +88,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     const [projectPorts, servicePorts] = await Promise.all([
-      db.selectFrom("projects").select(["port", "access_port"]).execute(),
+      db.selectFrom("projects").select(["port", "access_port", "live_port"]).execute(),
       db.selectFrom("services").select(["port", "access_port"]).execute(),
     ]);
     const port = source.port ? firstFreePort(source.port, portsInUse([...projectPorts, ...servicePorts])) : null;

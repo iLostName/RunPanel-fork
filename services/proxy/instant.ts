@@ -1,6 +1,6 @@
 import { getDb, nowIso } from "@/lib/db";
 import { generateId } from "@/lib/utils";
-import { listenPort } from "@/lib/access-columns";
+import { upstreamPort } from "@/lib/access-columns";
 import { INSTANT_SUFFIX, hostnameFor, instantDomainFor, labelFrom } from "@/lib/proxy-names";
 import type { ProjectHostsTable } from "@/lib/db/schema";
 import { addressProblem, canApply, claimedPorts, newHostRow, proxyProbe, serveNewHosts, serverAddresses, upstreamConflict } from "./index";
@@ -106,12 +106,12 @@ export async function addInstantHost(projectId: string, label: string): Promise<
   const db = await getDb();
   const project = await db
     .selectFrom("projects")
-    .select(["port", "access_mode", "access_allow", "access_port"])
+    .select(["port", "access_mode", "access_allow", "access_port", "live_port"])
     .where("id", "=", projectId)
     .executeTakeFirst();
   if (!project?.port) return { ok: false, status: 409, error: "Il progetto non ha una porta: impostala prima di dargli un indirizzo." };
   // Checked again at every apply; here only so the refusal comes with a reason.
-  const conflict = upstreamConflict(await claimedPorts(), projectId, listenPort(project, project.port));
+  const conflict = upstreamConflict(await claimedPorts(), projectId, upstreamPort(project, project.port));
   if (conflict) return { ok: false, status: 409, error: conflict };
 
   let domain = await db.selectFrom("domains").select("id").where("name", "=", offer.domain).executeTakeFirst();
