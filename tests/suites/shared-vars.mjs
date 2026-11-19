@@ -93,6 +93,12 @@ export async function run({ base, dataDir }) {
   res = await owner.call(`/api/env-groups/${smtpId}?reveal=true`);
   r.check("and open on request", res.body?.vars?.find((v) => v.key === "HOST")?.value === "mail.example.com");
 
+  // The pages render; what they show is their API's, asserted here.
+  res = await owner.call("/shared-variables");
+  r.check("the page of shared variables opens", res.status === 200 && String(res.body).includes("<html"), String(res.status));
+  res = await owner.call(`/shared-variables/${smtpId}`);
+  r.check("and so does a group's", res.status === 200, String(res.status));
+
   res = await owner.call("/api/env-groups", json("POST", { name: "loop", vars: [{ key: "A", value: "${{ shared.loop.B }}" }, { key: "B", value: "x${{ shared.loop.A }}" }] }));
   r.check("a group that loops on itself is refused", res.status === 400 && /circolare/.test(res.body?.error ?? ""), `${res.status} ${JSON.stringify(res.body)}`);
 
