@@ -132,10 +132,13 @@ function DayBars({ days, f, group }: { days: PublicDay[]; f: Formats; group: str
       className="group/strip relative grid gap-x-[2px]"
       style={{ gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }}
     >
-      {/* First, so a day's line, drawn over it in the same cell, wins. */}
-      <div className="text-muted col-span-full row-start-2 mt-1 flex justify-between text-meta" aria-hidden>
-        <span>{days.length} giorni fa</span>
-        <span>Oggi</span>
+      {/* First, so a day's line, drawn over it in the same cell, wins. The
+          middle words are for a finger only: a mouse finds the line by
+          hovering, but nothing else says that a bar can be tapped. */}
+      <div className="text-muted col-span-full row-start-2 mt-1 grid grid-cols-[auto_1fr_auto] gap-x-2 text-meta" aria-hidden>
+        <span className="whitespace-nowrap">{days.length} giorni fa</span>
+        <span className="hidden min-w-0 text-center pointer-coarse:inline">Tocca un giorno per i dettagli</span>
+        <span className="col-start-3 whitespace-nowrap">Oggi</span>
       </div>
       {days.map((d, i) => {
         const line = `${group}-${i}`;
