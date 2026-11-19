@@ -251,7 +251,8 @@
 
   --success: oklch(56% 0.15 155);
   --success-foreground: oklch(99% 0 0);
-  --warning: oklch(60% 0.14 65);
+  /* 56%, not 60%: small warning text on white needs 4.5:1, and 60% gave 4.1. */
+  --warning: oklch(56% 0.14 65);
   --warning-foreground: oklch(99% 0 0);
   --danger: oklch(55% 0.21 25);
   --danger-foreground: oklch(99% 0 0);
@@ -271,9 +272,10 @@
 }
 
 /* Each accent, darkened for a white page; the foreground flips to white where
-   the accent is now dark enough to carry it. */
+   the accent is now dark enough to carry it. Dark enough, too, for small accent
+   text on its own 10% tint (a badge, a chip) to keep 4.5:1. */
 [data-theme="light"][data-accent="blue"] {
-  --accent: oklch(54% 0.18 255);
+  --accent: oklch(52% 0.18 255);
   --accent-foreground: oklch(99% 0 0);
 }
 [data-theme="light"][data-accent="mono"] {
@@ -281,7 +283,7 @@
   --accent-foreground: oklch(99% 0 0);
 }
 [data-theme="light"][data-accent="teal"] {
-  --accent: oklch(52% 0.1 190);
+  --accent: oklch(51% 0.1 190);
   --accent-foreground: oklch(99% 0 0);
 }
 [data-theme="light"][data-accent="amber"] {
