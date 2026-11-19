@@ -7,6 +7,9 @@ import type { LogLine } from "@/components/ui/LogViewer";
 import { SelectField } from "@/components/ui/SelectField";
 import { StickySaveBar } from "@/components/ui/StickySaveBar";
 import { AccessPanel } from "@/components/users/AccessPanel";
+import { Hint } from "@/components/ui/Hint";
+import { LinkButton } from "@/components/ui/LinkButton";
+import { useServerHref } from "@/lib/hooks/useNode";
 import { useUrlTab } from "@/lib/hooks/useUrlTab";
 import { cn } from "@/lib/utils";
 import { BackupSection } from "./BackupSection";
@@ -68,6 +71,7 @@ export function SettingsTab({
   /** What a files move or a mount apply is saying, live. */
   operationLines: LogLine[];
 }) {
+  const href = useServerHref();
   const [section, setSection] = useUrlTab(SECTION_IDS, "general", "section");
   const [saving, setSaving] = useState(false);
   // Merged rather than replaced: the save answers with the row, and what only
@@ -196,7 +200,22 @@ export function SettingsTab({
           <AdvancedSection form={form} project={project} onRefresh={onRefresh} operationLines={operationLines} />
         </div>
         <div {...show("permissions")}>
-          <AccessPanel kind="project" id={project.id} />
+          {/* An environment's grants are production's: lib/principal.ts reads them, never its own. */}
+          {project.environment_of ? (
+            <Hint icon="solar:users-group-rounded-linear" title="Permessi del progetto di produzione">
+              <p>Questo ambiente segue i permessi del progetto di produzione: chi può gestire quel progetto gestisce anche questo.</p>
+              <LinkButton
+                href={href(`/projects/${project.environment_of}?tab=settings&section=permissions`)}
+                variant="secondary"
+                size="sm"
+                className="mt-2"
+              >
+                Apri i permessi di produzione
+              </LinkButton>
+            </Hint>
+          ) : (
+            <AccessPanel kind="project" id={project.id} />
+          )}
         </div>
         <div {...show("danger")}>
           <DangerSection project={project} />

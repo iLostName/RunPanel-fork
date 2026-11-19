@@ -18,6 +18,7 @@ import { Tabs } from "@/components/ui/Tabs";
 import { parseContractJson } from "@/lib/deploy-contract";
 
 import { ProjectHeader } from "./_components/ProjectHeader";
+import { EnvironmentSwitch } from "./_components/EnvironmentSwitch";
 import { ProjectOverview } from "./_components/ProjectOverview";
 import { LogsTab } from "./_components/LogsTab";
 import { DeploymentsTab } from "./_components/DeploymentsTab";
@@ -28,7 +29,7 @@ import { TerminalTab } from "./_components/TerminalTab";
 import { SettingsTab } from "./_components/SettingsTab";
 import { VersionDialog } from "./_components/VersionDialog";
 import { FilesTab } from "./_components/FilesTab";
-import type { Deployment, ProcessInfo, Project, SettingsSectionId, TabId } from "./_components/types";
+import type { Deployment, EnvironmentsResponse, ProcessInfo, Project, SettingsSectionId, TabId } from "./_components/types";
 import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { locateMember } from "@/lib/locate-member";
 import { projectControlText } from "@/lib/status";
@@ -177,6 +178,15 @@ export default function ProjectDetailPage() {
     { intervalMs: poll5000 }
   );
   const processInfo = statusData?.process ?? null;
+
+  // The family for the switch at the top. Its statuses change with the
+  // siblings' deploys, which this page's stream does not carry: polled, slowly.
+  const poll15000 = usePollInterval(15000);
+  const { data: environments } = useResource<EnvironmentsResponse>(
+    api(`/api/projects/${projectId}/environments`),
+    { intervalMs: poll15000 }
+  );
+  const family = environments?.family ?? null;
 
   // The row changes without a deploy too (a crash noticed by the sweep, a
   // scheduled restart, someone else pressing Stop): when the polled status
@@ -416,8 +426,10 @@ export default function ProjectDetailPage() {
 
   return (
     <div>
+      <EnvironmentSwitch project={project} family={family} />
       <ProjectHeader
         project={project}
+        family={family}
         busy={deploying}
         onDeploy={handleDeploy}
         onControl={handleControl}

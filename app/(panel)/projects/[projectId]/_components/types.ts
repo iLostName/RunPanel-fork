@@ -104,6 +104,73 @@ export interface Project {
   /** Who may reach the published port, and whether the gate enforcing it is up. */
   access: AccessValue;
   gate: GateValue;
+  /**
+   * The production project this one is an environment of (migration 053), and
+   * which kind. Optional: a server on an older release does not send them.
+   */
+  environment_of?: string | null;
+  environment?: "staging" | "preview" | null;
+}
+
+/** One member of a project's family — `GET /api/projects/{id}/environments`. */
+export interface EnvironmentBrief {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  environment: "staging" | "preview" | null;
+  branch: string;
+  pinnedSha: string | null;
+  url: string | null;
+  /** The commit of its live deployment, when one worked. */
+  liveCommit: string | null;
+  createdAt: string;
+  /** For a preview: its pull request (migration 054). */
+  pr?: { number: number; title: string; author: string; url: string; fork: boolean } | null;
+}
+
+export interface Family {
+  production: EnvironmentBrief;
+  staging: EnvironmentBrief | null;
+  previews: EnvironmentBrief[];
+}
+
+export type AddressOffer =
+  | { kind: "domain"; domainId: string; subdomain: string; hostname: string }
+  | { kind: "instant"; label: string; hostname: string };
+
+/** What creating a staging copy would do, for its dialog. */
+export interface StagingOffer {
+  blocker: string | null;
+  branch: string;
+  branches: string[] | null;
+  address: AddressOffer | null;
+  addressNote: string | null;
+  databases: { id: string; name: string; envKey: string }[];
+}
+
+export interface EnvironmentsResponse {
+  kind: "production" | "staging" | "preview";
+  family: Family | null;
+  offer: StagingOffer | null;
+}
+
+/** What "Promuovi in produzione" would deploy — `GET /api/projects/{id}/promote`. */
+export interface PromotionPreview {
+  staging: { id: string; name: string; branch: string };
+  production: {
+    id: string;
+    name: string;
+    branch: string;
+    status: string;
+    pinnedSha: string | null;
+    autoDeploy: boolean;
+    rollback: boolean;
+    zeroDowntime: boolean;
+  } | null;
+  commit: { sha: string; message: string | null; author: string | null; date: string | null } | null;
+  blocker: string | null;
+  variables: { key: string; change: "added" | "changed" | "removed" }[];
 }
 
 /** One entry of the branch's timeline, as the version picker renders it. */
