@@ -48,6 +48,10 @@ export interface EnvPreview {
   origin: ConnectionOrigin;
   vars: PreviewVar[];
   problems: number;
+  /** For an environment: the projects it inherits from, lowest first (lib/environments.ts). */
+  inherits: { id: string; name: string; environment: "production" | "staging" }[];
+  /** Inherited variables not handed down, with the sentence that says why. */
+  withheld: { key: string; source: EnvSource; reason: string }[];
 }
 
 const MASK = "••••••••";
@@ -117,7 +121,12 @@ export async function previewProjectEnv(
     if (v.value === null) return false;
     if (v.source.kind === "panel") return true;
     if (v.source.kind === "database") return canCredentials(v.source.id);
-    const base = v.source.kind === "own" ? satisfies(access, PROJECT_ACTIONS["env.reveal"]) : hasPermission(principal, "variables");
+    // An inherited variable is production's own, and production's grants are
+    // this environment's: the same right reveals it.
+    const base =
+      v.source.kind === "own" || v.source.kind === "inherited"
+        ? satisfies(access, PROJECT_ACTIONS["env.reveal"])
+        : hasPermission(principal, "variables");
     return base && v.refs.every(readsTarget);
   };
 
@@ -137,5 +146,7 @@ export async function previewProjectEnv(
       };
     }),
     problems: resolution.problems.length,
+    inherits: snap.inherited.map((from) => ({ id: from.project.id, name: from.project.name, environment: from.project.environment })),
+    withheld: resolution.withheld,
   };
 }

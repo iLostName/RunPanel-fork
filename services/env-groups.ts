@@ -1,6 +1,7 @@
 import { getDb } from "@/lib/db";
 import { tryDecrypt } from "@/lib/crypto";
 import { parseValue, sharedClosure, type EnvPair } from "@/lib/env-refs";
+import { inheritanceChain } from "@/lib/environments";
 
 /**
  * The shared variable groups of this server, read from the store.
@@ -89,6 +90,9 @@ export interface ProjectBrief {
   status: string;
   runtime_type: string;
   builder_config: string;
+  /** An environment receives its production's groups too: see `groupUsage`. */
+  environment_of: string | null;
+  environment: string | null;
 }
 
 export interface GroupUsage {
@@ -129,7 +133,11 @@ export interface UsageContext {
 export async function loadUsageContext(): Promise<UsageContext> {
   const db = await getDb();
   const [projects, links, own] = await Promise.all([
-    db.selectFrom("projects").select(["id", "name", "slug", "status", "runtime_type", "builder_config"]).orderBy("name").execute(),
+    db
+      .selectFrom("projects")
+      .select(["id", "name", "slug", "status", "runtime_type", "builder_config", "environment_of", "environment"])
+      .orderBy("name")
+      .execute(),
     db.selectFrom("project_env_groups").select(["project_id", "group_id", "position"]).execute(),
     db.selectFrom("env_vars").select(["project_id", "key", "value"]).execute(),
   ]);
@@ -183,6 +191,12 @@ export async function groupUsage(
     const viaGroup = links.some((l) => l.project_id === project.id && dependents.has(l.group_id));
     const viaOwn = touches((ownByProject.get(project.id) ?? []).map((v) => v.value));
     if (viaGroup || viaOwn) referencing.push(project);
+  }
+  // An environment inherits what its production (and a preview, its staging)
+  // receives, so a change that reaches those reaches it at its next deploy.
+  const reached = new Set([...seen, ...referencing.map((p) => p.id)]);
+  for (const project of projects) {
+    if (!reached.has(project.id) && inheritanceChain(project, projects).some((from) => reached.has(from.id))) referencing.push(project);
   }
 
   // Who reads which name directly: removing one of these breaks its reader.

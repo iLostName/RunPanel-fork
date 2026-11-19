@@ -74,6 +74,24 @@ export function environmentsBlocker(project: {
   return null;
 }
 
+/**
+ * The projects an environment inherits its variables from, lowest first.
+ *
+ * Staging inherits from production. A preview inherits from staging when
+ * there is one — the closest thing to what it will become — which itself
+ * inherits from production, so both come along, production first. An
+ * ordinary project, or one whose production is gone, inherits nothing.
+ */
+export function inheritanceChain<T extends { id: string } & EnvironmentColumns>(self: T, all: readonly T[]): T[] {
+  const kind = environmentKindOf(self);
+  if (!kind) return [];
+  const production = all.find((p) => p.id === self.environment_of && !p.environment_of);
+  if (!production) return [];
+  if (kind !== "preview") return [production];
+  const staging = all.find((p) => p.environment_of === production.id && environmentKindOf(p) === "staging");
+  return staging ? [production, staging] : [production];
+}
+
 // --- names ---------------------------------------------------------------------
 
 const NAME_MAX = 100;

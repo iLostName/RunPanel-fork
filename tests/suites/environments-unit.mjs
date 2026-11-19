@@ -34,6 +34,35 @@ export async function run({ repoRoot }) {
   r.check("production is its own production", env.productionIdOf({ id: "p1", environment_of: null, environment: null }) === "p1");
   r.check("an environment's production is its parent", env.productionIdOf({ id: "p2", environment_of: "p1", environment: "staging" }) === "p1");
 
+  // --- whom an environment inherits from ------------------------------------------------
+  const family = [
+    { id: "prod", environment_of: null, environment: null },
+    { id: "stage", environment_of: "prod", environment: "staging" },
+    { id: "pr1", environment_of: "prod", environment: "preview" },
+    { id: "other", environment_of: null, environment: null },
+  ];
+  const chainOf = (id, rows = family) => env.inheritanceChain(rows.find((p) => p.id === id), rows).map((p) => p.id).join(">");
+  r.check("production inherits from nobody", chainOf("prod") === "");
+  r.check("staging inherits from production", chainOf("stage") === "prod");
+  r.check("a preview from production, then staging over it", chainOf("pr1") === "prod>stage");
+  r.check("a preview with no staging from production alone", chainOf("pr1", family.filter((p) => p.id !== "stage")) === "prod");
+  r.check("an environment whose production is gone inherits nothing", chainOf("stage", family.filter((p) => p.id !== "prod")) === "");
+
+  const refs = await loadTs(repoRoot, "lib", "env-refs.ts");
+  const merged = refs.mergeLayers(
+    [{ id: "g-stage", name: "stage-cfg", vars: [{ key: "API", value: "https://api.staging" }] }],
+    [{ key: "OWN", value: "mine" }, { key: "SHARED", value: "staging wins" }],
+    [
+      { source: { kind: "group", id: "g-prod", name: "smtp", via: "Shop" }, vars: [{ key: "SMTP", value: "mail" }, { key: "API", value: "from prod group" }] },
+      { source: { kind: "inherited", id: "prod", name: "Shop", environment: "production" }, vars: [{ key: "API", value: "https://api.prod" }, { key: "SHARED", value: "prod" }, { key: "ONLY_PROD", value: "p" }] },
+    ]
+  );
+  const winner = (key) => merged.find((v) => v.key === key);
+  r.check("what only production sets is inherited", winner("ONLY_PROD")?.source.kind === "inherited" && winner("ONLY_PROD")?.raw === "p");
+  r.check("production's own variables win over production's groups", winner("SMTP")?.source.via === "Shop");
+  r.check("a group the environment attaches wins over what it inherits", winner("API")?.source.id === "g-stage" && winner("API")?.overridden.map((s) => s.kind).join() === "inherited,group");
+  r.check("and its own variables win over everything inherited", winner("SHARED")?.source.kind === "own" && winner("SHARED")?.raw === "staging wins");
+
   // --- who may have one -------------------------------------------------------------
   const github = { source_type: "github", source_url: "https://github.com/acme/shop", environment_of: null };
   r.check("a GitHub project may have environments", env.environmentsBlocker(github) === null);
