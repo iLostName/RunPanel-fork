@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Code, Hint } from "@/components/ui/Hint";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { CheckboxField } from "@/components/ui/CheckboxField";
+import { InfoTip } from "@/components/ui/Tooltip";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
@@ -584,14 +585,16 @@ function Group({
       <ul className="divide-border divide-y">
         {entries.map((entry) => (
           <li key={entry.id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+            {/* The subtitle ends in "…" like the name: on a phone a long one ran
+                on under the state beside it. */}
             <CheckboxField
-              className="flex-1"
+              className="min-w-0 flex-1"
               isSelected={entry.autostart}
               onChange={(next) => onEdit(entry.id, { autostart: next })}
               label={
-                <span className="min-w-0">
+                <span className="block min-w-0">
                   <span className="text-foreground block truncate text-sm">{entry.name}</span>
-                  <span className="text-muted text-xs">{entry.subtitle}</span>
+                  <span className="text-muted block truncate text-xs">{entry.subtitle}</span>
                 </span>
               }
             />
@@ -622,12 +625,19 @@ function Group({
                 </TextField>
                 s
               </span>
-              <span title="Aspetta che risponda prima di passare al successivo">
+              <span
+                title="Aspetta che risponda prima di passare al successivo"
+                className="pointer-coarse:inline-flex pointer-coarse:items-center pointer-coarse:gap-0.5"
+              >
                 <CheckboxField
                   label={<span className="text-muted text-xs">pronto</span>}
                   isSelected={entry.waitHealthy}
                   onChange={(next) => onEdit(entry.id, { waitHealthy: next })}
                 />
+                {/* What "pronto" means is in the tooltip above, which a touch screen never shows. */}
+                <span className="hidden pointer-coarse:inline-flex">
+                  <InfoTip title="Pronto">Aspetta che risponda prima di passare al successivo.</InfoTip>
+                </span>
               </span>
             </div>
           </li>

@@ -235,6 +235,7 @@ function ServerUpdatesPage() {
                   ? "Il checkout è shallow, quindi il numero di build non è calcolabile"
                   : (data.release.date ?? undefined)
               }
+              touchNote={data.release.shallow ? undefined : data.release.date ? formatWhen(data.release.date) : undefined}
             />
             <Fact
               label="Ultimo controllo"
@@ -377,11 +378,14 @@ function Fact({
   value,
   mono,
   title,
+  touchNote,
 }: {
   label: string;
   value: string;
   mono?: boolean;
   title?: string;
+  /** What a touch screen shows under the value in place of the tooltip, when `title` is not fit to read as is. */
+  touchNote?: string;
 }) {
   return (
     <div className="min-w-0">
@@ -392,6 +396,8 @@ function Fact({
       >
         {value}
       </dd>
+      {/* The tooltip's text, under the value on a touch screen, which shows no tooltips. */}
+      {(touchNote ?? title) && <dd className="text-muted text-meta mt-0.5 hidden pointer-coarse:block">{touchNote ?? title}</dd>}
     </div>
   );
 }

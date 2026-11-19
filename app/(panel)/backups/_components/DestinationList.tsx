@@ -1,12 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { Button, Dropdown, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
+import { ActionSheet } from "@/components/ui/ActionSheet";
 import { Badge } from "@/components/ui/Badge";
 import { FieldHint } from "@/components/ui/Hint";
 import { RowMenu } from "@/components/ui/ListRow";
 import { Segmented } from "@/components/ui/Segmented";
 import { MAX_COPIES } from "@/lib/backup-copies";
+import { useIsPhone } from "@/lib/hooks/useMediaQuery";
 import type { DestinationView, PolicyDestinationView } from "@/components/backups/types";
 import { describeDestination } from "./providers";
 
@@ -75,6 +78,9 @@ export function DestinationList({
     onChange(next);
   };
 
+  const phone = useIsPhone();
+  const [sheetOpen, setSheetOpen] = useState(false);
+
   const listed = list.map((draft) => byId.get(draft.destinationId)).filter((d): d is DestinationView => Boolean(d));
   const offsite = listed.some((destination) => destination.type !== "local");
   const full = list.length >= MAX_COPIES;
@@ -131,38 +137,66 @@ export function DestinationList({
       </ol>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Dropdown>
-          <Button size="sm" variant="secondary" isDisabled={remaining.length === 0 || full}>
-            <Icon icon="solar:add-circle-linear" width={15} aria-hidden />
-            Aggiungi una copia
-          </Button>
-          <Dropdown.Popover placement="bottom start">
-            <Dropdown.Menu
-              aria-label="Destinazione della nuova copia"
-              onAction={(key) => onChange([...list, blankDraft(String(key))])}
-            >
-              {remaining.map((destination) => (
-                <Dropdown.Item key={destination.id} id={destination.id} textValue={destination.name}>
-                  <Icon
-                    icon={
-                      destination.type === "local"
-                        ? "solar:server-linear"
-                        : destination.type === "telegram"
-                          ? "solar:plain-linear"
-                          : "solar:cloud-storage-linear"
-                    }
-                    width={15}
-                    aria-hidden
-                  />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">{destination.name}</span>
-                    <span className="text-muted truncate text-xs">{describeDestination(destination)}</span>
-                  </span>
-                </Dropdown.Item>
-              ))}
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
+        {/* On a phone the choice opens as an action sheet, each destination on
+            a row of its own with where it writes under its name. */}
+        {phone ? (
+          <>
+            <Button size="sm" variant="secondary" isDisabled={remaining.length === 0 || full} onPress={() => setSheetOpen(true)}>
+              <Icon icon="solar:add-circle-linear" width={15} aria-hidden />
+              Aggiungi una copia
+            </Button>
+            <ActionSheet
+              isOpen={sheetOpen}
+              onOpenChange={setSheetOpen}
+              title="Destinazione della nuova copia"
+              actions={remaining.map((destination) => ({
+                id: destination.id,
+                label: destination.name,
+                description: describeDestination(destination),
+                icon:
+                  destination.type === "local"
+                    ? "solar:server-linear"
+                    : destination.type === "telegram"
+                      ? "solar:plain-linear"
+                      : "solar:cloud-storage-linear",
+                onAction: () => onChange([...list, blankDraft(destination.id)]),
+              }))}
+            />
+          </>
+        ) : (
+          <Dropdown>
+            <Button size="sm" variant="secondary" isDisabled={remaining.length === 0 || full}>
+              <Icon icon="solar:add-circle-linear" width={15} aria-hidden />
+              Aggiungi una copia
+            </Button>
+            <Dropdown.Popover placement="bottom start">
+              <Dropdown.Menu
+                aria-label="Destinazione della nuova copia"
+                onAction={(key) => onChange([...list, blankDraft(String(key))])}
+              >
+                {remaining.map((destination) => (
+                  <Dropdown.Item key={destination.id} id={destination.id} textValue={destination.name}>
+                    <Icon
+                      icon={
+                        destination.type === "local"
+                          ? "solar:server-linear"
+                          : destination.type === "telegram"
+                            ? "solar:plain-linear"
+                            : "solar:cloud-storage-linear"
+                      }
+                      width={15}
+                      aria-hidden
+                    />
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate">{destination.name}</span>
+                      <span className="text-muted truncate text-xs">{describeDestination(destination)}</span>
+                    </span>
+                  </Dropdown.Item>
+                ))}
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
+        )}
         {remaining.length === 0 && !full && (
           <span className="text-muted text-xs">Per una copia in più, aggiungi prima un&apos;altra destinazione dalla pagina Backup.</span>
         )}

@@ -103,12 +103,16 @@ export const Row = memo(function Row({
       </div>
 
       {/* Numbers stay on one line on every width: tabular figures and fixed
-          columns, so the values do not jitter as they update. */}
-      <div className="text-muted flex shrink-0 items-center gap-3 font-mono text-xs tabular-nums sm:gap-5">
-        <span className="w-14 text-right" title={cpu != null ? `${cpu.toFixed(1)}% di un core` : undefined}>
+          columns, so the values do not jitter as they update. On a phone they
+          are that line, under the name and named, so the name has the width:
+          beside two columns of figures it was cut to "gestionale-mag…". */}
+      <div className="text-muted flex shrink-0 items-center gap-3 font-mono text-xs tabular-nums max-sm:basis-full max-sm:pl-3.5 sm:gap-5">
+        <span className="w-14 text-right max-sm:w-auto max-sm:text-left" title={cpu != null ? `${cpu.toFixed(1)}% di un core` : undefined}>
+          <span className="font-sans sm:hidden">CPU </span>
           {formatMetric(share, "percent")}
         </span>
-        <span className="w-28 text-right">
+        <span className="w-28 text-right max-sm:w-auto max-sm:text-left">
+          <span className="font-sans sm:hidden">RAM </span>
           {formatBytes(memory)}
           {memShare !== null && <span className="text-muted/70"> · {formatMetric(memShare, "percent")}</span>}
         </span>
@@ -118,7 +122,7 @@ export const Row = memo(function Row({
   );
 
   const className = cn(
-    "flex w-full items-center gap-3 px-3 py-2 text-left transition-colors",
+    "flex w-full items-center gap-3 px-3 py-2 text-left transition-colors max-sm:flex-wrap max-sm:gap-y-0.5",
     nested ? "pl-8" : "",
     (href || onToggle) && "hover:bg-surface-hover"
   );
@@ -164,15 +168,16 @@ export function TableHead({ first }: { first: string }) {
   return (
     <div className="text-muted flex items-center gap-3 px-3 py-2 text-meta font-medium">
       <span className="flex-1">{first}</span>
+      {/* On a phone the figures are a line of each row, named there. */}
       <span className="flex shrink-0 gap-3 sm:gap-5">
-        <span className="flex w-14 items-center justify-end gap-0.5">
-          CPU
+        <span className="flex w-14 items-center justify-end gap-0.5 max-sm:w-auto">
+          CPU<span className="sm:hidden">&nbsp;e RAM</span>
           <InfoTip title="CPU del server">
             La quota di tutto il server: 100% vuol dire tutti i core occupati. Docker e PM2 contano invece un core alla volta,
             per cui un processo che ne occupa uno intero qui vale 100 diviso il numero dei core.
           </InfoTip>
         </span>
-        <span className="w-28 text-right">RAM (% del server)</span>
+        <span className="w-28 text-right max-sm:hidden">RAM (% del server)</span>
         <span className="hidden w-16 text-right sm:inline">Uptime</span>
       </span>
     </div>

@@ -60,13 +60,18 @@ export function PanelHeader({
   actions?: React.ReactNode;
   className?: string;
 }) {
+  // On a phone the actions go under the title when the two do not fit side by
+  // side: next to a segmented switch or two buttons, the title was cut to a
+  // word and its description squeezed into a column of three-word lines. A
+  // title with a sentence under it keeps at least 12rem before anything moves;
+  // a bare one only its own width, so "Ultimo deploy" keeps its link beside it.
   return (
-    <div className={cn("flex items-start justify-between gap-3", className)}>
-      <div className="min-w-0">
+    <div className={cn("flex items-start justify-between gap-3 max-md:flex-wrap max-md:gap-y-2.5", className)}>
+      <div className={cn("min-w-0", description ? "max-md:flex-[1_1_12rem]" : "max-md:flex-[1_1_auto]")}>
         <h2 className="text-foreground truncate text-sm font-medium">{title}</h2>
         {description && <p className="text-muted mt-0.5 text-xs">{description}</p>}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 max-md:max-w-full">{actions}</div>}
     </div>
   );
 }

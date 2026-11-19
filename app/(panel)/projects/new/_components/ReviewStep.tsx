@@ -531,7 +531,7 @@ export function ReviewStep({
             {problem}
           </p>
         )}
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 max-md:flex-col-reverse max-md:items-stretch max-md:*:w-full">
           <Button variant="ghost" onPress={onBack}>
             <Icon icon="solar:alt-arrow-left-linear" width={16} aria-hidden />
             Indietro

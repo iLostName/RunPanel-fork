@@ -13,6 +13,7 @@ import { useServerHref } from "@/lib/hooks/useNode";
 import { exportProjectConfig, projectHasSource } from "./project-facts";
 import { DuplicateDialog } from "./DuplicateDialog";
 import { useCan } from "@/lib/hooks/useMe";
+import { useIsPhone } from "@/lib/hooks/useMediaQuery";
 import type { Project, SettingsSectionId, TabId } from "./types";
 
 /**
@@ -50,6 +51,7 @@ export const ProjectHeader = memo(function ProjectHeader({
   const canHost = useCan("host");
   const canAudit = useCan("audit.view");
   const router = useRouter();
+  const phone = useIsPhone();
 
   const deploying = project.status === "deploying";
   // Read-only accounts see the state, not the controls: the server refuses
@@ -73,6 +75,9 @@ export const ProjectHeader = memo(function ProjectHeader({
 
   const menu: ResourceMenuItem[] = canOperate
     ? [
+        // On a phone the header is a row of four tiles, and stopping is the
+        // rarest of its actions: it moves in here, still asking first.
+        ...(phone && canStop ? [{ id: "stop", label: "Ferma", icon: "solar:stop-linear", onAction: () => setStopOpen(true) }] : []),
         ...(canPickVersion
           ? [{ id: "versions", label: "Scegli la versione da distribuire", icon: "solar:branching-paths-up-linear", disabled: busy || deploying, onAction: onOpenVersions }]
           : []),
@@ -207,7 +212,7 @@ export const ProjectHeader = memo(function ProjectHeader({
               </Button>
             )}
             {canOperate && canStop && (
-              <Button variant="outline" size="sm" onPress={() => setStopOpen(true)}>
+              <Button variant="outline" size="sm" className="max-md:hidden" onPress={() => setStopOpen(true)}>
                 <Icon icon="solar:stop-linear" width={16} aria-hidden />
                 Ferma
               </Button>

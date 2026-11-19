@@ -293,7 +293,8 @@ export default function UploadRestorePage() {
               )}
             >
               <Icon icon="solar:upload-minimalistic-linear" width={28} className="text-muted" aria-hidden />
-              <p className="text-muted text-sm">Trascina qui il file, oppure</p>
+              {/* Nothing is dragged on a touch screen: there the button alone. */}
+              <p className="text-muted text-sm pointer-coarse:hidden">Trascina qui il file, oppure</p>
               <Button size="sm" variant="secondary" onPress={() => input.current?.click()}>
                 Scegli il file
               </Button>

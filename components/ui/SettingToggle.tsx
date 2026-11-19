@@ -32,6 +32,7 @@ export function SettingToggle({
   isSelected,
   onChange,
   isDisabled = false,
+  hideLabelOnPhone = false,
   className,
 }: {
   label: React.ReactNode;
@@ -39,6 +40,12 @@ export function SettingToggle({
   isSelected: boolean;
   onChange: (next: boolean) => void;
   isDisabled?: boolean;
+  /**
+   * Only the switch below `md`, the label kept for screen readers. For a
+   * switch in a section's header, whose title already says what it turns on:
+   * beside it, the label left the title a word wide on a phone.
+   */
+  hideLabelOnPhone?: boolean;
   className?: string;
 }) {
   return (
@@ -55,7 +62,7 @@ export function SettingToggle({
           panel setting carries a sentence of description under its label,
           and at medium weight the two stop reading as label and gloss.
         */}
-        <span className="min-w-0 flex-1 font-normal">
+        <span className={cn("min-w-0 flex-1 font-normal", hideLabelOnPhone && "max-md:sr-only")}>
           <span className="text-foreground block text-sm">{label}</span>
           {description && (
             <span className="text-muted mt-0.5 block text-meta leading-relaxed">{description}</span>

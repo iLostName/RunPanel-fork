@@ -639,7 +639,8 @@ export function PolicyForm({ policy }: Props) {
         <CopyRetention list={copyList} destinations={allDestinations} onChange={setDrafts} />
       </Section>
 
-      <div className="flex items-center gap-2">
+      {/* Stacked on a phone, the save on top and as wide as the form. */}
+      <div className="flex items-center gap-2 max-md:flex-col max-md:items-stretch max-md:*:w-full">
         <Button onPress={save} isPending={saving}>
           <Icon icon="solar:diskette-linear" width={16} aria-hidden />
           {policy ? "Salva le modifiche" : "Crea la pianificazione"}

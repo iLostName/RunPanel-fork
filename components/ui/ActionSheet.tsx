@@ -12,6 +12,10 @@ export interface SheetAction {
   /** Red, in a group of its own at the end. */
   danger?: boolean;
   disabled?: boolean;
+  /** A second, smaller line: where a destination writes, what a choice means. */
+  description?: string;
+  /** The current choice, ticked: the folder a project is in. */
+  selected?: boolean;
   onAction: () => void;
 }
 
@@ -63,10 +67,15 @@ export function ActionSheet({
                     <button
                       type="button"
                       disabled={action.disabled}
+                      aria-current={action.selected ? "true" : undefined}
                       onClick={() => run(action)}
                       className={cn(
                         "touch-chrome flex min-h-12 w-full items-center gap-3 px-4 text-left text-sm transition-colors",
-                        "active:bg-default disabled:opacity-45 focus-visible:-outline-offset-2",
+                        "active:bg-default focus-visible:-outline-offset-2",
+                        // The current choice is ticked, not dimmed: it is where
+                        // things stand, which is worth reading at full strength.
+                        action.selected ? "disabled:opacity-100" : "disabled:opacity-45",
+                        action.description && "py-2",
                         action.danger ? "text-danger" : "text-foreground"
                       )}
                     >
@@ -78,7 +87,11 @@ export function ActionSheet({
                           className={cn("shrink-0", action.danger ? "text-danger" : "text-muted")}
                         />
                       )}
-                      <span className="min-w-0 flex-1 truncate">{action.label}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{action.label}</span>
+                        {action.description && <span className="text-muted block truncate text-xs">{action.description}</span>}
+                      </span>
+                      {action.selected && <Icon icon="solar:check-read-linear" width={18} aria-hidden className="text-accent shrink-0" />}
                     </button>
                   </li>
                 ))}

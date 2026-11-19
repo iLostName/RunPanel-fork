@@ -285,7 +285,10 @@ export const ProjectOverview = memo(function ProjectOverview({
       {/* Uptime and the resource history, once there is something running to measure. */}
       {project.last_success_at && <ProjectHealth projectId={project.id} />}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* `grid-cols-1` and not the implicit column: that one grows to the
+          longest line it holds, so on a phone a long commit message pushed
+          all four cards past the right edge of the screen. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel className="space-y-3">
           <PanelHeader
             title="Ultimo deploy"
@@ -301,7 +304,9 @@ export const ProjectOverview = memo(function ProjectOverview({
             <div className="space-y-1.5 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={last.status} />
-                <span className="text-foreground min-w-0 truncate">
+                {/* Two lines on a phone rather than one cut short: it is the
+                    only thing that says which version this is. */}
+                <span className="text-foreground min-w-0 truncate max-md:line-clamp-2 max-md:whitespace-normal">
                   {last.commit_message || (deploymentSucceeded(last.status) ? "Deploy riuscito" : "Deploy")}
                 </span>
               </div>

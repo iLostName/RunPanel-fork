@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Field } from "@/components/ui/Field";
 import { Badge } from "@/components/ui/Badge";
+import { RowMenu } from "@/components/ui/ListRow";
 import { KeyValue } from "@/components/ui/KeyValue";
 import { Advanced, Technical } from "@/components/ui/Technical";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
@@ -254,8 +255,24 @@ export default function DomainsPage() {
                   <li key={domain.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0 space-y-1">
                       <p className="flex items-center gap-2">
-                        <span className="text-foreground font-mono text-sm">{domain.name}</span>
+                        <span className="text-foreground min-w-0 font-mono text-sm [overflow-wrap:anywhere]">{domain.name}</span>
                         {domain.cloudflare && <Badge icon="solar:cloud-linear">Cloudflare</Badge>}
+                        {/* On a phone the delete is in the row's ⋯, as everywhere
+                            else there, instead of a red button on a line of its own. */}
+                        <span className="ml-auto sm:hidden">
+                          <RowMenu
+                            label={`Azioni per ${domain.name}`}
+                            actions={[
+                              {
+                                id: "remove",
+                                label: "Rimuovi…",
+                                icon: "solar:trash-bin-trash-linear",
+                                danger: true,
+                                onAction: () => setRemoving(domain),
+                              },
+                            ]}
+                          />
+                        </span>
                       </p>
                       <p className="text-muted text-xs">
                         {instantDomainAddress(domain.name) ? (
@@ -274,7 +291,7 @@ export default function DomainsPage() {
                             : `${domain.hostCount} indirizzi`}
                       </p>
                     </div>
-                    <Button variant="ghost" size="sm" className="text-danger shrink-0" onPress={() => setRemoving(domain)}>
+                    <Button variant="ghost" size="sm" className="text-danger shrink-0 max-sm:hidden" onPress={() => setRemoving(domain)}>
                       <Icon icon="solar:trash-bin-trash-linear" width={16} aria-hidden />
                       Rimuovi
                     </Button>

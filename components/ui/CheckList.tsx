@@ -104,7 +104,7 @@ export function CheckList({
               {check.href && check.tone !== "ok" && (
                 <Link
                   href={routeHref(check.href)}
-                  className="text-muted hover:text-foreground text-xs underline"
+                  className="touch-target text-muted hover:text-foreground text-xs underline"
                 >
                   Vai
                 </Link>

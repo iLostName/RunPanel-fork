@@ -35,7 +35,15 @@ export function CopyField({
     <div className={cn("space-y-1.5", className)}>
       {label && <span className="text-muted text-xs font-medium">{label}</span>}
       <div className="border-border bg-surface-secondary flex items-center gap-1 rounded-[var(--radius)] border px-3 py-2">
-        <code className={cn("text-foreground min-w-0 flex-1 font-mono text-xs", wrap ? "break-all" : "truncate")}>
+        {/* On a phone a revealed value wraps instead of ending in "…", `wrap`
+            or not: a connection string cut at a third of its length could not
+            be read there, and a phone has no hover to show the rest. */}
+        <code
+          className={cn(
+            "text-foreground min-w-0 flex-1 font-mono text-xs",
+            wrap ? "break-all" : "truncate max-md:whitespace-normal max-md:[overflow-wrap:anywhere]"
+          )}
+        >
           {revealed ? value : "•".repeat(Math.min(value.length, 32))}
         </code>
 
@@ -43,7 +51,7 @@ export function CopyField({
           <button
             type="button"
             onClick={() => setRevealed((r) => !r)}
-            className="text-muted hover:text-foreground rounded p-1 transition-colors"
+            className="touch-target text-muted hover:text-foreground self-start rounded p-1 transition-colors md:self-auto"
             aria-label={revealed ? "Nascondi valore" : "Mostra valore"}
           >
             <Icon icon={revealed ? "solar:eye-closed-linear" : "solar:eye-linear"} width={15} />
@@ -53,7 +61,7 @@ export function CopyField({
         <button
           type="button"
           onClick={() => copy(value)}
-          className="text-muted hover:text-foreground rounded p-1 transition-colors"
+          className="touch-target text-muted hover:text-foreground self-start rounded p-1 transition-colors md:self-auto"
           aria-label={`Copia${label ? ` ${label}` : ""}`}
         >
           <Icon icon={copied ? "solar:check-read-linear" : "solar:copy-linear"} width={15} />

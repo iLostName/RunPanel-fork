@@ -9,6 +9,7 @@ import { ServerPicker } from "@/components/cluster/ServerBits";
 import { useCan } from "@/lib/hooks/useMe";
 import { useServerHref } from "@/lib/hooks/useNode";
 import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
+import { useTabStrip } from "@/lib/hooks/useTabStrip";
 import { CATALOG, CATEGORY_LABEL, catalogCategories, filterCatalog, type CatalogCategory } from "@/lib/app-catalog";
 import { AppCard } from "./_components/AppCard";
 import { CatalogLocked } from "./_components/CatalogLocked";
@@ -28,6 +29,8 @@ export default function CatalogPage() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CatalogCategory | null>(null);
   const shown = useMemo(() => filterCatalog(CATALOG, { query, category }), [query, category]);
+  // The fades at the edges of the categories that scroll on a phone.
+  const strip = useTabStrip<HTMLDivElement>(category ?? "all");
 
   return (
     <>
@@ -51,12 +54,16 @@ export default function CatalogPage() {
               aria-label="Cerca un'app"
               className="sm:max-w-xs"
             />
-            <ChoiceGroup label="Categoria" className="flex flex-wrap">
-              <ChoiceCard compact selected={category === null} onSelect={() => setCategory(null)} title="Tutte" />
-              {catalogCategories().map((id) => (
-                <ChoiceCard key={id} compact selected={category === id} onSelect={() => setCategory(id)} title={CATEGORY_LABEL[id]} />
-              ))}
-            </ChoiceGroup>
+            {/* One row that scrolls sideways on a phone, like a row of tabs:
+                wrapped, the eight categories took four lines above the apps. */}
+            <div ref={strip} className="tab-strip max-md:overflow-x-auto max-md:pb-0.5">
+              <ChoiceGroup label="Categoria" className="flex flex-wrap max-md:w-max max-md:flex-nowrap">
+                <ChoiceCard compact selected={category === null} onSelect={() => setCategory(null)} title="Tutte" />
+                {catalogCategories().map((id) => (
+                  <ChoiceCard key={id} compact selected={category === id} onSelect={() => setCategory(id)} title={CATEGORY_LABEL[id]} />
+                ))}
+              </ChoiceGroup>
+            </div>
           </div>
 
           {shown.length === 0 ? (

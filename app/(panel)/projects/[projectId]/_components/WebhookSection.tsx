@@ -225,6 +225,7 @@ export function WebhookSection({
       actions={
         <SettingToggle
           label="Attiva auto-deploy"
+          hideLabelOnPhone
           isSelected={Boolean(project.auto_deploy)}
           onChange={toggleAutoDeploy}
           className="w-auto"

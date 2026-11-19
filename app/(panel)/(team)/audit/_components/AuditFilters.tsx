@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { useExpertMode } from "@/components/Providers";
+import { Badge } from "@/components/ui/Badge";
 import { Panel } from "@/components/ui/Panel";
+import { cn } from "@/lib/utils";
 import { SelectField, type SelectOption } from "@/components/ui/SelectField";
 import { PERMISSION_GROUPS } from "@/components/users/labels";
 import { AUDIT_CATEGORIES } from "@/lib/audit-filter";
@@ -124,57 +126,78 @@ export function AuditFilters({ filters, onChange }: { filters: AuditFilterValues
   }, [filters.scope, filters.scopeId, projects.data, services.data, folders.data, users.data]);
 
   const active = FILTER_KEYS.some((key) => filters[key]);
+  // The kind and the item it names count as one filter.
+  const count = FILTER_KEYS.filter((key) => key !== "scopeId" && filters[key]).length;
+  const [open, setOpen] = useState(false);
 
   return (
-    <Panel className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <SelectField
-          label="Categoria"
-          value={filters.category}
-          onChange={(category) => onChange({ category })}
-          options={[{ value: "", label: "Tutte" }, ...AUDIT_CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c].label }))]}
-        />
-        <TextField type="date" value={filters.from} onChange={(from) => onChange({ from })}>
-          <Label>Dal</Label>
-          <Input />
-        </TextField>
-        <TextField type="date" value={filters.to} onChange={(to) => onChange({ to })}>
-          <Label>Al</Label>
-          <Input />
-        </TextField>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <SelectField label="Chi" value={filters.userId} onChange={(userId) => onChange({ userId })} options={userOptions} />
-        <SelectField label="Azione" value={filters.action} onChange={(action) => onChange({ action })} options={actionOptions} />
-        <SelectField
-          label="Su cosa"
-          value={filters.scope}
-          onChange={(scope) => onChange({ scope, scopeId: "" })}
-          options={SCOPE_OPTIONS}
-        />
-      </div>
-      {filters.scope && (
-        <div className="grid gap-3 sm:grid-cols-3">
+    <Panel className={cn("space-y-3", !open && "max-md:space-y-0")}>
+      {/*
+        On a phone the filters fold behind one row that says how many are on:
+        open, the six fields filled the first screen and the log started below
+        it, every time the page was opened.
+      */}
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="touch-chrome flex w-full items-center gap-2 text-left md:hidden"
+      >
+        <Icon icon="solar:filter-linear" width={16} className="text-muted shrink-0" aria-hidden />
+        <span className="text-foreground flex-1 text-sm font-medium">Filtri</span>
+        {count > 0 && <Badge tone="accent">{count === 1 ? "1 attivo" : `${count} attivi`}</Badge>}
+        <Icon icon={open ? "solar:alt-arrow-up-linear" : "solar:alt-arrow-down-linear"} width={16} className="text-muted shrink-0" aria-hidden />
+      </button>
+      <div className={cn("space-y-3", !open && "max-md:hidden")}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <SelectField
-            label={TARGET_LABEL[filters.scope] ?? "Quale"}
-            value={filters.scopeId}
-            onChange={(scopeId) => onChange({ scopeId })}
-            options={targetOptions}
+            label="Categoria"
+            value={filters.category}
+            onChange={(category) => onChange({ category })}
+            options={[{ value: "", label: "Tutte" }, ...AUDIT_CATEGORIES.map((c) => ({ value: c, label: CATEGORY_LABEL[c].label }))]}
+          />
+          <TextField type="date" value={filters.from} onChange={(from) => onChange({ from })}>
+            <Label>Dal</Label>
+            <Input />
+          </TextField>
+          <TextField type="date" value={filters.to} onChange={(to) => onChange({ to })}>
+            <Label>Al</Label>
+            <Input />
+          </TextField>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <SelectField label="Chi" value={filters.userId} onChange={(userId) => onChange({ userId })} options={userOptions} />
+          <SelectField label="Azione" value={filters.action} onChange={(action) => onChange({ action })} options={actionOptions} />
+          <SelectField
+            label="Su cosa"
+            value={filters.scope}
+            onChange={(scope) => onChange({ scope, scopeId: "" })}
+            options={SCOPE_OPTIONS}
           />
         </div>
-      )}
-      {active && (
-        <div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onPress={() => onChange(Object.fromEntries(FILTER_KEYS.map((key) => [key, ""])) as Partial<AuditFilterValues>)}
-          >
-            <Icon icon="solar:close-circle-linear" width={15} aria-hidden />
-            Azzera i filtri
-          </Button>
-        </div>
-      )}
+        {filters.scope && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <SelectField
+              label={TARGET_LABEL[filters.scope] ?? "Quale"}
+              value={filters.scopeId}
+              onChange={(scopeId) => onChange({ scopeId })}
+              options={targetOptions}
+            />
+          </div>
+        )}
+        {active && (
+          <div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onPress={() => onChange(Object.fromEntries(FILTER_KEYS.map((key) => [key, ""])) as Partial<AuditFilterValues>)}
+            >
+              <Icon icon="solar:close-circle-linear" width={15} aria-hidden />
+              Azzera i filtri
+            </Button>
+          </div>
+        )}
+      </div>
     </Panel>
   );
 }

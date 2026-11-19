@@ -12,6 +12,8 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DeleteButton } from "@/components/ui/DangerAction";
+import { Fab } from "@/components/ui/Fab";
+import { PhoneRowMenu } from "@/components/ui/PhoneMenu";
 import { DestinationsPanel } from "./_components/DestinationsPanel";
 import { EncryptionPanel } from "./_components/EncryptionPanel";
 import { HostedCopiesPanel } from "./_components/HostedCopiesPanel";
@@ -285,7 +287,9 @@ export default function BackupsPage() {
                 Ripristina da un archivio
               </LinkButton>
             )}
-            <LinkButton href={href("/backups/new")}>
+            {/* On a phone this is the floating button at the end of the page:
+                beside "Ripristina da un archivio" the row took two lines. */}
+            <LinkButton href={href("/backups/new")} className="max-md:hidden">
               <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
               Nuova pianificazione
             </LinkButton>
@@ -361,12 +365,18 @@ export default function BackupsPage() {
           ) : (
             <ul className="divide-border divide-y">
               {policyList.map((policy) => (
-                <li key={`${policy.memberId}:${policy.id}`} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+                // On a phone the row opens the policy from anywhere on it, and
+                // keeps one quick action and a ⋯ (`ListRow`'s shape): with three
+                // buttons the name was cut to a word.
+                <li
+                  key={`${policy.memberId}:${policy.id}`}
+                  className="flex flex-wrap items-center gap-3 px-4 py-3 max-md:relative max-md:active:bg-surface-hover sm:px-5"
+                >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <Link
                         href={href(`/backups/policies/${policy.id}`, policy.memberId)}
-                        className="text-foreground truncate text-sm font-medium hover:underline"
+                        className="text-foreground max-md:touch-chrome truncate text-sm font-medium hover:underline max-md:after:absolute max-md:after:inset-0"
                       >
                         {policy.name}
                       </Link>
@@ -387,6 +397,10 @@ export default function BackupsPage() {
                     <p className="text-muted/80 mt-0.5 truncate text-meta">
                       {policy.targets.map((t) => describeTarget(t, catalogFor(policy.memberId))).join(" · ")}
                     </p>
+                    {/* The column on the right is not drawn on a phone. */}
+                    <p className="text-muted/80 mt-0.5 truncate text-meta sm:hidden">
+                      prossima {formatRelative(policy.nextRunAt)} · ultima {formatRelative(policy.lastRunAt)}
+                    </p>
                   </div>
 
                   <div className="text-muted hidden text-right text-xs sm:block">
@@ -394,20 +408,22 @@ export default function BackupsPage() {
                     <div>ultima {formatRelative(policy.lastRunAt)}</div>
                   </div>
 
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 max-md:relative max-md:z-10">
                     <Button
                       size="sm"
                       variant="secondary"
                       onPress={() => runNow(policy)}
                       isPending={busy === `/api/backups/policies/${policy.id}/run`}
                       isDisabled={busyOn(policy.memberId)}
+                      aria-label={`Esegui ora ${policy.name}`}
                     >
                       <Icon icon="solar:play-linear" width={15} aria-hidden />
-                      Esegui ora
+                      <span className="max-md:hidden">Esegui ora</span>
                     </Button>
                     <Button
                       size="sm"
                       variant="ghost"
+                      className="max-md:hidden"
                       onPress={() => togglePolicy(policy)}
                       isPending={busy === policy.id}
                       aria-label={policy.enabled ? "Disattiva" : "Attiva"}
@@ -420,12 +436,31 @@ export default function BackupsPage() {
                     </Button>
                     <DeleteButton
                       label={`Elimina la pianificazione ${policy.name}`}
+                      className="max-md:hidden"
                       confirm={{
                         title: `Eliminare "${policy.name}"?`,
                         description:
                           "Gli archivi già creati restano e si possono ancora ripristinare. Da adesso non ne verranno creati altri da questa pianificazione.",
                       }}
                       onConfirm={() => removePolicy(policy.id, policy.memberId)}
+                    />
+                    <PhoneRowMenu
+                      label={`Azioni per ${policy.name}`}
+                      actions={[
+                        {
+                          id: "toggle",
+                          label: policy.enabled ? "Disattiva" : "Attiva",
+                          icon: policy.enabled ? "solar:pause-linear" : "solar:play-circle-linear",
+                          onAction: () => void togglePolicy(policy),
+                        },
+                      ]}
+                      remove={{
+                        label: "Elimina…",
+                        title: `Eliminare "${policy.name}"?`,
+                        description:
+                          "Gli archivi già creati restano e si possono ancora ripristinare. Da adesso non ne verranno creati altri da questa pianificazione.",
+                        onConfirm: () => removePolicy(policy.id, policy.memberId),
+                      }}
                     />
                   </div>
                 </li>
@@ -470,13 +505,18 @@ export default function BackupsPage() {
           ) : (
             <ul className="divide-border divide-y">
               {runList.map((run) => (
-                <li key={`${run.memberId}:${run.id}`} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+                // On a phone the row is the way to the run's page, so
+                // "Dettagli" goes, and the download and the delete are in the ⋯.
+                <li
+                  key={`${run.memberId}:${run.id}`}
+                  className="flex flex-wrap items-center gap-3 px-4 py-3 max-md:relative max-md:active:bg-surface-hover sm:px-5"
+                >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <StatusBadge status={run.status} />
                       <Link
                         href={href(`/backups/runs/${run.id}`, run.memberId)}
-                        className="text-foreground truncate text-sm hover:underline"
+                        className="text-foreground max-md:touch-chrome truncate text-sm hover:underline max-md:after:absolute max-md:after:inset-0"
                       >
                         {run.policyName ?? "Esecuzione manuale"}
                       </Link>
@@ -528,26 +568,54 @@ export default function BackupsPage() {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 max-md:relative max-md:z-10">
                     {run.hasArchive && (
                       <LinkButton
                         href={memberApi(run.memberId, `/api/backups/runs/${run.id}/download`)}
                         variant="ghost"
                         download
                         aria-label="Scarica l'archivio"
+                        className="max-md:hidden"
                       >
                         <Icon icon="solar:download-linear" width={16} aria-hidden />
                       </LinkButton>
                     )}
-                    <LinkButton href={href(`/backups/runs/${run.id}`, run.memberId)}>Dettagli</LinkButton>
+                    <LinkButton href={href(`/backups/runs/${run.id}`, run.memberId)} className="max-md:hidden">
+                      Dettagli
+                    </LinkButton>
                     <DeleteButton
                       label="Elimina questo backup"
+                      className="max-md:hidden"
                       isDisabled={run.status === "running" || run.copies?.some((copy) => copy.status === "uploading")}
                       confirm={{
                         title: "Eliminare questo backup?",
                         description: `${deleteWhere(run)} Se è l'ultimo riuscito, resti senza un punto di ripristino.`,
                       }}
                       onConfirm={() => removeRun(run.id, run.memberId)}
+                    />
+                    <PhoneRowMenu
+                      label={`Azioni per il backup del ${formatWhen(run.startedAt)}`}
+                      actions={
+                        run.hasArchive
+                          ? [
+                              {
+                                id: "download",
+                                label: "Scarica l'archivio",
+                                icon: "solar:download-linear",
+                                onAction: () => {
+                                  window.location.href = memberApi(run.memberId, `/api/backups/runs/${run.id}/download`);
+                                },
+                              },
+                            ]
+                          : []
+                      }
+                      remove={{
+                        label: "Elimina…",
+                        title: "Eliminare questo backup?",
+                        description: `${deleteWhere(run)} Se è l'ultimo riuscito, resti senza un punto di ripristino.`,
+                        disabled: run.status === "running" || run.copies?.some((copy) => copy.status === "uploading"),
+                        onConfirm: () => removeRun(run.id, run.memberId),
+                      }}
                     />
                   </div>
                 </li>
@@ -575,6 +643,7 @@ export default function BackupsPage() {
         </Hint>
       </div>
 
+      <Fab href={href("/backups/new")} label="Nuova pianificazione" />
     </>
   );
 }

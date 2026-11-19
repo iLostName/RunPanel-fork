@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
+import { useInstall } from "@/lib/pwa/install";
+import { SW_CACHE_PREFIX } from "@/lib/pwa/service-worker";
 
 /**
  * Whether this error is the page asking for a file the server no longer has.
@@ -89,6 +91,27 @@ export default function PanelError({
   }, [error]);
 
   const stale = isStaleBundle(error);
+  // The installed app has no tab, no address bar and no cache of its own to
+  // clear by hand: what to do next is said in its terms.
+  const { standalone } = useInstall();
+  const [clearing, setClearing] = useState(false);
+
+  /*
+    What "clear the cache" was asking the person to do, done here: the copies
+    the service worker keeps (`runpanel-*`, lib/pwa/service-worker.ts) are
+    dropped and the page loads again from the server. Only those: the worker
+    itself stays registered, so an installed app keeps its notifications.
+  */
+  async function reloadFresh() {
+    setClearing(true);
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((key) => key.startsWith(SW_CACHE_PREFIX)).map((key) => caches.delete(key)));
+    } catch {
+      /* no Cache Storage here (plain HTTP): a reload is all there is */
+    }
+    window.location.reload();
+  }
 
   if (reloading) {
     return (
@@ -101,7 +124,7 @@ export default function PanelError({
         />
         <h1 className="text-foreground mt-3 text-base font-medium">Ricarico la pagina</h1>
         <p className="text-muted mt-1 max-w-md text-sm">
-          Il pannello è stato ricostruito da quando hai aperto questa scheda, quindi stava
+          Il pannello è stato aggiornato da quando hai aperto questa pagina, quindi stava
           chiedendo file di una versione che non c&apos;è più.
         </p>
       </div>
@@ -114,7 +137,9 @@ export default function PanelError({
       <h1 className="text-foreground mt-3 text-base font-medium">Qualcosa è andato storto</h1>
       <p className="text-muted mt-1 max-w-md text-sm">
         {stale
-          ? "La pagina appartiene a una versione del pannello che non c'è più, e ricaricarla non è bastato. Prova a svuotare la cache di questa scheda."
+          ? `La pagina appartiene a una versione del pannello che non c'è più, e ricaricarla non è bastato. «Ricarica da zero» scarica di nuovo i file del pannello; se non basta, ${
+              standalone ? "chiudi l'app e riaprila" : "chiudi questa scheda e riapri il pannello"
+            }.`
           : "La pagina non è riuscita a caricarsi. Riprova; se continua, il dettaglio qui sotto è quello che serve per capire perché."}
       </p>
 
@@ -143,9 +168,10 @@ export default function PanelError({
         variant="secondary"
         size="sm"
         className="mt-5"
-        onPress={() => (stale ? window.location.reload() : reset())}
+        isPending={clearing}
+        onPress={() => (stale ? void reloadFresh() : reset())}
       >
-        {stale ? "Ricarica" : "Riprova"}
+        {stale ? "Ricarica da zero" : "Riprova"}
       </Button>
     </div>
   );

@@ -105,7 +105,7 @@ export function FolderHeading({
         <p className="text-muted mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
           <span>{projectCountLabel(count)}</span>
           {slices.map((slice) => (
-            <span key={slice.label} className="inline-flex items-center gap-1.5">
+            <span key={slice.label} className="inline-flex items-center gap-1.5 whitespace-nowrap">
               <span className={cn("size-1.5 rounded-full", TONE_DOT[slice.tone])} aria-hidden />
               {slice.label}
               <span className="text-foreground tabular-nums">{slice.count}</span>

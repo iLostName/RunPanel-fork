@@ -142,10 +142,21 @@ function TableList({ call, database, onPick }: { call: BrowseCall; database: str
                 className="text-muted shrink-0"
                 aria-hidden
               />
-              <span className="text-foreground min-w-0 flex-1 truncate font-mono text-sm">{label(table)}</span>
-              {KIND_LABEL[table.kind] && <span className="text-muted text-meta shrink-0">{KIND_LABEL[table.kind]}</span>}
-              <span className="text-muted text-meta shrink-0 tabular-nums">{estimate(table)}</span>
-              {expert && table.bytes !== null && <span className="text-muted text-meta w-16 shrink-0 text-right tabular-nums">{formatBytes(table.bytes)}</span>}
+              {/* On a phone what kind of table and how big go under the name:
+                  beside it they left "indirizzi_di_s…" of a name, or nothing. */}
+              <span className="min-w-0 flex-1 md:contents">
+                <span className="text-foreground block min-w-0 flex-1 truncate font-mono text-sm">{label(table)}</span>
+                <span className="text-muted text-meta block truncate tabular-nums md:hidden">
+                  {[KIND_LABEL[table.kind], estimate(table), expert && table.bytes !== null ? formatBytes(table.bytes) : null]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </span>
+              {KIND_LABEL[table.kind] && <span className="text-muted text-meta shrink-0 max-md:hidden">{KIND_LABEL[table.kind]}</span>}
+              <span className="text-muted text-meta shrink-0 tabular-nums max-md:hidden">{estimate(table)}</span>
+              {expert && table.bytes !== null && (
+                <span className="text-muted text-meta w-16 shrink-0 text-right tabular-nums max-md:hidden">{formatBytes(table.bytes)}</span>
+              )}
               <Icon icon="solar:alt-arrow-right-linear" width={15} className="text-muted shrink-0" aria-hidden />
             </button>
           </li>

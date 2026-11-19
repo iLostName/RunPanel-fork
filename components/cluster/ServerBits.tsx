@@ -42,8 +42,10 @@ export function ServerFilter({ className }: { className?: string }) {
   return (
     <SelectField
       ariaLabel="Server"
-      // The top bar has the same selector on wider screens; this one is for phones.
-      className={cn("w-44 sm:hidden", className)}
+      // The top bar has the same selector on wider screens; this one is for
+      // phones, where it takes its own line above the header's buttons rather
+      // than pushing one of them onto a second.
+      className={cn("w-full sm:hidden", className)}
       value={serverParam ?? ALL}
       onChange={(v) => select(v === ALL ? null : v)}
       options={[
