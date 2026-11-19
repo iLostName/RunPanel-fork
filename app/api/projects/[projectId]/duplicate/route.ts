@@ -140,6 +140,20 @@ export async function POST(request: NextRequest, { params }: Params) {
             .values(rows.map((row) => ({ id: generateId(), project_id: id, key: row.key, value: row.value, created_at: now })))
             .execute();
         }
+        // The shared groups too, in the same order: without them the copy
+        // would deploy with fewer variables than it shows it was copied with.
+        // Whoever duplicates holds the host permission, which reads them anyway.
+        const groups = await db
+          .selectFrom("project_env_groups")
+          .select(["group_id", "position"])
+          .where("project_id", "=", projectId)
+          .execute();
+        if (groups.length > 0) {
+          await db
+            .insertInto("project_env_groups")
+            .values(groups.map((row) => ({ project_id: id, group_id: row.group_id, position: row.position, created_at: now })))
+            .execute();
+        }
       }
 
       // An uploaded project has no repository to clone from: its files are copied.
@@ -152,6 +166,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     } catch (err) {
       // Nothing half-made: the copy goes away with its rows.
       await db.deleteFrom("env_vars").where("project_id", "=", id).execute();
+      await db.deleteFrom("project_env_groups").where("project_id", "=", id).execute();
       await db.deleteFrom("projects").where("id", "=", id).execute();
       fs.rmSync(getRepoPath(slug), { recursive: true, force: true });
       const message = err instanceof Error ? err.message : "Copia non riuscita";

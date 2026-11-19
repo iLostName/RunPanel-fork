@@ -963,6 +963,8 @@ async function restorePanelStore(
 interface ProjectConfigPayload {
   project: ProjectsTable;
   envVars: { key: string; value: string }[];
+  /** The shared groups it received, by name, first to last. Absent from archives made before groups existed. */
+  envGroups?: string[];
 }
 
 async function readProjectConfig(
@@ -1009,6 +1011,9 @@ async function restoreProjectConfig(
   // A deploy under way has read the row this replaces.
   holdProject(existing.id, stopped);
 
+  // Groups the archive names that this server does not have.
+  let missingGroups: string[] = [];
+
   // One transaction: a configuration applied halfway is worse than one not
   // applied at all, because nothing says which half.
   await db.transaction().execute(async (trx) => {
@@ -1038,6 +1043,24 @@ async function restoreProjectConfig(
       .where("id", "=", targetId)
       .execute();
 
+    // Groups only when the archive says which: one from before they existed
+    // leaves the project's attachments as they are.
+    if (payload.envGroups) {
+      const found = payload.envGroups.length
+        ? await trx.selectFrom("env_groups").select(["id", "name"]).where("name", "in", payload.envGroups).execute()
+        : [];
+      const byName = new Map(found.map((group) => [group.name, group.id]));
+      await trx.deleteFrom("project_env_groups").where("project_id", "=", targetId).execute();
+      const ids = payload.envGroups.map((name) => byName.get(name)).filter((id): id is string => id !== undefined);
+      if (ids.length > 0) {
+        await trx
+          .insertInto("project_env_groups")
+          .values(ids.map((groupId, position) => ({ project_id: targetId, group_id: groupId, position, created_at: nowIso() })))
+          .execute();
+      }
+      missingGroups = payload.envGroups.filter((name) => !byName.has(name));
+    }
+
     await trx.deleteFrom("env_vars").where("project_id", "=", targetId).execute();
 
     if (payload.envVars.length > 0) {
@@ -1059,6 +1082,13 @@ async function restoreProjectConfig(
   });
 
   emit(`  configurazione e ${payload.envVars.length} variabili ripristinate`);
+  if (missingGroups.length > 0) {
+    // Said, not skipped quietly: without them the next deploy has fewer variables than the archive had.
+    emit(
+      `  ATTENZIONE: gruppi di variabili condivise che su questo server non esistono: ${missingGroups.join(", ")}. ` +
+        "Creali con lo stesso nome e collegali dalla scheda Variabili."
+    );
+  }
 }
 
 async function restoreVolume(
