@@ -33,6 +33,13 @@ export interface StartOpts {
   loopbackPort?: number;
 
   // --- container-only options, ignored by native drivers ---
+  /**
+   * Deployed without downtime (lib/zero-downtime.ts): the container is
+   * published on 127.0.0.1 at this port instead of on `port`, and nginx is
+   * the way in. It still listens on `port` inside. Every start of such a
+   * project passes the same one, so a restart lands where nginx points.
+   */
+  livePort?: number;
   network?: NetworkMode;
   /** Useful under `network: host` to stop the app binding every interface. */
   hostname?: string;

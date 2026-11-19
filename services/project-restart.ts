@@ -176,6 +176,16 @@ async function restart(projectId: string): Promise<{ success: true } | { error: 
   const { closeGate } = await import("./access-gate");
   await closeGate("project", projectId);
 
+  /*
+    Deployed without downtime, the container goes back where nginx points:
+    the same loopback port, so a restart (by hand, scheduled, after a crash, a
+    bind apply) is a brief gap rather than a new address. Not under the
+    panel's IP gate, which forwards to one listener of its own: restricting
+    the project takes it back to the ordinary publishing, and nginx with it.
+  */
+  const livePort =
+    project.runtime_type === "docker" && access.mode !== "restricted" && project.live_port ? project.live_port : undefined;
+
   const startOpts = buildStartOpts({
     project,
     contract,
@@ -183,6 +193,10 @@ async function restart(projectId: string): Promise<{ success: true } | { error: 
     cwd: lastDeploy.artifact_dir,
     port,
     loopbackPort: access.mode === "restricted" ? listenPort(project, port) : undefined,
+    livePort,
+    // Labelled like a deploy's: at boot, the container of the deployment the
+    // store calls online is the one that stays (lib/zero-downtime.ts).
+    deploymentId: lastDeploy.id,
   });
 
   /*
@@ -236,11 +250,19 @@ async function restart(projectId: string): Promise<{ success: true } | { error: 
 
   await processManager.start(project.slug, lastDeploy.start_cmd, project.runtime_type, startOpts);
 
+  // A live port the start did not use no longer leads anywhere.
+  const leftLivePort = project.live_port !== null && livePort === undefined;
+
   await db
     .updateTable("projects")
-    .set({ status: "running", crashed_at: null, updated_at: nowIso() })
+    .set({ status: "running", crashed_at: null, updated_at: nowIso(), ...(leftLivePort ? { live_port: null } : {}) })
     .where("id", "=", projectId)
     .execute();
+
+  if (leftLivePort) {
+    const { applyProxySoon } = await import("./proxy");
+    applyProxySoon();
+  }
 
   // After the app, never before: while the old process still holds the public
   // port, binding it is an EADDRINUSE rather than a gate.

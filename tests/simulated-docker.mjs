@@ -13,6 +13,10 @@
  * match by prefix and `volume=` by substring. The code under test is supposed
  * to check ownership itself, whole, and a faithful simulator could not tell
  * whether it does.
+ *
+ * It also answers what a deploy without downtime asks of the containers
+ * (`services/docker/zero-downtime.ts`): `create`, `rename`, `rm`, a `ps` with
+ * a name filter and a `--format`. Ports are recorded, not bound.
  */
 import fs from "node:fs";
 import zlib from "node:zlib";
@@ -50,6 +54,26 @@ function renderContainer(format, c) {
     .replace("{{.State.Status}}", c.state);
   if (out.includes("{{")) throw new Error(`simulated docker: unsupported inspect format ${format}`);
   return out;
+}
+
+/** One row of `docker ps --format`, for the placeholders the panel's listings use. */
+function renderPsRow(format, c) {
+  const labels = Object.entries(c.labels)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(",");
+  const out = format
+    .replace("{{.ID}}", c.id)
+    .replace("{{.Names}}", c.name)
+    .replace("{{.State}}", c.state)
+    .replace("{{.Labels}}", labels);
+  if (out.includes("{{")) throw new Error(`simulated docker: unsupported ps format ${format}`);
+  return out;
+}
+
+/** `name=<regex>`, matched as Docker does: against the name with its leading slash, unanchored. */
+function nameMatch(name, filter) {
+  const pattern = new RegExp(filter.slice("name=".length));
+  return pattern.test(`/${name}`) || pattern.test(name);
 }
 
 function renderVolume(format, v) {
@@ -115,17 +139,55 @@ export function simulatedDocker({ volumes = [], containers = [], hooks = {} } = 
       case "ps": {
         const all = args.includes("-a");
         const filters = valuesOf(args, "--filter");
+        const format = valuesOf(args, "--format")[0];
         return state.containers
           .filter((c) => all || ACTIVE.has(c.state))
           .filter((c) =>
             filters.every((f) =>
               f.startsWith("volume=")
                 ? c.mounts.some((m) => m.name.includes(f.slice("volume=".length)))
-                : labelMatch(c.labels, f)
+                : f.startsWith("name=")
+                  ? nameMatch(c.name, f)
+                  : labelMatch(c.labels, f)
             )
           )
-          .map((c) => c.id)
+          .map((c) => (format ? renderPsRow(format, c) : c.id))
           .join("\n");
+      }
+      case "create": {
+        const name = valuesOf(args, "--name")[0];
+        if (!name) throw new SimulatedDockerError("simulated docker: create without --name");
+        if (find(name)) {
+          throw new SimulatedDockerError(`Error response from daemon: Conflict. The container name "/${name}" is already in use`);
+        }
+        const labels = {};
+        for (const pair of valuesOf(args, "--label")) {
+          const eq = pair.indexOf("=");
+          labels[pair.slice(0, eq)] = pair.slice(eq + 1);
+        }
+        const id = crypto.randomBytes(32).toString("hex");
+        state.containers.push({ id, name, state: "created", labels, mounts: [], publish: valuesOf(args, "-p") });
+        return id;
+      }
+      case "rename": {
+        const [, from, to] = args;
+        const container = find(from);
+        if (!container) throw new SimulatedDockerError(`Error response from daemon: No such container: ${from}`);
+        if (find(to)) throw new SimulatedDockerError(`Error response from daemon: Conflict. The container name "/${to}" is already in use`);
+        container.name = to;
+        return "";
+      }
+      case "rm": {
+        const refs = args.slice(1).filter((a) => !a.startsWith("-"));
+        for (const ref of refs) {
+          const container = find(ref);
+          if (!container) throw new SimulatedDockerError(`Error response from daemon: No such container: ${ref}`);
+          if (ACTIVE.has(container.state) && !args.includes("-f")) {
+            throw new SimulatedDockerError(`Error response from daemon: cannot remove container ${ref}: container is running`);
+          }
+          state.containers.splice(state.containers.indexOf(container), 1);
+        }
+        return "";
       }
       case "inspect": {
         const format = valuesOf(args, "--format")[0];
@@ -144,9 +206,19 @@ export function simulatedDocker({ volumes = [], containers = [], hooks = {} } = 
       case "unpause":
         for (const ref of args.slice(1)) transition(ref, ["paused"], "running", "unpause");
         return "";
-      case "stop":
-        for (const ref of args.slice(1).filter((a) => !a.startsWith("-"))) transition(ref, null, "exited", "stop");
+      case "stop": {
+        const refs = [];
+        for (let i = 1; i < args.length; i++) {
+          // `-t <seconds>` takes a value, which is not a container.
+          if (args[i] === "-t" || args[i] === "--time") {
+            i++;
+            continue;
+          }
+          if (!args[i].startsWith("-")) refs.push(args[i]);
+        }
+        for (const ref of refs) transition(ref, null, "exited", "stop");
         return "";
+      }
       case "start":
         for (const ref of args.slice(1)) transition(ref, null, "running", "start");
         return "";
