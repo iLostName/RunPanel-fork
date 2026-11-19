@@ -49,16 +49,17 @@ export async function usageFor(principal: Principal, usage: GroupUsage): Promise
 }
 
 /**
- * "il progetto «blog», il gruppo «base»" — who reads a name, for a refusal.
- * A project this account may not see is not named.
+ * "del progetto «blog», del gruppo «base»" — whose references read a name, for
+ * a refusal that says "è usato nei riferimenti …". A project this account may
+ * not see is not named.
  */
 export async function readersText(principal: Principal, readers: readonly Reader[]): Promise<string> {
   const refs = await projectRefs();
   const words = readers.map((reader) => {
-    if (reader.kind === "group") return `il gruppo «${reader.name}»`;
+    if (reader.kind === "group") return `del gruppo «${reader.name}»`;
     const ref = refs.get(reader.id);
-    return ref && projectAccess(principal, ref).level !== null ? `il progetto «${reader.name}»` : "un progetto che non puoi vedere";
+    return ref && projectAccess(principal, ref).level !== null ? `del progetto «${reader.name}»` : "di un progetto che non puoi vedere";
   });
   const unique = [...new Set(words)];
-  return unique.length <= 3 ? unique.join(", ") : `${unique.slice(0, 3).join(", ")} e altri ${unique.length - 3}`;
+  return unique.length <= 3 ? unique.join(", ") : `${unique.slice(0, 3).join(", ")} e di altri ${unique.length - 3}`;
 }

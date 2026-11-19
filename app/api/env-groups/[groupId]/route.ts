@@ -3,7 +3,7 @@ import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import { updateEnvGroupSchema } from "@/lib/validation";
-import { findCycle } from "@/lib/env-refs";
+import { findCycle, parseValue } from "@/lib/env-refs";
 import { groupUsage, loadGroups } from "@/services/env-groups";
 import { hostGuardForGroup, readersText, usageFor } from "@/services/env-group-guard";
 
@@ -69,13 +69,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         return NextResponse.json({ error: `Esiste già un gruppo «${name}» su questo server` }, { status: 409 });
       }
       // A reference finds the group by name: renaming it under one would
-      // stop that project's next deploy. Said now, with who to fix.
-      const usage = await groupUsage(group);
+      // stop that project's next deploy. Said now, with who to fix — the
+      // group itself included, when one of its values reads another.
+      const groups = await loadGroups();
+      const usage = await groupUsage(group, groups);
       const readers = [...usage.readers.values()].flat();
+      const self = groups.find((g) => g.id === groupId);
+      if (self?.vars.some((v) => parseValue(v.value).refs.some((ref) => ref.kind === "shared" && ref.group === group.name))) {
+        readers.push({ kind: "group", id: group.id, name: group.name });
+      }
       if (readers.length > 0) {
         return NextResponse.json(
           {
-            error: `Il nome «${group.name}» è usato nei riferimenti di ${await readersText(denied.principal, readers)}: cambiali prima, o il loro prossimo deploy si fermerà.`,
+            error: `Il nome «${group.name}» è usato nei riferimenti ${await readersText(denied.principal, readers)}: cambiali prima, o il prossimo deploy di chi li usa si fermerà.`,
             code: "group_referenced",
           },
           { status: 409 }
@@ -85,7 +91,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       // projects they are in, and any loop they close, are this change's.
       const noHost = await hostGuardForGroup(denied.principal, await groupUsage({ id: "", name }));
       if (noHost) return noHost;
-      const renamed = (await loadGroups()).map((g) => (g.id === groupId ? { ...g, name } : g));
+      const renamed = groups.map((g) => (g.id === groupId ? { ...g, name } : g));
       const cycle = findCycle(renamed);
       if (cycle) {
         return NextResponse.json(
@@ -127,7 +133,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     if (readers.length > 0) {
       return NextResponse.json(
         {
-          error: `«${group.name}» è usato nei riferimenti di ${await readersText(denied.principal, readers)}: toglili prima, o il loro prossimo deploy si fermerà.`,
+          error: `«${group.name}» è usato nei riferimenti ${await readersText(denied.principal, readers)}: toglili prima, o il prossimo deploy di chi li usa si fermerà.`,
           code: "group_referenced",
         },
         { status: 409 }

@@ -67,7 +67,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       if (readers.length > 0) {
         return NextResponse.json(
           {
-            error: `${key} è usata nei riferimenti di ${await readersText(denied.principal, readers)}: toglila prima da lì, o il loro prossimo deploy si fermerà.`,
+            error: `${key} è usata nei riferimenti ${await readersText(denied.principal, readers)}: toglila prima da lì, o il prossimo deploy di chi la usa si fermerà.`,
             code: "var_referenced",
           },
           { status: 409 }

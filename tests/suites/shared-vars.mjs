@@ -286,7 +286,9 @@ export async function run({ base, dataDir }) {
   res = await owner.call(`/api/env-groups/${smtpId}`, { method: "DELETE" });
   r.check("a group a reference names cannot be deleted", res.status === 409 && res.body?.code === "group_referenced", `${res.status} ${JSON.stringify(res.body)}`);
   res = await owner.call(`/api/env-groups/${smtpId}`, json("PATCH", { name: "mail" }));
-  r.check("nor renamed", res.status === 409, `${res.status} ${JSON.stringify(res.body)}`);
+  r.check("nor renamed", res.status === 409 && /nei riferimenti del progetto «Mailer»/.test(res.body?.error ?? ""), `${res.status} ${JSON.stringify(res.body)}`);
+  res = await owner.call(`/api/env-groups/${smtpId}`, json("PATCH", { description: "Posta in uscita" }));
+  r.check("its description can change all the same", res.status === 200 && res.body?.description === "Posta in uscita", `${res.status} ${JSON.stringify(res.body)}`);
 
   res = await owner.call(`/api/env-groups/${liveId}`, { method: "DELETE" });
   r.check("one only attached is deleted, and detached", res.status === 200 && res.body?.detached === 1, `${res.status} ${JSON.stringify(res.body)}`);
