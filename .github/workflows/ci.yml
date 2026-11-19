@@ -6,7 +6,7 @@
 # (`--no-docker`); the PM2 ones skip themselves when PM2 is not installed, and
 # the Postgres pass runs only where RUNPANEL_TEST_PG_URL is set — neither is
 # here, on purpose: this job is the floor every change has to clear, not the
-# whole matrix.
+# whole matrix. The browser tests are the second job, `e2e`, once it passes.
 
 name: CI
 
@@ -75,3 +75,55 @@ jobs:
 
       - name: Tests (no Docker)
         run: bun run test:quick
+
+  # The browser tests (tests/e2e): the five flows, the shell on a phone, the
+  # installable app and axe on the main pages, against a production build.
+  # After `check`, so a change that fails the floor does not also pay for a
+  # browser. The runner has Docker, so the project tests here follow the
+  # deploy until the app is online; on a machine without it they stop where
+  # the panel explains why it could not run.
+  e2e:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      # Playwright's own Chromium and the system libraries it needs; locally
+      # the tests use the installed Chrome instead (tests/e2e/playwright.config.ts).
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: bun run test:e2e
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 14
