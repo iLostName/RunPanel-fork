@@ -1,6 +1,5 @@
 import { getDb, nowIso } from "@/lib/db";
 import type { DeploymentsTable, ProjectsTable } from "@/lib/db/schema";
-import { decrypt } from "@/lib/crypto";
 import { redactGitSecrets } from "@/lib/redact";
 import { stripRemoteCredentials } from "@/lib/git-remote";
 import { openBuildEnv } from "./build-env";
@@ -41,8 +40,9 @@ import {
 import { checkLoopbackLeak, listenPort, readAccess, syncGate } from "./access";
 import { closeGate } from "./access-gate";
 import { injectLinkedServiceEnv } from "./service-injection";
+import { loadProjectEnv } from "./project-env";
 import { alignServiceNames } from "./service-rename";
-import { maskUrlPassword } from "@/lib/service-env";
+import { connectionOrigin, maskUrlPassword } from "@/lib/service-env";
 import { composeContext } from "./docker/compose";
 import { markCurrentImage } from "./docker/images";
 import { imageRepo, networkName } from "./docker/labels";
@@ -294,18 +294,13 @@ async function runDeploy(
       reason to put a command there at all: a dump, an authenticated call, a
       notification.
     */
-    const envRows = await db
-      .selectFrom("env_vars")
-      .select(["key", "value"])
-      .where("project_id", "=", project.id)
-      .execute();
-
-    appendLog(`Loaded ${envRows.length} env var(s)`);
-
-    const envVars: Record<string, string> = {};
-    for (const row of envRows) {
-      envVars[row.key] = decrypt(row.value);
-    }
+    // Its own variables, its shared groups and every reference expanded, or
+    // the deploy stops right here — naming the variable — before a command has
+    // run or a file has moved. Seen from where the panel's settings put the
+    // app; settled below, once the source says how a Compose stack is wired.
+    const projectEnv = await loadProjectEnv(project, { onLog: appendLog });
+    for (const line of projectEnv.summary) appendLog(line);
+    const envVars = projectEnv.forOrigin(connectionOrigin(project.runtime_type, contract.docker.network));
 
     // Container runtimes publish whatever their own definition says, so an
     // unset port means "no HTTP probe" rather than "assume 3000".
@@ -602,6 +597,7 @@ async function runDeploy(
     // run on the host, where the service names of the project network do not
     // resolve. They get the addresses a native process would, from the same
     // variables as they stood before the injection below.
+    projectEnv.applyOrigin(envVars, connectionOrigin(project.runtime_type, injectionNetwork));
     const runsOnHost = composeCtx || project.runtime_type === "docker";
     const hostCommandEnv = runsOnHost && injectionNetwork !== "host" ? { ...envVars } : null;
 
@@ -626,6 +622,7 @@ async function runDeploy(
       appendLog(`Servizio "${name}": iniezione disattivata, il progetto usa le proprie variabili.`);
     }
     if (hostCommandEnv) {
+      projectEnv.applyOrigin(hostCommandEnv, "host");
       await injectLinkedServiceEnv(project, "host", hostCommandEnv);
       commandEnv = hostCommandEnv;
       if (composeCtx && applied.length > 0) {

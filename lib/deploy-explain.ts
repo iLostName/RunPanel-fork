@@ -65,6 +65,7 @@ export function deployPhase(log: string | null | undefined): DeployPhase {
 
 export type DeployErrorCode =
   | "cancelled"
+  | "env-unresolved"
   | "no-source"
   | "branch-missing"
   | "repo-access"
@@ -103,6 +104,17 @@ const RULES: Rule[] = [
     code: "cancelled",
     test: /interrotto dall'operatore/i,
     explain: () => ({ title: "Deploy annullato", hint: "È stato fermato a mano. Puoi avviarne un altro quando vuoi.", fixes: [] }),
+  },
+  {
+    // `EnvResolutionError` (services/project-env.ts): the deploy stopped while
+    // reading the variables, before anything was touched.
+    code: "env-unresolved",
+    test: /variabil[ei] non risolt[ae] — /i,
+    explain: () => ({
+      title: "Una variabile non si risolve",
+      hint: "Il deploy si è fermato prima di toccare l'app: correggi il riferimento o il gruppo condiviso indicato nella scheda Variabili, poi riprova.",
+      fixes: ["env"],
+    }),
   },
   {
     code: "no-source",

@@ -18,6 +18,9 @@ export async function run({ repoRoot }) {
 
   r.check("cancelled", code("Deploy interrotto dall'operatore") === "cancelled");
   r.check("no source on disk", code("No source on disk for this project. Connect a GitHub repository or upload a ZIP, then deploy.") === "no-source");
+  const unresolved = explainDeployError("Variabile non risolta — La variabile SMTP_HOST usa ${{ shared.smtp.HOST }}, ma il gruppo «smtp» non esiste su questo server.");
+  r.check("a variable that does not resolve points at the Variables tab", unresolved.code === "env-unresolved" && unresolved.fixes[0] === "env");
+  r.check("so do several", code("3 variabili non risolte — La variabile A usa ${{ db.x.url }}, ma … Le altre sono nel log.") === "env-unresolved");
   const branch = explainDeployError('Il branch "develop" non esiste sul remote.');
   r.check("missing branch names it", branch.code === "branch-missing" && branch.title.includes("develop"));
   r.check("private repo without access, from the log", code("Build failed", "Cloning…\nremote: Repository not found.\nfatal: Authentication failed for 'https://github.com/x/y.git/'") === "repo-access");

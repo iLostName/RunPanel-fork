@@ -1,7 +1,7 @@
 import fs from "fs";
 import { getDb } from "@/lib/db";
-import { decrypt } from "@/lib/crypto";
 import { parseContractJson } from "@/lib/deploy-contract";
+import { connectionOrigin } from "@/lib/service-env";
 import type { ProjectTasksTable, ProjectsTable } from "@/lib/db/schema";
 import { SKIP_REASONS, type SkipCode } from "@/lib/tasks-rules";
 import { composeContext, composePs } from "../docker/compose";
@@ -11,6 +11,7 @@ import { projectWorkDir } from "../project-releases";
 import { assertOwnAppContainer, ForeignContainerError } from "../process-drivers/docker-driver";
 import { processManager } from "../process-manager";
 import { injectLinkedServiceEnv } from "../service-injection";
+import { EnvResolutionError, loadProjectEnv } from "../project-env";
 
 /**
  * Where a task's command runs, worked out at the moment it is about to.
@@ -84,7 +85,13 @@ async function hostTarget(project: ProjectsTable): Promise<TargetResult> {
   // which a deploy that failed may already have moved to another commit.
   const cwd = projectWorkDir(project.slug);
   if (!fs.existsSync(cwd)) return skip("no-directory");
-  return { ok: true, target: { kind: "host", cwd, env: await taskEnv(project), where: `sull'host, in ${cwd}` } };
+  try {
+    return { ok: true, target: { kind: "host", cwd, env: await taskEnv(project), where: `sull'host, in ${cwd}` } };
+  } catch (err) {
+    // Not run rather than run with a value nobody chose: the history keeps the sentence.
+    if (err instanceof EnvResolutionError) return skip("env", err.message);
+    throw err;
+  }
 }
 
 /**
@@ -97,17 +104,9 @@ async function hostTarget(project: ProjectsTable): Promise<TargetResult> {
  */
 async function taskEnv(project: ProjectsTable): Promise<Record<string, string>> {
   const db = await getDb();
-  const rows = await db.selectFrom("env_vars").select(["key", "value"]).where("project_id", "=", project.id).execute();
-
-  const env: Record<string, string> = {};
-  for (const row of rows) {
-    try {
-      env[row.key] = decrypt(row.value);
-    } catch {
-      // One unreadable value is not a reason to run nothing; the app has the
-      // same problem and the variables page shows it.
-    }
-  }
+  // Own variables, shared groups and references, as the app gets them; a
+  // value that does not resolve throws `EnvResolutionError` (see hostTarget).
+  const projectEnv = await loadProjectEnv(project);
 
   const lastDeploy = await db
     .selectFrom("deployments")
@@ -121,6 +120,7 @@ async function taskEnv(project: ProjectsTable): Promise<Record<string, string>> 
     ? parseContractJson(lastDeploy.resolved_contract)
     : parseContractJson(project.builder_config);
 
+  const env = projectEnv.forOrigin(connectionOrigin(project.runtime_type, contract.docker.network));
   await injectLinkedServiceEnv(project, contract.docker.network, env);
 
   // The two `buildStartOpts` sets on every start, with the same precedence.

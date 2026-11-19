@@ -164,6 +164,7 @@ export type SkipCode =
   | "host-review"
   | "not-running"
   | "no-directory"
+  | "env"
   | "missed";
 
 export interface StartFacts {
@@ -203,6 +204,7 @@ export const SKIP_REASONS: Record<SkipCode, string> = {
     "il progetto ora raggiunge l'host: serve che qualcuno con il permesso «Accesso all'host» apra l'attività e la salvi di nuovo",
   "not-running": "l'app non è in esecuzione",
   "no-directory": "il progetto non ha ancora una cartella sul server: fai prima un deploy",
+  env: "una variabile del progetto non si risolve: correggila nella scheda Variabili",
   missed: "non è partita all'orario previsto: il pannello era spento o troppo occupato",
 };
 
