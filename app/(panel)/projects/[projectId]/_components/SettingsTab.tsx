@@ -22,6 +22,7 @@ import { NetworkSection } from "./settings/NetworkSection";
 import { ResourcesSection } from "./settings/ResourcesSection";
 import { SourceSection } from "./settings/SourceSection";
 import { useDeployForm } from "./settings/useDeployForm";
+import { PreviewsSection } from "./settings/PreviewsSection";
 import type { Project, SettingsSectionId } from "./types";
 
 const SECTIONS: { id: SettingsSectionId; label: string; icon: string }[] = [
@@ -32,6 +33,7 @@ const SECTIONS: { id: SettingsSectionId; label: string; icon: string }[] = [
   { id: "network", label: "Rete", icon: "solar:routing-linear" },
   { id: "resources", label: "Risorse", icon: "solar:cpu-bolt-linear" },
   { id: "automations", label: "Automazioni", icon: "solar:calendar-linear" },
+  { id: "previews", label: "Anteprime", icon: "solar:eye-scan-linear" },
   { id: "backup", label: "Backup", icon: "solar:safe-square-linear" },
   { id: "advanced", label: "Avanzate", icon: "solar:tuning-square-linear" },
   { id: "permissions", label: "Permessi", icon: "solar:users-group-rounded-linear" },
@@ -41,7 +43,12 @@ const SECTIONS: { id: SettingsSectionId; label: string; icon: string }[] = [
 const SECTION_IDS = SECTIONS.map((s) => s.id);
 
 /** Which menu entry a section that saves on its own (see pending-saves.ts) belongs to. */
-const PENDING_SECTION: Record<string, SettingsSectionId> = { backup: "backup", "one-time": "build" };
+const PENDING_SECTION: Record<string, SettingsSectionId> = {
+  backup: "backup",
+  "one-time": "build",
+  previews: "previews",
+  "preview-env": "previews",
+};
 
 /**
  * Project settings: a side menu, one section at a time, one save bar.
@@ -132,6 +139,9 @@ export function SettingsTab({
   }
 
   const show = (id: SettingsSectionId) => ({ hidden: section !== id });
+  // Previews are production's, and follow a repository.
+  const hasPreviews = !project.environment_of && project.source_type === "github" && Boolean(project.source_url);
+  const sections = SECTIONS.filter((s) => s.id !== "previews" || hasPreviews);
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
@@ -141,12 +151,12 @@ export function SettingsTab({
           label="Sezione"
           value={section}
           onChange={(value) => setSection(value as SettingsSectionId)}
-          options={SECTIONS.map((s) => ({ value: s.id, label: `${s.label}${dirtyMenu.has(s.id) ? " •" : ""}` }))}
+          options={sections.map((s) => ({ value: s.id, label: `${s.label}${dirtyMenu.has(s.id) ? " •" : ""}` }))}
         />
       </div>
       <nav aria-label="Sezioni delle impostazioni" className="hidden lg:block">
         <ul className="sticky top-4 space-y-0.5">
-          {SECTIONS.map((s) => (
+          {sections.map((s) => (
             <li key={s.id}>
               <button
                 type="button"
@@ -189,6 +199,11 @@ export function SettingsTab({
         <div {...show("automations")}>
           <AutomationsSection project={project} onProjectChange={onProjectChange} />
         </div>
+        {hasPreviews && (
+          <div {...show("previews")}>
+            <PreviewsSection project={project} registerPending={registerPending} />
+          </div>
+        )}
         <div {...show("backup")}>
           <BackupSection
             project={project}

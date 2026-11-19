@@ -19,6 +19,7 @@ import { parseContractJson } from "@/lib/deploy-contract";
 
 import { ProjectHeader } from "./_components/ProjectHeader";
 import { EnvironmentSwitch } from "./_components/EnvironmentSwitch";
+import { PreviewsPanel } from "./_components/PreviewsPanel";
 import { ProjectOverview } from "./_components/ProjectOverview";
 import { LogsTab } from "./_components/LogsTab";
 import { DeploymentsTab } from "./_components/DeploymentsTab";
@@ -452,6 +453,8 @@ export default function ProjectDetailPage() {
           onGoTo={goTo}
         />
       )}
+      {/* Production's pull requests and their previews, under its own overview. */}
+      {shownTab === "overview" && !project.environment_of && project.source_type === "github" && <PreviewsPanel project={project} />}
 
       {shownTab === "deployments" && deploymentsError && !deploymentsData && (
         <LoadError what="i deploy" error={deploymentsError} onRetry={() => void refreshDeployments()} />

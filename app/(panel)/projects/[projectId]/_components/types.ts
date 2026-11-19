@@ -155,6 +155,34 @@ export interface EnvironmentsResponse {
   offer: StagingOffer | null;
 }
 
+/** One pull request and its preview — `GET /api/projects/{id}/previews`. */
+export interface PreviewRow {
+  id: string;
+  prNumber: number;
+  title: string;
+  author: string;
+  url: string;
+  headRef: string;
+  headSha: string;
+  fork: boolean;
+  approvedSha: string | null;
+  needsApproval: boolean;
+  state: "waiting" | "active" | "stopped";
+  stoppedReason: "limit" | "idle" | "manual" | null;
+  lastActivityAt: string;
+  addressProblem: string | null;
+  statusProblem: string | null;
+  project: { id: string; name: string; status: string; url: string | null; pinnedSha: string | null } | null;
+}
+
+export interface PreviewsResponse {
+  settings: { enabled: boolean; maxPreviews: number; idleDays: number; domainId: string | null; commitStatus: boolean };
+  previews: PreviewRow[];
+  usage: { running: number; memoryBytes: number | null; cpuPercent: number | null };
+  transport: { ok: boolean; problem: string | null };
+  domains: { id: string; name: string }[];
+}
+
 /** What "Promuovi in produzione" would deploy — `GET /api/projects/{id}/promote`. */
 export interface PromotionPreview {
   staging: { id: string; name: string; branch: string };
@@ -236,6 +264,7 @@ export type SettingsSectionId =
   | "network"
   | "resources"
   | "automations"
+  | "previews"
   | "backup"
   | "advanced"
   | "permissions"
