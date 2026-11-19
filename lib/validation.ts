@@ -765,6 +765,31 @@ export const pinActionSchema = z.object({
   deploy: z.boolean().optional(),
 });
 
+/**
+ * A staging copy of a production project (services/environments.ts).
+ *
+ * `address` is optional and either a name on one of the panel's domains or an
+ * instant one; `databaseIds` names production's linked databases staging
+ * should read instead of having its own — the explicit choice, never a default.
+ */
+export const createEnvironmentSchema = z.object({
+  kind: z.literal("staging"),
+  branch: branchNameSchema,
+  address: z
+    .discriminatedUnion("kind", [
+      z.object({ kind: z.literal("domain"), domainId: z.string().min(1).max(32), subdomain: z.string().trim().max(63) }),
+      z.object({ kind: z.literal("instant"), label: z.string().trim().min(1).max(63) }),
+    ])
+    .nullable()
+    .optional(),
+  databaseIds: z.array(z.string().min(1).max(32)).max(20).optional(),
+});
+
+/** "Promuovi in produzione": the commit the confirmation showed, which must still be what staging runs. */
+export const promoteSchema = z.object({
+  commitSha: commitShaSchema,
+});
+
 /** The commit list behind the version picker. */
 export const commitsQuerySchema = z.object({
   branch: branchNameSchema.optional(),

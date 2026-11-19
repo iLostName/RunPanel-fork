@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { explainDeployError } from "@/lib/deploy-explain";
 import { isDenied, requireProject } from "@/lib/auth-guard";
 import { requireHostFor, requireHostIfReaching } from "@/lib/host-guard";
-import { withAudit } from "@/lib/audit";
-import { accessChangedForEveryone, deleteGrantsFor } from "@/lib/users";
+import { audit, withAudit } from "@/lib/audit";
+import { accessChangedForEveryone } from "@/lib/users";
+import { environmentKindOf, productionDeleteProblem, stagingBranchProblem } from "@/lib/environments";
 import { isVisible, visibleFolderIds } from "@/lib/principal";
 import { PROJECT_ACTIONS, hasPermission, satisfies } from "@/lib/authz";
 import { redactProject } from "@/lib/project-redact";
@@ -18,33 +19,19 @@ import {
 } from "@/services/project-mounts";
 import { parseRepoMove, repoLocation } from "@/services/project-repo";
 import { readAccess, reportGate, syncGate } from "@/services/access";
-import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
+import { allocateLoopbackPort } from "@/services/access-gate";
 import { restartFromLastDeployment } from "@/services/project-restart";
-import { currentRelease, removeProjectReleases } from "@/services/project-releases";
+import { currentRelease } from "@/services/project-releases";
 import { releasesSupported } from "@/lib/releases";
 import { getPreset } from "@/services/deploy-presets";
 import { queuedForProject } from "@/services/one-time-commands";
 import { folderExists } from "@/services/folders";
 import { restartScheduleColumns } from "@/services/restart-scheduler";
-import { processManager } from "@/services/process-manager";
-import { removeService } from "@/services/service-provisioner";
-import { disconnectFromNetwork, removeProjectNetwork } from "@/services/docker-network";
-import { removeProjectImages } from "@/services/docker/images";
-import { containerMounts, listOwnedVolumes, removeProjectVolumes, removeVolumes } from "@/services/docker/volumes";
-import { removePm2Artifacts } from "@/services/process-drivers/pm2-driver";
-import { forgetRun } from "@/services/process-drivers/run-log";
-import { removeEnvFile } from "@/services/env-file";
 import { sealContract } from "@/services/build-env";
-import { cancelDeploy, clearQueuedDeploy } from "@/services/deploy-queue";
-import { applyLogPath } from "@/services/project-mounts";
-import { moveLogPath } from "@/services/project-repo";
-import { busyMessage, tryLock } from "@/services/project-lock";
 import { syncAutoDeploy } from "@/services/webhook-manage";
-import { processLogHub } from "@/services/process-logs";
-import { applyProxy, applyProxySoon, canApply, forgetCertificate, proxyProbe } from "@/services/proxy";
-import fs from "fs";
-import path from "path";
-import { config } from "@/lib/config";
+import { applyProxySoon, canApply, proxyProbe } from "@/services/proxy";
+import { deleteProject } from "@/services/project-delete";
+import { deleteEnvironments, environmentsOf } from "@/services/environments";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -193,6 +180,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (sourceType !== undefined || sourceUrl !== undefined || sourceBranch !== undefined) {
       const noHost = requireHostFor(denied.principal, "cambiare il codice che il progetto esegue");
       if (noHost) return noHost;
+    }
+    // Staging on production's branch would deploy every push twice, and a
+    // promote would deploy what production already has.
+    if (sourceBranch !== undefined && project.environment_of && environmentKindOf(project) === "staging") {
+      const production = await db.selectFrom("projects").select("source_branch").where("id", "=", project.environment_of).executeTakeFirst();
+      const problem = production ? stagingBranchProblem(sourceBranch, production.source_branch) : null;
+      if (problem) return NextResponse.json({ error: problem, details: [{ path: ["sourceBranch"], message: problem }] }, { status: 400 });
     }
     if (runtimeType !== undefined || builderConfig !== undefined || presetId !== undefined) {
       const preset = presetId ? getPreset(presetId) : null;
@@ -489,9 +483,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
  * included. Previously there was only the second, and the dialog could warn
  * about it but not offer anything else — so removing a project you no longer
  * needed meant losing a database you still did.
+ *
+ * A production project with environments (a staging copy, previews) is
+ * refused with 409 `has_environments` unless `?environments=delete` says they
+ * go with it: they run its code with its variables and its permissions, and
+ * left behind they would follow nothing. They are deleted first, each like a
+ * project of its own, with the same choice about databases; deleting an
+ * environment itself never touches production.
  */
-const DELETE_CANCEL_WAIT_MS = 15_000;
-
 export async function DELETE(request: NextRequest, { params }: Params) {
   return withAudit(request, { category: "delete", action: "project.delete", scope: "project", scopeId: async () => (await params).projectId }, async () => {
     const { projectId } = await params;
@@ -504,6 +503,10 @@ export async function DELETE(request: NextRequest, { params }: Params) {
         { error: "Il parametro services può essere solo keep o delete" },
         { status: 400 }
       );
+    }
+    const environmentsParam = request.nextUrl.searchParams.get("environments");
+    if (environmentsParam !== null && environmentsParam !== "delete") {
+      return NextResponse.json({ error: "Il parametro environments può essere solo delete" }, { status: 400 });
     }
     const deleteServices = servicesParam === "delete";
     const db = await getDb();
@@ -518,143 +521,46 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
     }
 
-    const { slug } = project;
-
-    // A deploy that went on running would put back a container, an image and a
-    // row-less checkout right after they are taken away.
-    const deploy = cancelDeploy(projectId);
-    if (deploy) {
-      await Promise.race([deploy, new Promise((resolve) => setTimeout(resolve, DELETE_CANCEL_WAIT_MS))]);
+    const environments = project.environment_of ? [] : await environmentsOf(projectId);
+    const problem = productionDeleteProblem(environments.length, environmentsParam === "delete");
+    if (problem) {
+      return NextResponse.json(
+        {
+          error: problem,
+          code: "has_environments",
+          environments: environments.map((row) => ({ id: row.id, name: row.name, environment: environmentKindOf(row) })),
+        },
+        { status: 409 }
+      );
     }
 
-    const release = tryLock(projectId, "stop");
-    if (!release) {
-      return NextResponse.json({ error: busyMessage(projectId) }, { status: 409 });
-    }
-
-    try {
-    // Drop any follow-up deploy and stop following this project's logs before
-    // taking anything apart, so nothing tries to redeploy what we are deleting.
-    clearQueuedDeploy(projectId);
-    processLogHub.detachAll(projectId);
-
-    // A gate left open would keep holding the public port for a project that no
-    // longer exists, and the next thing to claim it would fail to bind for no
-    // visible reason.
-    await closeGate("project", projectId);
-
-    // Stop the running process (PM2 delete or Docker rm)
-    try {
-      // `remove`, not `stop`: a stopped container still references its image, so
-      // stopping here would leave both the container and the image on disk.
-      await processManager.remove(slug, project.runtime_type);
-    } catch { /* ignore */ }
-
-    // Remove every image RunPanel built for this project, not just the one tag
-    // the old code knew about — each deploy produces its own immutable tag.
-    await removeProjectImages(slug);
-
-    const services = await db
-      .selectFrom("services")
-      .select(["id", "container_name"])
-      .where("project_id", "=", projectId)
-      .execute();
-
-    let volumesRemoved: string[] = [];
-    let servicesKept = 0;
-
-    if (deleteServices) {
-      // Stop and remove every service container linked to this project. The
-      // volumes are not passed here: `removeProjectVolumes` below takes them all
-      // by label, which is both scoped and complete.
-      for (const svc of services) {
-        try {
-          await removeService(svc.container_name);
-        } catch { /* ignore */ }
+    let environmentsDeleted = 0;
+    if (environments.length > 0) {
+      const removed = await deleteEnvironments(projectId, { deleteServices });
+      // Each one in the activity log, under its own id, like any project deleted.
+      for (const gone of removed.deleted) {
+        await audit({
+          userId: denied.session.user.id,
+          category: "delete",
+          action: "project.delete",
+          scope: "project",
+          scopeId: gone.id,
+          detail: `Ambiente di «${project.name}», eliminato insieme al progetto`,
+          request,
+        });
       }
-
-      // Deleting the services deletes their storage too. Previously the
-      // containers went and the named volumes stayed on disk forever, invisible
-      // and ready to silently reattach to a future service with the same name.
-      volumesRemoved = await removeProjectVolumes(slug);
-    } else {
-      // Detach, the same way the services PATCH does it: off the project's
-      // network, injection off (there is no app left to inject into), and into
-      // the project's folder so it stays where it was on the Overview. Written
-      // before the project row goes, because `services.project_id` cascades on
-      // delete and would otherwise take these rows with it. The volumes stay
-      // labelled with this project's slug; `removeService` finds them through
-      // the container's mounts when the standalone service is deleted later.
-      const inUse = new Set<string>();
-      for (const svc of services) {
-        for (const mount of await containerMounts(svc.container_name)) {
-          if (mount.name) inUse.add(mount.name);
-        }
-        await disconnectFromNetwork(svc.container_name, slug);
-      }
-      if (services.length > 0) {
-        await db
-          .updateTable("services")
-          .set({ project_id: null, inject_env: 0, folder_id: project.folder_id, updated_at: nowIso() })
-          .where("project_id", "=", projectId)
-          .execute();
-      }
-      servicesKept = services.length;
-
-      // A volume of this project that no surviving service mounts belongs to a
-      // service deleted "without data", kept for one recreated under the same
-      // name in this project. That name includes the slug, so with the project
-      // gone nothing can ever be recreated onto it: it would sit on the host
-      // forever, labelled with a project no screen shows. Removed here, and only
-      // here — the kept services' volumes are exactly the ones excluded.
-      const orphaned = (await listOwnedVolumes({ project: slug }))
-        .map((v) => v.name)
-        .filter((name) => !inUse.has(name));
-      volumesRemoved = await removeVolumes(orphaned);
+      environmentsDeleted = removed.deleted.length;
+      if (!removed.ok) return NextResponse.json({ error: removed.error, environmentsDeleted }, { status: 409 });
     }
 
-    // Delete project source.
-    //
-    // Asynchronously, because this tree contains `node_modules`: the synchronous
-    // version walked a hundred thousand files with the event loop stopped, so
-    // deleting one project froze the whole panel — every other tab, every poll,
-    // every running deploy's log stream — for as long as it took.
-    const repoDir = path.join(config.reposDir, slug);
-    await fs.promises.rm(repoDir, { recursive: true, force: true });
-    // And every version folder of a native project, which only links to it.
-    await removeProjectReleases(slug);
+    const outcome = await deleteProject(project, { deleteServices });
+    if (!outcome.ok) return NextResponse.json({ error: outcome.error, environmentsDeleted }, { status: outcome.status });
 
-    // Delete generated PM2 files, including the 0600 sidecar holding the
-    // project's environment and the process logs, plus the marker saying when the
-    // last run began.
-    removePm2Artifacts(slug);
-    forgetRun(slug);
-    removeEnvFile(slug);
-    fs.rmSync(moveLogPath(projectId), { force: true });
-    fs.rmSync(applyLogPath(projectId), { force: true });
-
-    try {
-      await removeProjectNetwork(slug);
-    } catch { /* ignore */ }
-
-    // Read before the delete cascades them away: nginx still has their blocks.
-    const hostnames = (
-      await db.selectFrom("project_hosts").select("hostname").where("project_id", "=", projectId).execute()
-    ).map((row) => row.hostname);
-
-    // Child rows go with the parent: the schema declares ON DELETE CASCADE on
-    // deployments, env_vars, services, webhook_deliveries and project_hosts, so
-    // a single delete is enough — no hand-rolled ordering to get wrong.
-    await db.deleteFrom("projects").where("id", "=", projectId).execute();
-    await deleteGrantsFor("project", projectId);
-
-    if (hostnames.length > 0) {
-      void applyProxy().then(() => hostnames.forEach(forgetCertificate));
-    }
-
-    return NextResponse.json({ success: true, volumesRemoved, servicesKept });
-    } finally {
-      release();
-    }
+    return NextResponse.json({
+      success: true,
+      volumesRemoved: outcome.volumesRemoved,
+      servicesKept: outcome.servicesKept,
+      environmentsDeleted,
+    });
   });
 }

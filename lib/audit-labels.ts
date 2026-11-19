@@ -77,6 +77,8 @@ export const ACTION_LABEL: Record<string, string> = {
   "project.delete": "Progetto eliminato",
   "project.create": "Progetto creato",
   "project.duplicate": "Progetto duplicato",
+  "project.environment.create": "Staging creato",
+  "project.promote": "Promosso in produzione",
   "project.app.delete": "App rimossa dal progetto",
   "project.backup": "Backup del progetto modificato",
   "project.files": "File modificato",

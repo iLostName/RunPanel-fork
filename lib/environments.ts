@@ -141,6 +141,16 @@ export function defaultStagingBranch(productionBranch: string, branches: readonl
   return candidates[0] ?? "staging";
 }
 
+/**
+ * The label proposed for staging's address next to production's, on the same
+ * domain: `shop.esempio.it` → `shop-staging.esempio.it`, the domain itself →
+ * `staging.esempio.it`. One label, so the domain's wildcard record covers it.
+ */
+export function stagingLabel(productionSubdomain: string): string {
+  if (!productionSubdomain) return "staging";
+  return `${productionSubdomain.slice(0, 63 - "-staging".length).replace(/-+$/, "")}-staging`;
+}
+
 /** Why a branch cannot be staging's, or null. */
 export function stagingBranchProblem(branch: string, productionBranch: string): string | null {
   if (branch === productionBranch) {

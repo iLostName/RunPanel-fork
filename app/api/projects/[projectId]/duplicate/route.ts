@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isDenied, requireProject } from "@/lib/auth-guard";
@@ -11,7 +10,7 @@ import { getDb, nowIso } from "@/lib/db";
 import { grantCreator } from "@/lib/users";
 import { generateId, slugify } from "@/lib/utils";
 import { isReservedSlug } from "@/lib/project-slug";
-import { firstFreePort, portsInUse } from "@/lib/ports";
+import { insertProjectCopy } from "@/services/project-copy";
 import { repoLocation } from "@/services/project-repo";
 import { getRepoPath } from "@/services/git-manager";
 import { isPanelEnvFile } from "@/services/env-file";
@@ -87,48 +86,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: `Esiste già un progetto con il nome interno "${slug}": scegline un altro` }, { status: 409 });
     }
 
-    const [projectPorts, servicePorts] = await Promise.all([
-      db.selectFrom("projects").select(["port", "access_port", "live_port"]).execute(),
-      db.selectFrom("services").select(["port", "access_port"]).execute(),
-    ]);
-    const port = source.port ? firstFreePort(source.port, portsInUse([...projectPorts, ...servicePorts])) : null;
-
-    // Bind mounts point at host folders: two projects must not write to one.
-    let builderConfig = source.builder_config;
-    try {
-      const contract = JSON.parse(source.builder_config || "{}") as { docker?: { mounts?: unknown } };
-      if (contract.docker && "mounts" in contract.docker) {
-        delete contract.docker.mounts;
-        builderConfig = JSON.stringify(contract);
-      }
-    } catch {
-      /* an unreadable contract is copied as it is, like the original keeps it */
-    }
-
-    const id = generateId();
+    // Not an environment: a copy of production is a project of its own, with
+    // its own permissions, and a copy of an environment is one too.
+    const { id } = await insertProjectCopy({ source, name, slug });
     const now = nowIso();
-    await db
-      .insertInto("projects")
-      .values({
-        id,
-        name,
-        slug,
-        app_name: null,
-        source_type: source.source_type,
-        source_url: source.source_url,
-        source_branch: source.source_branch,
-        runtime_type: source.runtime_type,
-        builder_config: builderConfig,
-        port,
-        status: "stopped",
-        auto_deploy: 0,
-        webhook_secret: crypto.randomBytes(20).toString("hex"),
-        folder_id: source.folder_id,
-        backup_settings: source.backup_settings,
-        created_at: now,
-        updated_at: now,
-      })
-      .execute();
 
     try {
       if (includeEnv) {
