@@ -240,6 +240,17 @@ export async function run({ repoRoot }) {
       "a project on the page has exactly the allowed fields",
       JSON.stringify(Object.keys(snapshot.projects[0]).sort()) === JSON.stringify(["days", "name", "since", "state", "up24h", "up30d"])
     );
+    r.check(
+      "and a day of its strip a date, a share and its outages",
+      snapshot.projects[0].days.every((d) => JSON.stringify(Object.keys(d).sort()) === '["day","outages","ratio"]'),
+      JSON.stringify(snapshot.projects[0].days[0])
+    );
+    const began = snapshot.projects[0].days.find((d) => d.day <= now - 12 * MIN && now - 12 * MIN < d.day + DAY);
+    r.check(
+      "the outage going on is on its day, up to the minute the page was made",
+      began?.outages?.count === 1 && began.outages.open && began.outages.ms === 12 * MIN,
+      JSON.stringify(began)
+    );
     const text = JSON.stringify(snapshot);
     const leaked = secrets.filter((secret) => text.includes(secret));
     r.check("the whole page holds none of what the owner did not choose", leaked.length === 0, leaked.join(", "));
@@ -249,6 +260,54 @@ export async function run({ repoRoot }) {
       now
     );
     r.check("ten outages at most, all projects together", flood.incidents.length === s.PAGE_INCIDENTS);
+  }
+
+  // --- what a tapped day tells ------------------------------------------------------------------
+  {
+    // Midnight-aligned days, as `dailyRatios` cuts them in UTC.
+    const midnight = Date.UTC(2026, 10, 18);
+    const at = midnight + 15 * 60 * MIN;
+    const days = [2, 1, 0].map((back) => ({ day: midnight - back * DAY }));
+    const outage = (start, end, extra = {}) => ({ startedAt: start, endedAt: end, endUnknown: false, ...extra });
+
+    const across = s.dayOutages(days, [outage(midnight - 30 * MIN, midnight + 10 * MIN)], at);
+    r.check(
+      "an outage across midnight counts on both days, each with its part",
+      across[1].count === 1 && across[1].ms === 30 * MIN && across[2].count === 1 && across[2].ms === 10 * MIN && across[0].count === 0,
+      JSON.stringify(across)
+    );
+    r.check("a day without outages is known to have none", across[0].ms === 0 && !across[0].atLeast && !across[0].open);
+
+    const two = s.dayOutages(days, [outage(midnight + 60 * MIN, midnight + 65 * MIN), outage(midnight + 120 * MIN, midnight + 127 * MIN)], at);
+    r.check("two the same day add up", two[2].count === 2 && two[2].ms === 12 * MIN, JSON.stringify(two[2]));
+
+    const open = s.dayOutages(days, [outage(midnight - 60 * MIN, null)], at);
+    r.check(
+      "one still going on runs to now, and only today says so",
+      open[2].open && open[2].ms === 15 * 60 * MIN && open[1].count === 1 && !open[1].open,
+      JSON.stringify(open)
+    );
+
+    const paused = s.dayOutages(days, [outage(midnight + 60 * MIN, midnight + 63 * MIN, { endUnknown: true })], at);
+    r.check("one the check stopped watching is a floor", paused[2].atLeast && paused[2].ms === 3 * MIN);
+
+    const backwards = s.dayOutages(days, [outage(midnight + 60 * MIN, midnight + 30 * MIN)], at);
+    r.check("an end before its start counts for nothing", backwards.every((d) => d.count === 0));
+
+    // A full list: anything older than its oldest may be missing.
+    const full = Array.from({ length: s.PAGE_INCIDENTS }, (_, k) => outage(midnight + (k + 1) * 30 * MIN, midnight + (k + 1) * 30 * MIN + MIN));
+    const capped = s.dayOutages(days, full, at);
+    r.check(
+      "with the list full, the days up to its oldest are not known",
+      capped[0] === null && capped[1] === null && capped[2] === null,
+      JSON.stringify(capped)
+    );
+    const shifted = s.dayOutages([...days, { day: midnight + DAY }], full.map((o) => ({ ...o, startedAt: o.startedAt - 2 * DAY, endedAt: o.endedAt - 2 * DAY })), at + DAY);
+    r.check(
+      "the days after the oldest of a full list are complete",
+      shifted[0] === null && shifted[1]?.count === 0 && shifted[2]?.count === 0 && shifted[3]?.count === 0,
+      JSON.stringify(shifted)
+    );
   }
 
   {

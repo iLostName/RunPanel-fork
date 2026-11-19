@@ -376,13 +376,31 @@ export function readProjectStatus(value: unknown): PublicProjectStatus | null {
 
 export type Verdict = "up" | "partial" | "down" | "maintenance" | "unknown" | "empty";
 
+/** The outages of one day: how many, and their time inside the day. */
+export interface DayOutages {
+  count: number;
+  ms: number;
+  /** One of them has no known end (the check stopped first): `ms` is a floor. */
+  atLeast: boolean;
+  /** One of them is still going on. */
+  open: boolean;
+}
+
+/** One bar of a project's strip, with what tapping it tells. */
+export interface PublicDay {
+  day: number;
+  ratio: number | null;
+  /** Null where the page cannot know them: see `dayOutages`. */
+  outages: DayOutages | null;
+}
+
 export interface PublicProject {
   name: string;
   state: PublicState;
   since: number | null;
   up24h: number | null;
   up30d: number | null;
-  days: { day: number; ratio: number | null }[];
+  days: PublicDay[];
 }
 
 export interface PublicPageIncident extends PublicIncident {
@@ -406,6 +424,45 @@ export interface PublicSnapshot {
  */
 export type EntryOutcome = PublicProjectStatus | "missing" | "unavailable";
 
+const DAY_MS = 86_400_000;
+
+/**
+ * The outages of each day of a strip, from the project's own list: those going
+ * on at some point of the day, and their time inside it. One across midnight
+ * counts on both days, each with its part; one still open runs to `now`.
+ *
+ * Worked out here, from the incidents a status already carries, rather than
+ * sent by the server that checks the project: a member on an older release
+ * answers without it, and the page still has every outage it lists.
+ *
+ * The list holds the newest `PAGE_INCIDENTS` only. Outages never overlap — the
+ * next one opens only once the last has closed — so when the list is full, the
+ * days after the start of its oldest are complete, and the ones up to it may
+ * be missing some. Those get null: the page then says nothing about their
+ * outages, rather than a count that may be short.
+ */
+export function dayOutages(
+  days: readonly { day: number }[],
+  incidents: readonly PublicIncident[],
+  now: number
+): (DayOutages | null)[] {
+  const oldest = incidents.length >= PAGE_INCIDENTS ? Math.min(...incidents.map((i) => i.startedAt)) : -Infinity;
+  return days.map(({ day }) => {
+    if (day <= oldest) return null;
+    const out: DayOutages = { count: 0, ms: 0, atLeast: false, open: false };
+    for (const incident of incidents) {
+      const end = Math.min(incident.endedAt ?? now, day + DAY_MS);
+      const start = Math.max(incident.startedAt, day);
+      if (end <= start) continue;
+      out.count += 1;
+      out.ms += end - start;
+      out.atLeast ||= incident.endUnknown;
+      out.open ||= incident.endedAt === null && end === now;
+    }
+    return out;
+  });
+}
+
 export function overallVerdict(states: readonly PublicState[]): Verdict {
   if (states.length === 0) return "empty";
   const count = (state: PublicState) => states.filter((s) => s === state).length;
@@ -428,7 +485,9 @@ export function assembleSnapshot(
     const status: PublicProjectStatus =
       outcome === "unavailable" ? { state: "unknown", since: null, up24h: null, up30d: null, days: [], incidents: [] } : outcome;
     counts[status.state] += 1;
-    projects.push({ name, state: status.state, since: status.since, up24h: status.up24h, up30d: status.up30d, days: status.days });
+    const outages = dayOutages(status.days, status.incidents, now);
+    const days = status.days.map((d, i): PublicDay => ({ day: d.day, ratio: d.ratio, outages: outages[i] }));
+    projects.push({ name, state: status.state, since: status.since, up24h: status.up24h, up30d: status.up30d, days });
     for (const incident of status.incidents) {
       incidents.push({ name, startedAt: incident.startedAt, endedAt: incident.endedAt, endUnknown: incident.endUnknown });
     }
