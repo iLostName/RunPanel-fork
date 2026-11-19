@@ -25,7 +25,9 @@ export type ProjectOperation =
   | "autostart"
   | "restore"
   | "upload"
-  | "reset";
+  | "reset"
+  /** Containers left by a deploy without downtime cut short, brought back to one at boot. */
+  | "settle";
 
 export type ReleaseLock = () => void;
 
@@ -56,6 +58,7 @@ const BUSY_MESSAGES: Record<ProjectOperation, string> = {
   restore: "È in corso un ripristino su questo progetto: aspetta che finisca.",
   upload: "Si sta caricando una nuova versione di questo progetto: aspetta che finisca.",
   reset: "L'app di questo progetto si sta rimuovendo: aspetta che finisca.",
+  settle: "Il pannello sta rimettendo in ordine i container di questo progetto: aspetta che finisca.",
 };
 
 export const PANEL_CLOSING_MESSAGE =

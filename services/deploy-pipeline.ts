@@ -54,7 +54,9 @@ import {
 } from "./compose-network";
 import { sweep } from "./docker/gc";
 import { restartFromLastDeployment } from "./project-restart";
-import { ROLLBACK_NOTE } from "@/lib/deploy-explain";
+import { KEPT_ONLINE_NOTE, ROLLBACK_NOTE } from "@/lib/deploy-explain";
+import { decideZeroDowntime, describeBlockers, runZeroDowntimeRelease } from "./zero-downtime";
+import { applyProxySoon } from "./proxy";
 import { envFileEntry, releaseMode, rollbackPlan } from "@/lib/releases";
 import { createRelease, freeCheckoutBuildDirs } from "./releases-fs";
 import {
@@ -232,6 +234,14 @@ async function runDeploy(
   // Set when the failure is the new version not answering, which is the one
   // failure the previous version can stand in for (the rollback below).
   let healthFailed = false;
+
+  // Set once this deploy goes without downtime (lib/zero-downtime.ts): the
+  // version online is not stopped, and a failure before the switch leaves it
+  // exactly as it was — so there is nothing for the rollback to bring back.
+  let zeroDowntime = false;
+  // Set when that sequence began: from there, a failure says the version
+  // online stayed online, which it did.
+  let zeroDowntimeStarted = false;
 
   /*
     Where the version being deployed lives. Until the source is resolved, the
@@ -528,6 +538,29 @@ async function runDeploy(
     }
 
     /*
+      Without downtime, or the ordinary way. Decided on the resolved contract,
+      where the switch can only have come from the panel (`PANEL_ONLY_FIELDS`),
+      and on what the store and nginx say now. Asked for and not possible —
+      the address removed, nginx down, the health check turned off — the
+      deploy is an ordinary one and says why, rather than failing a deploy
+      that would work.
+    */
+    if (isDockerApp && contract.zeroDowntime.enabled) {
+      appendLog("\n--- Deploy senza interruzioni ---");
+      try {
+        const decision = await decideZeroDowntime(project, contract);
+        zeroDowntime = decision.blockers.length === 0;
+        appendLog(
+          zeroDowntime
+            ? "La versione online resta accesa: la nuova parte accanto, e nginx passa a lei solo quando risponde."
+            : `Non si applica a questo deploy, che sarà un deploy normale: ${describeBlockers(decision.blockers)}`
+        );
+      } catch (err) {
+        appendLog(`Non verificabile (${err instanceof Error ? err.message : String(err)}): deploy normale.`);
+      }
+    }
+
+    /*
       A folder of its own for this version, or the project folder as before.
 
       Decided here, on the resolved contract, because the automatic return is
@@ -567,7 +600,9 @@ async function runDeploy(
       appendLog(`Building in ${created.dir}`);
     } else {
       deployDir = projectDir;
-      if (mode === "rebuild") await cleanForRebuild();
+      // A Docker rebuild has no files to clean (`REBUILD_CLEAN_DIRS`), so the
+      // stop is all it would do — and without downtime nothing stops.
+      if (mode === "rebuild" && !zeroDowntime) await cleanForRebuild();
     }
     checkpoint();
 
@@ -846,7 +881,8 @@ async function runDeploy(
     // folder is involved, coming or going: the hand-over below moves files out
     // of the version that ran, and that version has to be stopped for it.
     const leaving = !release && IN_PLACE_BUILD_RUNTIMES.has(project.runtime_type) && currentRelease(project.slug) !== null;
-    if ((release || leaving || (wasRunning && mode === "deploy")) && !stoppedForBuild) {
+    // Without downtime the version online goes on serving until nginx has moved.
+    if ((release || leaving || (wasRunning && mode === "deploy")) && !stoppedForBuild && !zeroDowntime) {
       appendLog("\n--- Stopping previous instance ---");
       try {
         await processManager.stop(project.slug, project.runtime_type);
@@ -897,6 +933,82 @@ async function runDeploy(
       }
     }
 
+    /*
+      Without downtime: the new version next to the old one, the health check
+      on it, the "A deploy riuscito" commands, nginx moved with a validated
+      reload — and the deploy recorded as done in the same step, inside the
+      proxy's apply chain, so nginx and the store never tell two stories. Then
+      the old container drains and goes. A failure before the switch rejects
+      with the new container removed and the old one never touched, and lands
+      in the catch below like any other.
+    */
+    if (zeroDowntime) {
+      const startOpts = buildStartOpts({
+        project,
+        contract,
+        envVars,
+        cwd: buildResult.artifactDir,
+        port,
+        deploymentId,
+        onLog: appendLog,
+      });
+      zeroDowntimeStarted = true;
+      await runZeroDowntimeRelease({
+        project,
+        deploymentId,
+        startCmd: buildResult.startCmd,
+        startOpts,
+        contract,
+        port,
+        signal,
+        log: appendLog,
+        checkpoint,
+        afterStart: () => runPhase("post-start", oneTime, phaseCtx(builtImage)),
+        beforeSwitch: () => runPhase("post-deploy", oneTime, phaseCtx(builtImage)),
+        commit: async (livePort) => {
+          const finishedAt = nowIso();
+          await db.transaction().execute(async (trx) => {
+            await trx
+              .updateTable("deployments")
+              .set({ status: "running", finished_at: finishedAt })
+              .where("id", "=", deploymentId)
+              .execute();
+            await trx
+              .updateTable("deployments")
+              .set({ status: "superseded" })
+              .where("project_id", "=", project.id)
+              .where("id", "!=", deploymentId)
+              .where("status", "=", "running")
+              .execute();
+            await trx
+              .updateTable("projects")
+              .set({ status: "running", port: port > 0 ? port : null, live_port: livePort, crashed_at: null, updated_at: finishedAt })
+              .where("id", "=", project.id)
+              .execute();
+          });
+          appendLog(`\n=== ${label} successful ===`);
+          logFile.flush();
+          projectEvents.emit(project.id, { type: "deploy:status", deploymentId, status: "running" });
+        },
+      });
+
+      // Only now, as on the ordinary path: proved good, and ours.
+      if (builtImage?.startsWith(`${imageRepo(project.slug)}:`)) {
+        try {
+          await markCurrentImage(project.slug, builtImage);
+        } catch (err) {
+          console.error(`[deploy] Could not tag ${builtImage} as current:`, err);
+        }
+      }
+      // After the old container is gone, so the image it held can be retired with the rest.
+      try {
+        await sweep({ project: project.slug });
+      } catch (err) {
+        console.error("[deploy] Image cleanup failed:", err);
+      }
+      return;
+    }
+
     // Start new process
     appendLog("\n--- Starting application ---");
     // Announced before the start, not after: the driver empties the output as
@@ -930,6 +1042,21 @@ async function runDeploy(
         onLog: appendLog,
       })
     );
+
+    // Started the ordinary way, on its own port, after deploys without
+    // downtime (turned off since, or not possible this time): the live port
+    // nginx was sent to belongs to the container just replaced. Cleared at
+    // once rather than on success, so a rollback below starts the previous
+    // version the ordinary way too, where nginx is about to point.
+    if (project.live_port !== null) {
+      try {
+        await db.updateTable("projects").set({ live_port: null }).where("id", "=", project.id).execute();
+        appendLog("Pubblicata di nuovo sulla sua porta: nginx torna a puntare lì.");
+        applyProxySoon();
+      } catch (err) {
+        appendLog(`ATTENZIONE: porta di nginx non aggiornata: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
 
     if (restricted) {
       try {
@@ -1106,18 +1233,33 @@ async function runDeploy(
       /* a driver that cannot answer leaves the opening snapshot standing */
     }
 
+    // Without downtime, a failure of the new version is no failure of the app:
+    // the version online was never stopped, and goes on serving as before —
+    // the same outcome a successful rollback reports, without the restart.
+    const keptOnline = zeroDowntimeStarted && !cancelled && stillRunning;
+
     // Running after a failed deploy is an error state — it is serving, but not
     // what this deploy intended. Not running is simply stopped.
     await db
       .updateTable("projects")
       .set({
-        status: stillRunning ? "error" : "stopped",
+        status: keptOnline ? "running" : stillRunning ? "error" : "stopped",
         // Not a crash, so the scheduled restart leaves the project alone.
         ...(cancelled ? { crashed_at: null } : {}),
         updated_at: nowIso(),
       })
       .where("id", "=", project.id)
       .execute();
+
+    if (keptOnline) {
+      appendLog("La versione online non è mai stata fermata: l'app continua a funzionare con quella.");
+      await db
+        .updateTable("deployments")
+        .set({ error_message: `${message} — ${KEPT_ONLINE_NOTE}` })
+        .where("id", "=", deploymentId)
+        .execute();
+      logFile.flush();
+    }
 
     /*
       Automatic rollback: a version that never answered is replaced by the last
@@ -1139,7 +1281,8 @@ async function runDeploy(
     */
     const previousRelease = release ? await previousGoodRelease(project.id, project.slug).catch(() => null) : null;
     const rollback = rollbackPlan({
-      healthFailed,
+      // Without downtime there is nothing to bring back: it never went.
+      healthFailed: healthFailed && !zeroDowntime,
       cancelled,
       rollbackEnabled: contract.rollback.enabled,
       runtimeType: project.runtime_type,

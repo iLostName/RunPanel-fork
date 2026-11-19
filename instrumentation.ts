@@ -149,6 +149,15 @@ export async function register() {
   const { reconcileGates } = await import("./services/access");
   await reconcileGates();
 
+  // Deploys without downtime a restart cut short: back to exactly one app
+  // container per project, and the store's live port set to the one it is
+  // on. Before nginx, which the next step points wherever the store says.
+  // Behind the flag: it renames and removes containers.
+  const { reconcileZeroDowntime } = await import("./services/zero-downtime");
+  await reconcileZeroDowntime().catch((err) => {
+    console.error("[zero-downtime] Reconcile failed:", err instanceof Error ? err.message : err);
+  });
+
   // Domains: nginx brought back to what the store says — a restored backup or
   // a moved data directory may disagree with it — and a certificate request a
   // restart cut short marked as such. Behind the flag for the gates' reason: it

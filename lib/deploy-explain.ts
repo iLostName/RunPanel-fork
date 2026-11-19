@@ -22,6 +22,12 @@
  */
 export const ROLLBACK_NOTE = "è tornata online la versione precedente";
 
+/**
+ * What it appends when the deploy went without downtime (lib/zero-downtime.ts)
+ * and failed before the switch: nothing came back because nothing went.
+ */
+export const KEPT_ONLINE_NOTE = "la versione precedente è rimasta online";
+
 export type DeployPhase = "queued" | "source" | "build" | "start" | "health" | "done" | "failed";
 
 /**
@@ -50,7 +56,8 @@ export const DEPLOY_PHASES: { id: Exclude<DeployPhase, "queued" | "done" | "fail
 const MARKERS: [RegExp, DeployPhase][] = [
   [/^\s*=== .* FAILED/m, "failed"],
   [/^\s*=== .* successful ===/m, "done"],
-  [/^\s*--- Health check ---/m, "health"],
+  // Without downtime, nginx moving to the new version comes after its check.
+  [/^\s*--- (Health check|Switching traffic) ---/m, "health"],
   [/^\s*--- Starting application ---/m, "start"],
   [/^\s*--- (Building|Release) ---/m, "build"],
   [/^\s*--- (Fetching source|Preflight) ---/m, "source"],
@@ -216,8 +223,13 @@ export function explainDeployError(message: string | null | undefined, log: stri
   // older warning that merely mentions "npm ERR!" should not win over it.
   const tail = (log ?? "").slice(-20_000);
   const rolledBack = text.includes(ROLLBACK_NOTE);
+  const keptOnline = text.includes(KEPT_ONLINE_NOTE);
   const note = (explanation: DeployErrorExplanation): DeployErrorExplanation =>
-    rolledBack ? { ...explanation, hint: `Intanto è tornata online la versione precedente. ${explanation.hint}` } : explanation;
+    rolledBack
+      ? { ...explanation, hint: `Intanto è tornata online la versione precedente. ${explanation.hint}` }
+      : keptOnline
+        ? { ...explanation, hint: `Intanto l'app continua a funzionare con la versione precedente, che non è mai stata fermata. ${explanation.hint}` }
+        : explanation;
   for (const rule of RULES) {
     const match = text.match(rule.test) ?? (rule.inLog ? tail.match(rule.test) : null);
     if (match) return note({ code: rule.code, ...rule.explain(match) });
