@@ -62,7 +62,8 @@ async function send(body: Record<string, unknown>, failure: string): Promise<Rec
   }
 }
 
-export function TwoFactorPanel() {
+/** `hasPassword` false: an account that signs in only with GitHub. Every change here asks for the password, so it has to choose one first. */
+export function TwoFactorPanel({ hasPassword = true }: { hasPassword?: boolean }) {
   const me = useMe();
   const { isSolo } = useNode();
   const status = useResource<Status>(API);
@@ -143,12 +144,16 @@ export function TwoFactorPanel() {
             Per entrare servirà anche il codice di 6 cifre che un&apos;app sul telefono cambia ogni 30 secondi: chi scopre
             la tua password, da sola, non entra.
           </p>
-          <div>
-            <Button variant="primary" size="sm" onPress={() => open("setup")}>
-              <Icon icon="solar:shield-keyhole-linear" width={15} aria-hidden />
-              Attiva
-            </Button>
-          </div>
+          {hasPassword ? (
+            <div>
+              <Button variant="primary" size="sm" onPress={() => open("setup")}>
+                <Icon icon="solar:shield-keyhole-linear" width={15} aria-hidden />
+                Attiva
+              </Button>
+            </div>
+          ) : (
+            <p className="text-muted text-sm">Per attivarla imposta prima una password, qui sopra: serve a confermare che sei tu.</p>
+          )}
         </>
       )}
 

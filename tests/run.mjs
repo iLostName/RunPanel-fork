@@ -104,8 +104,10 @@ for (const file of suiteFiles) {
         driver,
         databaseUrl: driver === "postgres" ? pgUrl : undefined,
         // A suite that needs the server configured a particular way says so in
-        // its own meta, rather than the harness growing a flag per suite.
-        env: meta.env ?? {},
+        // its own meta, rather than the harness growing a flag per suite. A
+        // function is called first, for a suite that stands up a fake of some
+        // outside service and has to tell the server where it listens.
+        env: typeof meta.env === "function" ? await meta.env() : (meta.env ?? {}),
       });
       const result = await run({ base: server.base, dataDir: server.dataDir, repoRoot: REPO_ROOT });
       results.push({ ...result, name: `${result.name} [${driver}]` });

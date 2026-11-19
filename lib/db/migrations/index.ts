@@ -41,6 +41,7 @@ import * as projectTasks from "./041-project-tasks";
 import * as backupEncryption from "./044-backup-encryption";
 import * as backupCopies from "./045-backup-copies";
 import * as pushDevices from "./049-push-devices";
+import * as githubLogin from "./050-github-login";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -92,6 +93,7 @@ export const migrations: Record<string, Migration> = {
   "044-backup-encryption": backupEncryption,
   "045-backup-copies": backupCopies,
   "049-push-devices": pushDevices,
+  "050-github-login": githubLogin,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

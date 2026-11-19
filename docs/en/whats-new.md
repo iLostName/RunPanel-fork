@@ -81,6 +81,7 @@ Alerts by email, Telegram, Discord, Slack, ntfy or a signed webhook: each channe
 ## Account and security
 
 - **Two-step sign-in** with an authenticator app and recovery codes, "remember this device", sessions listed and closable.
+- **Sign in with GitHub**: the owner sets up a GitHub OAuth App once (**Impostazioni › Generale › Accesso con GitHub**, a step-by-step guide with the callback URL to copy and a **Verifica** button); each user then links their GitHub account from **Impostazioni › Account**, or accepts an invitation with GitHub. A GitHub account never creates a user, two-step verification is still asked for, and before it is turned off the panel names whoever signs in only with GitHub and would be locked out. See [Signing in with GitHub](users.md#signing-in-with-github).
 - **`scripts/reset-owner.mjs`** resets the owner's password (and, if needed, two-step sign-in) from the server's terminal. See [Users and permissions](users.md).
 - **Activity log** filterable by user, resource and action, and exportable as CSV.
 - **AI e API › API**: a reference of every API with `curl` examples.

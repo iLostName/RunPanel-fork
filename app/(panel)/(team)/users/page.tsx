@@ -12,6 +12,8 @@ import { LoadError } from "@/components/ui/LoadError";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { DurationPicker, LinkResultDialog } from "@/components/users/LinkDialogs";
 import { STATUS_LABEL } from "@/components/users/labels";
+import { GithubMark } from "@/components/github/GithubMark";
+import { Badge } from "@/components/ui/Badge";
 import { useResource } from "@/lib/hooks/useResource";
 import { formatRelative } from "@/lib/format";
 
@@ -22,6 +24,9 @@ interface UserRow {
   status: string;
   lastLoginAt: string | null;
   inviteExpiresAt: string | null;
+  /** The GitHub account it may sign in with (lib/github-login.ts), or null. */
+  githubLogin?: string | null;
+  hasPassword?: boolean;
 }
 
 /** Every account, and the way in for a new one. */
@@ -92,7 +97,29 @@ export default function UsersPage() {
                         {user.lastLoginAt ? `ultimo accesso ${formatRelative(user.lastLoginAt)}` : "mai entrato"}
                       </p>
                     </div>
-                    <Icon icon="solar:alt-arrow-right-linear" className="text-muted shrink-0" width={16} aria-hidden />
+                    <div className="flex shrink-0 items-center gap-2">
+                      {user.githubLogin && (
+                        // Who can sign in with GitHub, and with which account: what the
+                        // owner needs before turning GitHub sign-in off.
+                        <span
+                          className="min-w-0"
+                          title={
+                            user.hasPassword === false
+                              ? `Entra solo con GitHub, come @${user.githubLogin}: non ha una password`
+                              : `Può entrare anche con GitHub, come @${user.githubLogin}`
+                          }
+                        >
+                          <Badge tone={user.hasPassword === false ? "warning" : "neutral"} className="max-w-[9rem]">
+                            <GithubMark size={12} />
+                            <span className="truncate">{user.githubLogin}</span>
+                            <span className="sr-only">
+                              {user.hasPassword === false ? ", entra solo con GitHub" : ", collegato a GitHub"}
+                            </span>
+                          </Badge>
+                        </span>
+                      )}
+                      <Icon icon="solar:alt-arrow-right-linear" className="text-muted" width={16} aria-hidden />
+                    </div>
                   </Link>
                 </li>
               );

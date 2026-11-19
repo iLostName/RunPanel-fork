@@ -12,6 +12,36 @@ Con [più server](multi-server.md) gli account sono gli stessi ovunque e si gest
 
 Si entra con email e password. Il pannello non invia email: l'email è solo il nome con cui accedi.
 
+Dove il proprietario l'ha configurato c'è anche **Accedi con GitHub**: vedi [Accesso con GitHub](#accesso-con-github).
+
+## Accesso con GitHub
+
+Si può entrare con il proprio account GitHub invece che con la password. Un account GitHub non crea mai un utente: viene **collegato** a uno che esiste già, e solo allora lo fa entrare. Chi ha un account GitHub non collegato a nessuno si sente dire di chiedere un invito al proprietario.
+
+**La configurazione** spetta al proprietario, in **Impostazioni › Generale › Accesso con GitHub**, una volta per tutto il pannello. La sezione guida passo per passo:
+
+1. Su GitHub, **Settings › Developer settings › OAuth Apps › New OAuth App** (il bottone **Apri GitHub** la apre). Il nome è a scelta, per esempio «RunPanel».
+2. **Homepage URL** e **Authorization callback URL** si copiano dal pannello, che li mostra con il bottone per copiarli. La callback è `https://<indirizzo del pannello>/api/auth/github/callback` e deve essere identica. Nasce dall'**Indirizzo pubblico** del pannello se è impostato, altrimenti dall'indirizzo da cui hai aperto la pagina. Il pannello rifiuta http senza lucchetto, tranne sulla macchina stessa (`http://localhost`, `http://127.0.0.1`): GitHub rimanderebbe il codice di accesso in chiaro. Metti prima il pannello su HTTPS (**Metti il pannello su HTTPS**).
+3. Nella pagina dell'app, **Generate a new client secret**, poi incolla nel pannello **Client ID** e secret. Il secret viene salvato cifrato con la chiave segreta del pannello e non si rilegge più.
+4. **Verifica** chiede a GitHub se accetta Client ID e secret.
+5. **Consenti l'accesso con GitHub** lo accende; si applica subito.
+
+L'URL di callback è anche l'indirizzo da cui deve partire l'accesso: da un altro indirizzo dello stesso pannello il bottone dice dove andare. Se l'indirizzo del pannello cambia, la sezione lo segnala: aggiorna l'URL su GitHub, poi **Usa il nuovo indirizzo**.
+
+**Collegare un account**: in **Impostazioni › Account › Accesso con GitHub**, **Collega GitHub**, poi la tua password, poi GitHub chiede di autorizzare l'app e ti riporta indietro. Il collegamento usa l'id numerico dell'utente GitHub, che non cambia mai, mai il nome utente né l'email. Un account GitHub si collega a un solo utente, e un utente ne ha al massimo uno. **Scollega GitHub** lo toglie.
+
+**Inviti**: un link di invito si può accettare anche con **Accedi con GitHub** invece di scegliere una password. L'account entra allora solo con GitHub; può aggiungere una password da **Impostazioni › Account**, entro dieci minuti da un accesso (dopo, la pagina propone prima di rientrare con GitHub). Un link per scegliere una nuova password non si usa con GitHub.
+
+**Cosa GitHub non cambia**:
+
+- La verifica in due passaggi viene chiesta dopo GitHub esattamente come dopo la password, e **Ricorda questo dispositivo** funziona allo stesso modo.
+- Un account disattivato viene rifiutato, le sessioni sono quelle del pannello, ai tentativi valgono gli stessi limiti, e ogni accesso, collegamento, scollegamento e rifiuto finisce nel registro attività.
+- Il pannello chiede a GitHub solo `read:user`, usa il token una volta per leggere id e nome dell'account, poi lo revoca su GitHub e non conserva niente. Ogni accesso è protetto da uno `state` legato a un cookie di breve durata del browser da cui è partito, e da PKCE (S256); dopo, il browser va solo a pagine del pannello.
+
+**Spegnerlo**: il proprietario lo spegne dalla stessa sezione (o rimuove l'app). Gli accessi in corso finiscono subito, anche quello che aspetta il codice. Gli utenti collegati entrano allora con la password; i collegamenti restano, e tornano a funzionare quando lo riaccende. Chi entra solo con GitHub resterebbe fuori, quindi il pannello rifiuta di spegnerlo finché ce n'è qualcuno, e li nomina: ognuno può impostare una password dalla sua pagina Account, oppure gli mandi un link per sceglierla dalla sua pagina in **Team › Utenti** (lì il suo badge GitHub dice che non ha una password). Si può comunque spegnere lo stesso, dopo una conferma.
+
+**Team › Utenti** mostra l'account GitHub di ogni utente che ne ha uno. Con [più server](multi-server.md) tutto questo vale per pannello, come la verifica in due passaggi: ogni pannello ha la sua app OAuth, e gli account si collegano su ogni pannello a parte.
+
 ## Verifica in due passaggi
 
 Con la **verifica in due passaggi** attiva, per entrare serve anche il codice di 6 cifre che un'app di autenticazione sul telefono mostra e cambia ogni 30 secondi: chi scopre la password, da sola, non entra.
@@ -53,9 +83,9 @@ Trova il database come il pannello: `RUNPANEL_DB_DRIVER`, `RUNPANEL_DATA_DIR`, `
 
 ## Invitare qualcuno
 
-In **Accessi › Utenti › Invita utente** scrivi l'email e scegli per quanto vale il link: 1 ora, 24 ore, 7 giorni o una durata a piacere fino a 30 giorni. Il pannello mostra il link **una volta sola** e lo mandi tu alla persona. Il link funziona una volta: la persona sceglie la password ed entra.
+In **Accessi › Utenti › Invita utente** scrivi l'email e scegli per quanto vale il link: 1 ora, 24 ore, 7 giorni o una durata a piacere fino a 30 giorni. Il pannello mostra il link **una volta sola** e lo mandi tu alla persona. Il link funziona una volta: la persona sceglie la password, oppure usa **Accedi con GitHub** dove l'[accesso con GitHub](#accesso-con-github) è attivo, ed entra.
 
-Dalla pagina di un account generi un link nuovo: un invito se l'account non ha ancora una password, altrimenti un link per sceglierne una nuova (così si risolve una password dimenticata). Ogni link nuovo annulla quelli non usati, e usarne uno disconnette quell'account da ogni dispositivo.
+Dalla pagina di un account generi un link nuovo: un invito se l'account non ne ha ancora accettato uno, altrimenti un link per scegliere una nuova password (così si risolve una password dimenticata, e così la ottiene un account che entra solo con GitHub). Ogni link nuovo annulla quelli non usati, e usarne uno disconnette quell'account da ogni dispositivo.
 
 ## Cosa può fare un account
 

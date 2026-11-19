@@ -7,6 +7,7 @@ import { readBodyCapped } from "@/lib/read-body";
 import { refuseCrossOrigin } from "@/lib/request-origin";
 import { inspectInvite, recordLogin, redeemInvite } from "@/lib/users";
 import { forgetTrustedDevices, isTwoFactorEnabled } from "@/lib/two-factor";
+import { githubLoginAvailable } from "@/lib/github-login";
 
 /**
  * Invitation and reset links — public, like the login form.
@@ -35,13 +36,19 @@ async function limited(request: NextRequest): Promise<NextResponse | null> {
 const invalid = () =>
   NextResponse.json({ error: "Link non valido o scaduto. Chiedi un nuovo invito." }, { status: 400 });
 
-/** What a link is for, so the page can show the email it will set a password on. */
+/**
+ * What a link is for, so the page can show the email it will set a password
+ * on — and whether an invitation may instead be accepted with GitHub
+ * (`/api/auth/github/start`). A reset link never: it is how a password is
+ * chosen again.
+ */
 export async function GET(request: NextRequest) {
   const tooMany = await limited(request);
   if (tooMany) return tooMany;
   const invite = await inspectInvite(request.nextUrl.searchParams.get("token"));
   if (!invite) return invalid();
-  return NextResponse.json({ email: invite.email, kind: invite.kind }, { headers: { "Cache-Control": "no-store" } });
+  const github = invite.kind === "invite" && (await githubLoginAvailable());
+  return NextResponse.json({ email: invite.email, kind: invite.kind, github }, { headers: { "Cache-Control": "no-store" } });
 }
 
 /** Spend a link: set the password and sign in. */

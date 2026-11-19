@@ -81,6 +81,7 @@ Avvisi via email, Telegram, Discord, Slack, ntfy o webhook firmato: per ogni can
 ## Account e sicurezza
 
 - **Verifica in due passaggi** con app di autenticazione e codici di recupero, «ricorda questo dispositivo», sessioni visibili e chiudibili.
+- **Accesso con GitHub**: il proprietario configura una volta un'app OAuth di GitHub (**Impostazioni › Generale › Accesso con GitHub**, una guida passo per passo con l'URL di callback da copiare e il bottone **Verifica**); poi ogni utente collega il suo account GitHub da **Impostazioni › Account**, oppure accetta un invito con GitHub. Un account GitHub non crea mai un utente, la verifica in due passaggi viene chiesta lo stesso, e prima di spegnerlo il pannello nomina chi entra solo con GitHub e resterebbe fuori. Vedi [Accesso con GitHub](users.md#accesso-con-github).
 - **`scripts/reset-owner.mjs`** reimposta dal terminale del server la password del proprietario (e, se serve, la verifica in due passaggi). Vedi [Utenti e permessi](users.md).
 - **Registro attività** filtrabile per utente, risorsa e azione, ed esportabile in CSV.
 - **AI e API › API**: il riferimento di tutte le API con esempi `curl`.
