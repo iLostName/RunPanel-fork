@@ -65,7 +65,7 @@ export function LinkedServiceDelete({
               <>
                 {deleteData
                   ? "Il container e il volume con i dati vengono eliminati. I dati non sono recuperabili."
-                  : "Il container viene eliminato. Il volume con i dati resta, e un servizio ricreato con lo stesso nome in questo progetto lo ritrova."}
+                  : "Il container viene eliminato. Il volume con i dati resta, e un database ricreato con lo stesso nome in questo progetto lo ritrova."}
                 <CheckboxField
                   className="mt-3"
                   isSelected={deleteData}

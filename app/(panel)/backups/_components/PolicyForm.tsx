@@ -349,7 +349,7 @@ export function PolicyForm({ policy }: Props) {
           </TextField>
 
           {/* Only when creating: an existing schedule belongs to the server it was made on. */}
-          {!policy && <ServerPicker description="La pianificazione gira su questo server e salva i suoi progetti e servizi." />}
+          {!policy && <ServerPicker description="La pianificazione gira su questo server e salva i suoi progetti e database." />}
         </div>
       </Panel>
 
@@ -457,7 +457,7 @@ export function PolicyForm({ policy }: Props) {
 
           {databaseScope === "all" && (
             <FieldHint>
-              Include anche i servizi che creerai domani: la lista viene risolta all&apos;avvio di
+              Include anche i database che creerai domani: la lista viene risolta all&apos;avvio di
               ogni backup, non adesso.
             </FieldHint>
           )}
@@ -465,7 +465,7 @@ export function PolicyForm({ policy }: Props) {
           {databaseScope === "some" && (
             <div className="border-border mt-3 divide-y divide-[var(--color-border)] rounded-[var(--radius)] border">
               {services.length === 0 && (
-                <p className="text-muted p-3 text-xs">Nessun servizio configurato.</p>
+                <p className="text-muted p-3 text-xs">Nessun database configurato.</p>
               )}
               {services.map((service) => {
                 const chosen = service.id in selectedServices;
@@ -517,7 +517,7 @@ export function PolicyForm({ policy }: Props) {
             label={<span className="text-foreground font-medium">Store del pannello</span>}
           />
           <FieldHint>
-            Progetti, servizi, variabili cifrate e impostazioni. Senza questo un ripristino rimette i
+            Progetti, database, variabili cifrate e impostazioni. Senza questo un ripristino rimette i
             dati ma non chi li possedeva.
           </FieldHint>
 

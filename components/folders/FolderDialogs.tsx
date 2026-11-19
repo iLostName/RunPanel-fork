@@ -104,7 +104,7 @@ export function FolderDialogs<F extends FolderLike>({
             <Input placeholder="Es. Clienti" maxLength={60} />
           </TextField>
           {shown?.kind === "create" && !isSolo && (
-            <p className="text-muted text-xs">La cartella vale per tutti i server: può contenere progetti e servizi di qualunque server.</p>
+            <p className="text-muted text-xs">La cartella vale per tutti i server: può contenere progetti e database di qualunque server.</p>
           )}
         </div>
       </FormDialog>
@@ -117,7 +117,7 @@ export function FolderDialogs<F extends FolderLike>({
         title="Eliminare la cartella?"
         description={
           shown?.kind === "delete"
-            ? `"${shown.folder.name}" sparisce dalla Panoramica e da Progetti${isSolo ? "" : " su tutti i server"}. I progetti e i servizi che contiene non vengono toccati: restano senza cartella.`
+            ? `"${shown.folder.name}" sparisce dalla Panoramica e da Progetti${isSolo ? "" : " su tutti i server"}. I progetti e i database che contiene non vengono toccati: restano senza cartella.`
             : undefined
         }
         confirmLabel="Elimina"

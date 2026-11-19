@@ -65,7 +65,7 @@ export function ServerCardView({ server: s, active, onSelect }: { server: Server
               {s.summary.projects.running}/{s.summary.projects.total} progetti attivi
             </span>
             <span>
-              {s.summary.services.running}/{s.summary.services.total} servizi
+              {s.summary.services.running}/{s.summary.services.total} database
             </span>
             {m && <span>{formatBytes(m.disk.free)} liberi</span>}
             <span className="inline-flex items-center gap-1">

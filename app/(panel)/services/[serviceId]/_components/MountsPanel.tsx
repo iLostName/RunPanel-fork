@@ -35,7 +35,7 @@ import { useNodeApi } from "@/lib/hooks/useNode";
 
 const PHASE_LABEL: Record<MountPhase, string> = {
   checking: "Controllo le destinazioni…",
-  stopping: "Fermo il servizio…",
+  stopping: "Fermo il database…",
   seeding: "Copio il contenuto attuale…",
   recreating: "Ricreo il container…",
   verifying: "Aspetto che il motore risponda…",
@@ -179,7 +179,7 @@ export function MountsPanel({
       {inFlight ? (
         <>
           <Hint tone="warn" title={PHASE_LABEL[apply.phase]}>
-            Il servizio è fermo finché l&apos;applicazione non finisce. Il contenuto di partenza non
+            Il database è fermo finché l&apos;applicazione non finisce. Il contenuto di partenza non
             viene toccato: se qualcosa va storto il pannello rimette la configurazione precedente.
             {apply.seeding && (
               <>
@@ -206,14 +206,14 @@ export function MountsPanel({
             <Hint tone="warn" title="L'ultima applicazione non è riuscita">
               {apply.error}{" "}
               {apply.rolledBack
-                ? "Il servizio è tornato alla configurazione precedente."
+                ? "Il database è tornato alla configurazione precedente."
                 : "Attenzione: neanche il ritorno indietro è riuscito — controlla lo stato del container."}
             </Hint>
           )}
 
           {rows.length === 0 ? (
             <FieldHint>
-              Nessuna cartella condivisa. Il servizio usa solo il volume che RunPanel gli ha creato.
+              Nessuna cartella condivisa. Il database usa solo il volume che RunPanel gli ha creato.
             </FieldHint>
           ) : (
             <div className="space-y-3">
@@ -284,11 +284,11 @@ export function MountsPanel({
           )}
 
           {releasing && (
-            <Hint tone="warn" title="Stai togliendo il bind sui dati del servizio">
+            <Hint tone="warn" title="Stai togliendo il bind sui dati del database">
               {releasing.message}
               <CheckboxField
                 className="mt-2"
-                label="Ho capito: rimetti il servizio sul volume di prima"
+                label="Ho capito: rimetti il database sul volume di prima"
                 isSelected={release.includes(releasing.id)}
                 onChange={(checked) =>
                   setRelease((prev) =>

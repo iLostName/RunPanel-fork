@@ -44,8 +44,8 @@ export async function policyProblem(
     if (target.kind === "project" && target.id && can.project(target.id)) continue;
     if (target.kind === "service" && target.id && can.service(target.id)) continue;
     return target.kind === "panel" || target.kind.startsWith("all-")
-      ? "Solo il proprietario può fare il backup del pannello o di tutti i progetti e servizi"
-      : "Puoi fare il backup solo dei progetti e servizi che gestisci";
+      ? "Solo il proprietario può fare il backup del pannello o di tutti i progetti e database"
+      : "Puoi fare il backup solo dei progetti e database che gestisci";
   }
   return null;
 }
@@ -113,7 +113,7 @@ export async function restoreProblem(
     if (!target) return "Destinazione del ripristino mancante";
     const ok =
       artifact.kind === "service-db" ? can.service(target) : artifact.kind.startsWith("project-") ? can.project(target) : false;
-    if (!ok) return "Puoi ripristinare solo su progetti e servizi che gestisci";
+    if (!ok) return "Puoi ripristinare solo su progetti e database che gestisci";
     if (artifact.kind === "project-repo" && !hasPermission(principal, "host")) {
       return 'Serve il permesso "Accesso all\'host": cambiare il codice che il progetto esegue';
     }

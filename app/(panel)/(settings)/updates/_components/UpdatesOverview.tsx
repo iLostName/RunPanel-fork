@@ -191,8 +191,8 @@ export function UpdatesOverview() {
         : "Aggiornare RunPanel?";
   const confirmText =
     confirming === "all"
-      ? `${updatable.map((s) => s.memberName).join(", ")}: ognuno scarica la nuova versione, installa, builda e si riavvia, e per qualche secondo risulta non raggiungibile. Questo pannello parte per ultimo. I progetti e i servizi in esecuzione non vengono toccati.`
-      : "Il server scarica la nuova versione, installa, builda e si riavvia: per qualche secondo risulta non raggiungibile. I progetti e i servizi in esecuzione non vengono toccati.";
+      ? `${updatable.map((s) => s.memberName).join(", ")}: ognuno scarica la nuova versione, installa, builda e si riavvia, e per qualche secondo risulta non raggiungibile. Questo pannello parte per ultimo. I progetti e i database in esecuzione non vengono toccati.`
+      : "Il server scarica la nuova versione, installa, builda e si riavvia: per qualche secondo risulta non raggiungibile. I progetti e i database in esecuzione non vengono toccati.";
 
   return (
     <>

@@ -42,7 +42,7 @@ export function describePush(event: NotifyEvent, message: Pick<NotifyMessage, "t
 
     case "service.crashed":
       return text(
-        `Servizio fermo — ${event.name}`,
+        `Database fermo — ${event.name}`,
         "Non è più in esecuzione, e non è stato il pannello a fermarlo. I progetti collegati probabilmente non riescono a connettersi."
       );
 
@@ -50,7 +50,7 @@ export function describePush(event: NotifyEvent, message: Pick<NotifyMessage, "t
       return text(
         `${message.title} — ${event.name}`,
         event.ok
-          ? `${event.kind === "project" ? "Il progetto" : "Il servizio"} è stato riavviato all'orario previsto.`
+          ? `${event.kind === "project" ? "Il progetto" : "Il database"} è stato riavviato all'orario previsto.`
           : "Il riavvio non è riuscito e il pannello non riprova da solo: il motivo è nella sua pagina."
       );
 

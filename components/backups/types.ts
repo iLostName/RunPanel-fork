@@ -303,7 +303,7 @@ export function describeTarget(target: BackupTarget, catalog?: TargetCatalog | n
       return `Tutti i progetti (${includeWords(target.include)})`;
     case "service": {
       const service = catalog?.services.find((entry) => entry.id === target.id);
-      const name = service?.name ?? "servizio rimosso";
+      const name = service?.name ?? "database rimosso";
       return target.databases?.length ? `${name}: ${target.databases.join(", ")}` : name;
     }
     case "project": {

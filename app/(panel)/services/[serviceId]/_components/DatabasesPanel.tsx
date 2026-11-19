@@ -14,6 +14,7 @@ import { Field } from "@/components/ui/Field";
 import { LoadError } from "@/components/ui/LoadError";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { buildConnectionString } from "@/lib/service-env";
+import { engineLabel } from "@/lib/labels";
 import { DATABASE_NAME_RULE } from "@/lib/validation";
 
 /**
@@ -133,7 +134,7 @@ export function DatabasesPanel({
       <Panel className="space-y-4">
         <PanelHeader
           title="Database"
-          description="Più database nello stesso servizio, ognuno con la sua URL"
+          description={`Più database nello stesso ${engineLabel(type)}, ognuno con la sua URL`}
         />
 
         {/* A failed read used to fall through to "Nessun database", which is
@@ -187,7 +188,7 @@ export function DatabasesPanel({
                         confirm={{
                           title: `Eliminare il database "${database.name}"?`,
                           description:
-                            "Le tabelle e i dati che contiene vengono persi. Gli altri database del servizio restano.",
+                            "Le tabelle e i dati che contiene vengono persi. Gli altri database restano.",
                         }}
                         onConfirm={() => dropDatabase(database.name)}
                       />
@@ -209,7 +210,7 @@ export function DatabasesPanel({
 
         {data && !data.running && (
           <Hint tone="warn">
-            Il servizio è fermo: l&apos;elenco è quello registrato dal pannello e non può essere
+            {engineLabel(type)} è fermo: l&apos;elenco è quello registrato dal pannello e non può essere
             confermato dal motore. Avvialo per crearne o eliminarne.
           </Hint>
         )}
@@ -240,7 +241,7 @@ export function DatabasesPanel({
 
         <FieldHint>
           Minuscole, numeri e underscore, iniziando con una lettera. Condividono container, volume,
-          memoria e credenziali di questo servizio: un backup, uno stop o un&apos;eliminazione con i
+          memoria e credenziali di questo {engineLabel(type)}: un backup, uno stop o un&apos;eliminazione con i
           dati li prende tutti insieme.
           {type === "mongodb" && (
             <>

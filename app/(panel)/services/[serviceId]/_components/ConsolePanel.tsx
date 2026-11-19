@@ -32,7 +32,7 @@ const MODES = [
 ];
 
 const MODE_NOTE: Record<ConsoleMode, string> = {
-  engine: "Il client del motore, già autenticato con le credenziali del servizio.",
+  engine: "Il client del motore, già autenticato con le credenziali del database.",
   shell: "Una shell dentro il container.",
   logs: "Quello che il container scrive, in diretta. Sola lettura, e non viene salvato.",
 };
@@ -181,7 +181,7 @@ export function ConsolePanel({
           </Button>
           {!running && !readOnly && (
             <span className="text-muted text-xs">
-              Il servizio è fermo: avvialo per aprire una sessione.
+              Il database è fermo: avvialo per aprire una sessione.
             </span>
           )}
         </div>

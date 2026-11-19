@@ -177,7 +177,7 @@ export function ConnectionPanel({
           Variabili: non serve copiarla.
         </Hint>
       ) : (
-        <Hint icon="solar:database-linear" title="Servizio autonomo">
+        <Hint icon="solar:database-linear" title="Database autonomo">
           Nessun progetto lo riceve da solo: copia la riga qui sotto nelle variabili di chi lo usa.
         </Hint>
       )}

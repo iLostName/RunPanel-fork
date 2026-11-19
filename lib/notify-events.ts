@@ -60,14 +60,14 @@ export const NOTIFY_GROUPS: NotifyEventGroup[] = [
       },
       {
         key: "service.crashed",
-        label: "Un servizio si è fermato da solo",
+        label: "Un database si è fermato da solo",
         description: "Stessa cosa per un container di database.",
       },
       {
         key: "restart.scheduled",
         label: "Riavvio programmato",
         description:
-          "Quando un riavvio a orario fisso riavvia un progetto o un servizio, o ci prova dopo un crash e non ci riesce. I salti non vengono notificati.",
+          "Quando un riavvio a orario fisso riavvia un progetto o un database, o ci prova dopo un crash e non ci riesce. I salti non vengono notificati.",
       },
       {
         key: "docker.down",

@@ -443,7 +443,7 @@ export default function ProjectsPage() {
         <EmptyState
           icon="solar:widget-2-linear"
           title="Nessun progetto"
-          description="Un progetto contiene un'app e i servizi di cui ha bisogno."
+          description="Un progetto contiene un'app e i database di cui ha bisogno."
           action={
             canCreate ? (
               <LinkButton href={href("/projects/new")} variant="primary">

@@ -113,7 +113,7 @@ function TableList({ call, database, onPick }: { call: BrowseCall; database: str
       <EmptyState
         icon="solar:database-linear"
         title="Nessuna tabella"
-        description="Questo database è vuoto, oppure le tabelle stanno in un altro database del servizio."
+        description="Questo database è vuoto, oppure le tabelle stanno in un altro database dello stesso motore."
       />
     );
   }

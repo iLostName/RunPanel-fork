@@ -157,7 +157,7 @@ export default function McpPage() {
               )}
               <FieldHint>
                 Endpoint MCP: <span className="font-mono">{endpoint}</span>. Ogni token agisce come te, con i tuoi
-                stessi permessi su progetti, servizi e server del cluster.
+                stessi permessi su progetti, database e server del cluster.
               </FieldHint>
             </Panel>
 

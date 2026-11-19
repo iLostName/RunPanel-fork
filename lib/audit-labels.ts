@@ -8,7 +8,7 @@
  * Zero imports: the unit suite loads this file directly.
  */
 
-export const SCOPE_LABEL: Record<string, string> = { project: "progetto", service: "servizio", folder: "cartella", user: "utente" };
+export const SCOPE_LABEL: Record<string, string> = { project: "progetto", service: "database", folder: "cartella", user: "utente" };
 
 /**
  * The categories, as the log page's filter and settings and the CSV export
@@ -16,12 +16,12 @@ export const SCOPE_LABEL: Record<string, string> = { project: "progetto", servic
  */
 export const CATEGORY_LABEL: Record<string, { label: string; description: string }> = {
   security: { label: "Sicurezza", description: "Accessi, inviti, utenti, permessi e sessioni. Sempre registrata." },
-  deploy: { label: "Deploy", description: "Deploy, avvio, stop e riavvio di progetti e servizi." },
+  deploy: { label: "Deploy", description: "Deploy, avvio, stop e riavvio di progetti e database." },
   config: { label: "Configurazione", description: "Variabili, impostazioni, mount, file, nuovi progetti." },
   terminal: { label: "Terminale", description: "Apertura di terminali e console, letture dal browser dei dati." },
   backup: { label: "Backup", description: "Pianificazioni, esecuzioni e ripristini." },
   system: { label: "Sistema", description: "Aggiornamenti, avvio automatico, storage, impostazioni globali." },
-  delete: { label: "Eliminazioni", description: "Progetti, servizi, cartelle e database eliminati." },
+  delete: { label: "Eliminazioni", description: "Progetti, database e cartelle eliminati." },
 };
 
 /** Readable names for the actions the routes record. */
@@ -98,17 +98,17 @@ export const ACTION_LABEL: Record<string, string> = {
   "project.upload": "Archivio caricato",
   "project.webhook": "Webhook GitHub",
   "catalog.install": "App installata dal catalogo",
-  "service.control": "Avvio / stop / riavvio servizio",
-  "service.update": "Impostazioni servizio",
-  "service.delete": "Servizio eliminato",
-  "service.create": "Servizio creato",
+  "service.control": "Avvio / stop / riavvio database",
+  "service.update": "Impostazioni database",
+  "service.delete": "Database eliminato",
+  "service.create": "Database creato",
   "service.console.engine": "Console del database aperta",
-  "service.console.shell": "Shell del servizio aperta",
+  "service.console.shell": "Shell del database aperta",
   "service.browse.read": "Dati letti dal browser",
   "service.browse.query": "Query eseguita dal browser",
-  "service.database.create": "Database creato",
-  "service.database.delete": "Database eliminato",
-  "service.mounts": "Mount del servizio",
+  "service.database.create": "Database con nome creato",
+  "service.database.delete": "Database con nome eliminato",
+  "service.mounts": "Mount del database",
   "folder.create": "Cartella creata",
   "folder.update": "Cartella modificata",
   "folder.delete": "Cartella eliminata",
