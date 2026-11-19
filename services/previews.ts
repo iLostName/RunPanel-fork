@@ -103,6 +103,11 @@ export async function stopPreview(record: ProjectPreviewsTable, reason: PreviewS
   return true;
 }
 
+async function markClosing(recordId: string): Promise<void> {
+  const db = await getDb();
+  await db.updateTable("project_previews").set({ state: "closing", updated_at: nowIso() }).where("id", "=", recordId).execute();
+}
+
 /** The preview and its record, gone: its project like any project, its databases with it. */
 export async function removePreview(record: ProjectPreviewsTable): Promise<{ ok: true } | { ok: false; error: string }> {
   const db = await getDb();
@@ -244,9 +249,10 @@ export async function handlePullRequest(
       return ignored(decision.reason);
     case "remove": {
       const removed = existing ? await removePreview(existing) : { ok: true as const };
-      return removed.ok
-        ? { status: "accepted", message: "Preview removed", summary: { ...summary, removed: true }, deploymentId: null }
-        : { status: "ignored", message: `Preview not removed: ${removed.error}`, summary: { ...summary, reason: "busy" }, deploymentId: null };
+      if (removed.ok) return { status: "accepted", message: "Preview removed", summary: { ...summary, removed: true }, deploymentId: null };
+      // No second delivery is coming for a closed pull request: the sweep finishes it.
+      if (existing) await markClosing(existing.id);
+      return { status: "accepted", message: `Preview removal postponed: ${removed.error}`, summary: { ...summary, closing: true }, deploymentId: null };
     }
     case "update":
       await upsertRecord(production, pr);
@@ -454,7 +460,7 @@ export async function pollPreviews(production: ProjectsTable, token: string): Pr
   }
   for (const number of changes.closed) {
     const record = records.find((r) => r.pr_number === number);
-    if (record) await removePreview(record);
+    if (record && !(await removePreview(record)).ok) await markClosing(record.id);
   }
 }
 
@@ -463,6 +469,10 @@ export async function pollPreviews(production: ProjectsTable, token: string): Pr
 /** Stop every preview idle past its project's days. Exported so a tick can be driven by hand. */
 export async function sweepIdlePreviews(now = new Date()): Promise<number> {
   const db = await getDb();
+  // Previews whose pull request closed while they could not be removed.
+  for (const record of await db.selectFrom("project_previews").selectAll().where("state", "=", "closing").execute()) {
+    await removePreview(record);
+  }
   const productions = await db.selectFrom("projects").selectAll().where("preview_settings", "is not", null).execute();
   let stopped = 0;
   for (const production of productions) {

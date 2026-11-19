@@ -178,8 +178,12 @@ export interface ProjectsTable {
   updated_at: string;
 }
 
-/** `'waiting'` a fork's commit nobody approved; `'active'`; `'stopped'` — see migration 054. */
-export type PreviewState = "waiting" | "active" | "stopped";
+/**
+ * `'waiting'` a fork's commit nobody approved; `'active'`; `'stopped'`;
+ * `'closing'` its pull request closed while the preview could not be removed
+ * (a deploy held it): the hourly sweep removes it then. See migration 054.
+ */
+export type PreviewState = "waiting" | "active" | "stopped" | "closing";
 export type PreviewStopReason = "limit" | "idle" | "manual";
 
 /** A pull request the panel knows of, and its preview project once there is one. */

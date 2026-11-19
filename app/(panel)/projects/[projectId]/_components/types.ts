@@ -167,7 +167,7 @@ export interface PreviewRow {
   fork: boolean;
   approvedSha: string | null;
   needsApproval: boolean;
-  state: "waiting" | "active" | "stopped";
+  state: "waiting" | "active" | "stopped" | "closing";
   stoppedReason: "limit" | "idle" | "manual" | null;
   lastActivityAt: string;
   addressProblem: string | null;
