@@ -284,7 +284,11 @@ export function SourceStep({
               </>
             ) : (
               <>
-                <p className="text-foreground text-sm font-medium">Trascina qui lo ZIP, oppure premi per sceglierlo</p>
+                {/* Nothing is dragged on a touch screen. */}
+                <p className="text-foreground text-sm font-medium">
+                  <span className="pointer-coarse:hidden">Trascina qui lo ZIP, oppure premi per sceglierlo</span>
+                  <span className="hidden pointer-coarse:inline">Tocca per scegliere lo ZIP</span>
+                </p>
                 <p className="text-muted text-xs">Va bene anche uno ZIP con una sola cartella dentro: viene aperta da sola.</p>
               </>
             )}
@@ -302,7 +306,7 @@ export function SourceStep({
       )}
 
       <div className="flex justify-end">
-        <Button variant="primary" isDisabled={!ready} onPress={next}>
+        <Button variant="primary" className="max-md:w-full" isDisabled={!ready} onPress={next}>
           Continua
           <Icon icon="solar:arrow-right-linear" width={16} aria-hidden />
         </Button>

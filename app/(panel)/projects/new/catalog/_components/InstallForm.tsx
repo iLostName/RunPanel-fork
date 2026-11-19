@@ -377,13 +377,16 @@ export function InstallForm({
           </div>
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <LinkButton href={href("/projects/new/catalog")}>
+          {/* On a phone the way back is in the top bar, and the button that
+              finishes the form spans it, under the thumb. */}
+          <LinkButton href={href("/projects/new/catalog")} className="max-md:hidden">
             <Icon icon="solar:alt-arrow-left-linear" width={16} aria-hidden />
             Catalogo
           </LinkButton>
           {/* Held while the project list loads: the suggested name is checked against it. */}
           <Button
             variant="primary"
+            className="max-md:w-full"
             isDisabled={Boolean(problem) || (projectsLoading && !projectsData)}
             isPending={submitting}
             onPress={install}
