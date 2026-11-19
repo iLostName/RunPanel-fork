@@ -92,6 +92,8 @@ export async function run({ repoRoot }) {
   const many = envVarsSchema.safeParse({ vars: Array.from({ length: 501 }, (_, i) => ({ key: `K${i}`, value: "" })) });
   r.check("a problem of the whole list is general", serverIssuesToRows(many.error?.issues, []).general?.includes("500") === true);
   r.check("garbage issues are ignored", serverIssuesToRows("nope", []).rows.size === 0);
+  const reference = serverIssuesToRows([{ code: "custom", path: ["vars", 0, "value"], message: "La variabile A usa ${{ shared.x.Y }}, ma il gruppo «x» non esiste su questo server." }], [7]);
+  r.check("a refused reference keeps the server's sentence on its row", reference.rows.get(7)?.value?.includes("il gruppo «x» non esiste") === true, JSON.stringify([...reference.rows]));
 
   // --- unsaved changes --------------------------------------------------------
   const saved = [{ key: "A", value: "1" }, { key: "B", value: "2" }];

@@ -33,6 +33,10 @@ export const GLOBAL_PERMISSIONS = [
   "audit.view",
   "host",
   "nodes",
+  // Shared variable groups: reading their values, changing them, and attaching
+  // them to a project. Attaching is reading — the app receives the values and
+  // whoever manages the project can make it print them — so it needs this too.
+  "variables",
 ] as const;
 export type GlobalPermission = (typeof GLOBAL_PERMISSIONS)[number];
 

@@ -45,6 +45,13 @@ Three steps, and the project is created only at the end: source (GitHub, or a ZI
 - **Scheduled tasks** (Impostazioni › Automazioni): a command with a schedule, run in the project ("every night at 3, clear the cache"), with history, output and outcome of every run, "Esegui ora" (run now), a time limit and an alert when it fails. It never runs twice at once nor during a deploy.
 - **Log**: search, errors only, pause, download. The panel keeps each app's log on disk, rotated, and it can be searched after a restart too.
 
+## Shared variables
+
+- **Variabili condivise** (in the menu, next to Database): named groups of encrypted variables — SMTP credentials, an API key — that several projects receive and that are changed in one place. A group's page lists the projects that use it and, after a change, offers **Ridistribuisci i progetti interessati** (redeploy the affected projects).
+- A project attaches groups from the **Variabili** tab, in the order it wants. The project's own variables win over the groups, a later group over an earlier one, and an enabled database link still wins over everything, as before. **Cosa riceve l'app** (what the app receives) shows every variable once, with where it comes from, what it replaces and the conflicts between groups.
+- **References**: a value can read another one — `${{ shared.smtp.HOST }}`, `${{ db.cache.url }}`, `${{ project.api.url }}` — resolved at every deploy and restart. One that does not resolve stops the deploy before anything is touched, naming the variable: an empty value never reaches the app.
+- A new **Variabili condivise** permission reads, edits and attaches groups; a reference may only point at what whoever writes it could read. Groups belong to one server: a project uses those of the server it runs on. See [Shared variables](deploy.md#shared-variables).
+
 ## The database page
 
 The same header as the project page and tabs Panoramica, Connessione, Console, **Dati** (data), Database interni, Backup, Impostazioni. **Dati** shows tables and rows (PostgreSQL, MySQL), keys (Redis) and documents (MongoDB), and runs queries: always read-only, with a row and a time limit, and every read goes to the activity log. On creation the panel proposes the name and a free port. The Nginx, Apache and Caddy cards, which did nothing, are gone.

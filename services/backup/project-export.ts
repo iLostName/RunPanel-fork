@@ -85,8 +85,18 @@ export async function exportProjectConfig(
 ): Promise<{ files: StagedFile[]; meta: Record<string, unknown> }> {
   const db = await getDb();
 
-  const [envVars, services, deployment] = await Promise.all([
+  const [envVars, envGroups, services, deployment] = await Promise.all([
     db.selectFrom("env_vars").selectAll().where("project_id", "=", project.id).execute(),
+    // By name, in order: a restore attaches the groups of the same name it
+    // finds there. Their values are the group's, not the project's, and stay
+    // with the group (the panel store's backup holds them).
+    db
+      .selectFrom("project_env_groups")
+      .innerJoin("env_groups", "env_groups.id", "project_env_groups.group_id")
+      .select(["env_groups.name as name", "project_env_groups.position as position"])
+      .where("project_env_groups.project_id", "=", project.id)
+      .orderBy("project_env_groups.position")
+      .execute(),
     db.selectFrom("services").selectAll().where("project_id", "=", project.id).execute(),
     db
       .selectFrom("deployments")
@@ -120,6 +130,7 @@ export async function exportProjectConfig(
     schemaVersion: 1,
     project: readableProject,
     envVars: decoded,
+    envGroups: envGroups.map((group) => group.name),
     services: services.map((service) => ({
       ...service,
       credentials: safeJson(safeDecrypt(service.credentials)),
@@ -137,6 +148,7 @@ export async function exportProjectConfig(
   const summary = {
     project: projectBackupSummary(project, stripRemoteCredentials),
     envKeys: decoded.map((v) => v.key),
+    envGroups: envGroups.map((group) => group.name),
     services: services.map((s) => ({ id: s.id, name: s.name, type: s.type, version: s.version })),
     databases: databases.map((d) => ({ service_id: d.service_id, name: d.name })),
     note:

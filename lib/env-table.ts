@@ -130,9 +130,13 @@ export function serverIssuesToRows(
       // The first issue of a field is the one to read: an empty name also
       // fails the name pattern, and "doesn't match" says less than "missing".
       if (id === undefined || rows.get(id)?.[field]) continue;
+      // A value is refused for its length, or for a reference in it — which
+      // the server words itself, naming what is wrong with it.
       const text =
         field === "value"
-          ? VALUE_TOO_LONG
+          ? issue.code === "custom" && message
+            ? message
+            : VALUE_TOO_LONG
           : issue.code === "too_small"
             ? KEY_MISSING
             : issue.code === "too_big"

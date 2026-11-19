@@ -107,11 +107,12 @@ With several servers a grant can point at a project or service on any server: in
 
 ### Panel permissions
 
-Per-account switches: Create projects and services, GitHub, Registries, Storage, Backup, Restore, Monitor, Autostart, Diagnostics, Notifications, Updates, Host access, Manage users, Activity log, Linked servers. Menu and buttons follow them, but the real check happens on the server, on every request and every stream.
+Per-account switches: Create projects and services, GitHub, Registries, Shared variables, Storage, Backup, Restore, Monitor, Autostart, Diagnostics, Notifications, Updates, Host access, Manage users, Activity log, Linked servers. Menu and buttons follow them, but the real check happens on the server, on every request and every stream.
 
 To grant with care:
 
 - **Host access.** Native runtimes (PM2), Compose, shared folders (services included), Docker capabilities, host networking, one-time commands and changing a project's code (files, uploads, repository) reach past the container, as far as the panel's database and its secret key. Without this permission, even an account with Manage on a project only works with plain Docker containers.
+- **Shared variables.** Reading, creating and changing the groups of [shared variables](deploy.md#shared-variables), and attaching them to the projects one manages: attaching a group hands its values to the app, and whoever manages the project can read them through it. A group that reaches a project running on the host also needs Host access to be changed.
 - **Backup and Restore.** An account other than the owner backs up and restores only the projects and services it manages, one by one. Backing up the panel itself, or including the secret key, stays with the owner.
 - **Manage users.** It never allows touching the owner or oneself, granting a permission or level one does not hold, or editing, resetting or deleting an account with more access than one's own.
 - **Linked servers.** Linking, diagnosing, changing the role of and revoking the cluster's servers, and regenerating the shared secret. It gives no access to the projects of other servers, which follow the usual permissions.

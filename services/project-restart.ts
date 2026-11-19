@@ -2,8 +2,8 @@ import fs from "fs";
 import { getDb, nowIso } from "@/lib/db";
 import { config } from "@/lib/config";
 import { relocatedArtifactDir, relocatedReleaseDir, relocatedStartCmd } from "@/lib/artifact-dir";
-import { decrypt } from "@/lib/crypto";
 import { parseContractJson } from "@/lib/deploy-contract";
+import { connectionOrigin } from "@/lib/service-env";
 import { envFileEntry } from "@/lib/releases";
 import { activateRelease, clearCurrentRelease, releaseOfArtifact } from "./project-releases";
 import { repairLinks } from "./releases-fs";
@@ -11,6 +11,7 @@ import { listenPort, readAccess } from "@/lib/access-columns";
 import { processManager } from "./process-manager";
 import { buildStartOpts } from "./start-opts";
 import { injectLinkedServiceEnv } from "./service-injection";
+import { EnvResolutionError, loadProjectEnv, type ProjectEnv } from "./project-env";
 import { composeContext } from "./docker/compose";
 import { composeNetworkMode, planComposeNetwork } from "./compose-network";
 import { projectEvents } from "./events";
@@ -121,15 +122,17 @@ async function restart(projectId: string): Promise<{ success: true } | { error: 
     }
   }
 
-  const envRows = await db
-    .selectFrom("env_vars")
-    .select(["key", "value"])
-    .where("project_id", "=", projectId)
-    .execute();
-
-  const envVars: Record<string, string> = {};
-  for (const row of envRows) {
-    envVars[row.key] = decrypt(row.value);
+  // The variables a deploy hands over — its own, its shared groups, every
+  // reference expanded — or no restart at all, said before anything is
+  // stopped: an app brought back with a reference that no longer resolves
+  // would start on a value nobody chose. This is also the path every project
+  // takes after a reboot, where a quiet difference costs the most.
+  let projectEnv: ProjectEnv;
+  try {
+    projectEnv = await loadProjectEnv(project);
+  } catch (err) {
+    if (err instanceof EnvResolutionError) return { error: err.message };
+    throw err;
   }
 
   /*
@@ -159,11 +162,13 @@ async function restart(projectId: string): Promise<{ success: true } | { error: 
   // `network_mode: host` it reaches a service on localhost — so the file is
   // read again here, the way the deploy read it, rather than trusting the
   // contract's network mode, which compose never uses.
+  const envVars = projectEnv.forOrigin(connectionOrigin(project.runtime_type, contract.docker.network));
   let injectionNetwork: string = contract.docker.network;
   if (project.runtime_type === "compose") {
     const ctx = composeContext(project.slug, lastDeploy.artifact_dir);
     if (ctx) injectionNetwork = composeNetworkMode(await planComposeNetwork(ctx, envVars));
   }
+  projectEnv.applyOrigin(envVars, connectionOrigin(project.runtime_type, injectionNetwork));
   await injectLinkedServiceEnv(project, injectionNetwork, envVars);
 
   // Same rule as the deploy: a container project without a port publishes

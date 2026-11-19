@@ -7,6 +7,9 @@ import { getDb, nowIso } from "@/lib/db";
 import { encrypt, decrypt } from "@/lib/crypto";
 import { generateId } from "@/lib/utils";
 import { envVarsSchema, envVarsIssueText } from "@/lib/validation";
+import { loadOwnVars } from "@/services/env-groups";
+import { checkReferences, issuesResponse } from "@/services/env-ref-access";
+import { loadSnapshot } from "@/services/project-env";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -79,6 +82,24 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
     if (!project) {
       return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+    }
+
+    // References: written right, pointing at something that exists, and only
+    // at what this account could read itself — checked for the ones that are
+    // new, against the variables as they will be (services/env-ref-access.ts).
+    const stored = await loadOwnVars(projectId);
+    const snap = await loadSnapshot(projectId);
+    snap.own = parsed.data.vars;
+    snap.ownUnreadable = [];
+    const issues = await checkReferences({
+      principal: denied.principal,
+      values: parsed.data.vars,
+      before: stored.vars.map((v) => v.value),
+      snap,
+    });
+    if (issues.length > 0) {
+      const { status, body: out } = issuesResponse(issues);
+      return NextResponse.json(out, { status });
     }
 
     const now = nowIso();

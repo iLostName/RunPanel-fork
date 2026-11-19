@@ -86,6 +86,15 @@ const PAGE = {
     iconActive: "solar:database-bold-duotone",
     keys: "g s",
   },
+  // Next to the databases: both are things several projects draw on, and both
+  // hand them variables. Each server keeps its own, like its projects.
+  sharedVariables: {
+    label: "Variabili condivise",
+    href: "/shared-variables",
+    permission: "variables",
+    icon: "solar:key-square-linear",
+    iconActive: "solar:key-square-bold-duotone",
+  },
   backups: {
     label: "Backup",
     href: "/backups",
@@ -227,6 +236,7 @@ export const NAV_ITEMS: NavItem[] = [
   { ...PAGE.home, group: "main" },
   { ...PAGE.projects, group: "infra" },
   { ...PAGE.services, group: "infra" },
+  { ...PAGE.sharedVariables, group: "infra" },
   { ...PAGE.domains, group: "infra" },
   { ...PAGE.backups, group: "infra" },
   {

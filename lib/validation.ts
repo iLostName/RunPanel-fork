@@ -6,6 +6,7 @@ import { parseAddress, ruleProblem } from "./ip-access";
 import { normalizeDomain, normalizeSubdomain } from "./proxy-names";
 import { deployPhases } from "./deploy-phases";
 import { MAX_DISPLAY_NAME } from "./service-name";
+import { GROUP_NAME_PATTERN, GROUP_NAME_RULE } from "./env-refs";
 import { isContractInput } from "./deploy-contract";
 import { versionsFor } from "./service-versions";
 import {
@@ -322,6 +323,37 @@ export const envVarsSchema = z.object({
         seen.add(v.key);
       });
     }),
+});
+
+// --- Shared variables ---
+
+/** A group's name is what `${{ shared.<name>.KEY }}` spells, so it is held to the same characters. */
+const envGroupNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Serve un nome")
+  .max(40, "Al massimo 40 caratteri")
+  .regex(GROUP_NAME_PATTERN, GROUP_NAME_RULE);
+
+const envGroupDescriptionSchema = z.string().trim().max(200, "Al massimo 200 caratteri").nullable();
+
+export const createEnvGroupSchema = z.object({
+  name: envGroupNameSchema,
+  description: envGroupDescriptionSchema.optional(),
+  /** Optional: a group can be made with its variables, as a paste of a .env would. */
+  vars: envVarsSchema.shape.vars.optional(),
+});
+
+export const updateEnvGroupSchema = z
+  .object({ name: envGroupNameSchema.optional(), description: envGroupDescriptionSchema.optional() })
+  .refine((body) => body.name !== undefined || body.description !== undefined, { message: "Niente da cambiare" });
+
+/** The groups a project receives, first to last: the whole list, as the Variables tab orders it. */
+export const projectEnvGroupsSchema = z.object({
+  groupIds: z
+    .array(z.string().min(1).max(64))
+    .max(20, "Al massimo 20 gruppi per progetto")
+    .refine((ids) => new Set(ids).size === ids.length, { message: "Un gruppo può comparire una volta sola" }),
 });
 
 /**

@@ -40,6 +40,7 @@ const AREA_LABEL: Record<string, string> = {
   deployments: "Deploy",
   diagnostics: "Diagnostica",
   domains: "Domini",
+  "env-groups": "Variabili condivise",
   folders: "Cartelle",
   github: "GitHub",
   metrics: "Monitor",

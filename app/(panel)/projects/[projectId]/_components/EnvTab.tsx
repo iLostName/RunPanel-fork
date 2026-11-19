@@ -42,6 +42,10 @@ import { EnvTable, type EnvRowContext } from "./EnvTable";
 import { EnvTextView } from "./EnvTextView";
 import { EnvPasteDialog } from "./EnvPasteDialog";
 import { EnvLinkedVars, type LinkedService } from "./EnvLinkedVars";
+import { EnvGroupsPanel, type AttachedGroup } from "./EnvGroupsPanel";
+import { EnvEffective, type EnvPreview } from "./EnvEffective";
+import { useCan } from "@/lib/hooks/useMe";
+import { envSourceLabel } from "@/lib/copy";
 
 /**
  * The env tab as the project page mounts it: the variables are fetched here,
@@ -206,6 +210,22 @@ export function EnvTab({
   }, [linked]);
   const userKeys = useMemo(() => new Set(sent.pairs.map((pair) => pair.key).filter(Boolean)), [sent]);
 
+  // What the app receives once groups and references are counted in, and the
+  // groups themselves. Both describe what is saved: refreshed after a save.
+  const canAttachGroups = useCan("variables") && !readOnly;
+  const { data: preview, refresh: refreshPreview } = useResource<EnvPreview>(api(`/api/projects/${projectId}/env/effective`));
+  const { data: attachedData, refresh: refreshAttached } = useResource<AttachedGroup[]>(api(`/api/projects/${projectId}/env-groups`));
+  const attached = Array.isArray(attachedData) ? attachedData : [];
+  // Name → the groups an own variable replaces, for the row's badge.
+  const shadows = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const v of preview?.vars ?? []) {
+      const groups = v.overridden.filter((s) => s.kind === "group");
+      if (v.source.kind === "own" && groups.length > 0) map.set(v.key, groups.map(envSourceLabel).join(", "));
+    }
+    return map;
+  }, [preview]);
+
   // Stable, so a keystroke re-renders the row it is in and not the whole table.
   const changeRow = useCallback((id: number, patch: Partial<EnvPair>) => {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -363,6 +383,7 @@ export function EnvTab({
         setTextEdited(false);
       }
 
+      void refreshPreview();
       const count = typeof data.count === "number" ? data.count : body.pairs.length;
       const done = count === 0 ? "Variabili eliminate" : count === 1 ? "1 variabile salvata" : `${count} variabili salvate`;
       if (deploy) await redeploy(done);
@@ -402,6 +423,14 @@ export function EnvTab({
         <Hint icon="solar:lock-keyhole-minimalistic-linear" title="Solo i nomi">
           Puoi vedere quali variabili ha il progetto, non i loro valori: per vederli o cambiarli serve il permesso di
           gestire il progetto.
+        </Hint>
+      )}
+
+      {/* The one alert of the tab: a deploy would stop on these, before touching the app. */}
+      {preview && preview.problems > 0 && (
+        <Hint tone="warn" title="Il prossimo deploy si fermerà">
+          {preview.problems === 1 ? "Una variabile non si risolve" : `${preview.problems} variabili non si risolvono`}: le trovi
+          in «Cosa riceve l&apos;app», qui sotto. Il deploy si ferma prima di toccare l&apos;app, e così il riavvio.
         </Hint>
       )}
 
@@ -542,6 +571,7 @@ export function EnvTab({
             problems={problems}
             buildPrefixes={prefixOf}
             overrides={overrides}
+            shadows={shadows}
             focusId={focusId}
             context={context}
           />
@@ -566,11 +596,33 @@ export function EnvTab({
         )}
       </Panel>
 
+      {(attached.length > 0 || !readOnly) && (
+        <EnvGroupsPanel
+          projectId={projectId}
+          groups={attached}
+          canManage={!readOnly}
+          canAttach={canAttachGroups}
+          onChanged={() => {
+            void refreshAttached();
+            void refreshPreview();
+          }}
+        />
+      )}
+
       {linked.length > 0 ? (
-        <EnvLinkedVars services={linked} userKeys={userKeys} onChanged={() => void refreshServices()} />
+        <EnvLinkedVars
+          services={linked}
+          userKeys={userKeys}
+          onChanged={() => {
+            void refreshServices();
+            void refreshPreview();
+          }}
+        />
       ) : (
         !readOnly && <ServiceLinkHint projectId={projectId} />
       )}
+
+      {preview && <EnvEffective projectId={projectId} preview={preview} />}
 
       {/* Reference rather than instructions: under the editor and closed, so the
           thing you came here to do is the first thing on screen. */}
@@ -578,10 +630,19 @@ export function EnvTab({
         title="Come vengono usate"
         summary={
           runtimeType === "docker"
-            ? "Variabili al build, quelle che mette RunPanel, host.docker.internal"
-            : "Variabili al build e quelle che mette RunPanel"
+            ? "Riferimenti, variabili al build, quelle che mette RunPanel, host.docker.internal"
+            : "Riferimenti, variabili al build e quelle che mette RunPanel"
         }
       >
+        <Hint title="Riferimenti">
+          Un valore può leggerne un altro invece di ripeterlo: <Code>{"${{ shared.gruppo.NOME }}"}</Code> da un gruppo
+          condiviso, <Code>{"${{ db.nome.url }}"}</Code> da un database senza progetto (
+          <Code>{"${{ db.progetto.nome.url }}"}</Code> se è collegato a un progetto), <Code>{"${{ project.nome.url }}"}</Code>{" "}
+          per raggiungere un altro progetto di questo server. Campi di un database: url, host, port, user, password, database; di
+          un progetto: url, host, port. Host e porta sono quelli che vede l&apos;app, come per i database collegati. Per scrivere{" "}
+          <Code>{"${{"}</Code> così com&apos;è, usa <Code>{"$${{"}</Code>. Un riferimento che non si risolve ferma il deploy
+          prima che tocchi l&apos;app.
+        </Hint>
         <BuildEnvHint prefixes={buildEnvPrefixes} />
         <ManagedEnvHint runtimeType={runtimeType} />
         {runtimeType === "docker" && (
