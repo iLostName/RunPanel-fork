@@ -108,6 +108,49 @@ Si gestiscono nella scheda **Variabili** e sono cifrate a riposo. Valgono dal de
 
 RunPanel aggiunge `NODE_ENV=production` e, per i runtime nativi, `PORT` (3000 se non indicata). Le variabili di un [servizio collegato](databases.md) prevalgono su quelle con lo stesso nome: la scheda le elenca in sola lettura sotto **Dai database collegati**, con il database da cui arrivano, e segna la tua variabile che verrebbe sostituita.
 
+### Variabili condivise
+
+Le **Variabili condivise** (nel menu, accanto a Database) sono gruppi di variabili cifrate, con un nome, che più progetti ricevono: le credenziali SMTP, una chiave di Stripe, un dominio comune. Un gruppo si cambia in un posto solo e ogni progetto che lo usa riceve la modifica al suo prossimo deploy o riavvio; dopo una modifica la pagina del gruppo offre **Ridistribuisci i progetti interessati**, che fa il deploy di quelli in esecuzione e lascia fermi quelli fermi. La stessa pagina elenca quali progetti usano il gruppo, collegato o tramite un riferimento.
+
+Un progetto collega quanti gruppi vuole dalla scheda **Variabili**, nell'ordine che sceglie. Quando lo stesso nome è impostato in più punti, l'app riceve, dal più forte:
+
+1. il valore di un [database collegato](databases.md) con l'iniezione accesa (come prima: spegnendola, o dandole un altro nome di variabile, passano gli altri);
+2. la variabile del progetto;
+3. i gruppi, dove un gruppo più in basso vince su uno più in alto.
+
+I database restano in cima perché i progetti contano già sul fatto che sostituiscano un vecchio `DATABASE_URL` rimasto tra le loro variabili: mettere sopra il valore del progetto darebbe a quelle app il valore vecchio al prossimo deploy, senza dire niente. **Cosa riceve l'app**, in fondo alla scheda, elenca ogni variabile una volta, con da dove arriva, cosa sostituisce e quando due gruppi non sono d'accordo; anche la riga di una variabile che sostituisce quella di un gruppo lo dice.
+
+I gruppi appartengono a un server, come i suoi progetti: un progetto usa i gruppi del server su cui gira, e su un server collegato si creano con quel server selezionato. Non vengono replicati.
+
+### Riferimenti
+
+Un valore può leggerne un altro invece di ripeterlo:
+
+| Riferimento | Cosa legge |
+|---|---|
+| `${{ shared.GRUPPO.NOME }}` | la variabile `NOME` del gruppo `GRUPPO`, senza collegare tutto il gruppo |
+| `${{ db.NOME.campo }}` | un database senza progetto |
+| `${{ db.PROGETTO.NOME.campo }}` | il database `NOME` collegato al progetto `PROGETTO` (il suo nome interno) |
+| `${{ project.NOME.campo }}` | come raggiungere un altro progetto dello stesso server |
+
+Campi di un database: `url`, `host`, `port`, `user`, `password`, `database`. Campi di un progetto: `url`, `host`, `port`. Host e porta sono quelli che vede l'app, come per il `DATABASE_URL` iniettato: da un container il database si raggiunge per nome sulla porta interna, dall'host su `localhost` e la porta pubblicata; un altro progetto si raggiunge sulla sua porta pubblicata, su `localhost` dall'host e su `host.docker.internal` da un container (uno stack Compose deve dichiararlo in `extra_hosts`). `$${{` scrive `${{` così com'è. Un riferimento indica una cosa sola: un database collegato a un progetto si scrive sempre con il progetto, così scollegarne o eliminarne uno non può trasformare in silenzio un riferimento nel database di qualcun altro.
+
+I riferimenti si risolvono a ogni deploy e riavvio, e per le attività pianificate che girano sull'host (quelle in un container girano con quello con cui è partita l'app). Uno che non si risolve — un gruppo, una variabile, un database o un progetto che non c'è, un valore vuoto, un giro di riferimenti — **ferma il deploy prima che tocchi qualcosa**, con una frase che nomina la variabile ("La variabile SMTP_URL usa ${{ shared.smtp.HOST }}, ma il gruppo «smtp» non esiste su questo server"); il riavvio si rifiuta con le stesse parole, e l'attività pianificata viene saltata con quelle. Al suo posto non arriva mai un valore vuoto. La scheda segnala questi problemi prima che li trovi il deploy, e **Cosa riceve l'app** mostra ogni valore già risolto, nascosto finché non lo mostri.
+
+Un riferimento nuovo viene controllato quando lo salvi: deve risolversi e portare solo a cose che potresti leggere tu.
+
+### Chi può usare cosa
+
+Chi gestisce un progetto può far stampare alla sua app quello che riceve, quindi dare un valore a un progetto equivale a leggerlo:
+
+- **Collegare un gruppo** richiede il permesso **Variabili condivise**, che serve anche per leggere, creare e modificare i gruppi, e di poter leggere ogni database e progetto a cui portano i suoi valori. Scollegare un gruppo da un progetto, o spostarlo, richiede solo il progetto.
+- **Un riferimento nuovo** richiede il permesso Variabili condivise per `shared`, le credenziali del database (Gestione su di esso, o sul progetto a cui è collegato) per `db`, e di vedere il progetto per `project`. Un riferimento scritto da altri può restare com'è a chi salva le variabili; uno a qualcosa che non puoi vedere viene rifiutato con le stesse parole di uno a qualcosa che non esiste.
+- **Mostrare un valore** in **Cosa riceve l'app** segue la stessa regola, variabile per variabile: quelle del progetto richiedono di poterne vedere i valori, quelle di un gruppo il permesso, quelle di un database le sue credenziali, e una costruita con dei riferimenti di poter leggere ciascuno di essi.
+- Un gruppo che arriva a un progetto che gira sull'host (runtime nativo, Compose, rete host) si modifica solo con **Accesso all'host**, come le variabili di quel progetto: un `NODE_OPTIONS` è codice.
+- Un gruppo, o una sua variabile, ancora nominato da un riferimento non si può eliminare né rinominare: il pannello dice chi lo usa. Eliminare un gruppo solo collegato lo scollega dai suoi progetti, che la conferma elenca.
+
+Via API: `GET /api/projects/<id>/env/effective`, `GET`/`PUT /api/projects/<id>/env-groups`, e `/api/env-groups` per i gruppi (vedi **AI e API**).
+
 Le variabili con prefisso `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` o `REACT_APP_` arrivano anche al **build** (badge **usata nella build**), perché i frontend le incorporano nel bundle: chiunque apra il sito può leggerle, quindi niente segreti lì. Nei runtime nativi il build vede comunque tutte le variabili; per Docker arrivano come `--build-arg`. L'elenco dei prefissi (`buildEnvPrefixes`) e le chiavi aggiuntive (`buildEnv`) si cambiano nel contratto.
 
 ## Log

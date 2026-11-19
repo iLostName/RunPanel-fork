@@ -110,6 +110,49 @@ Managed in the **Variabili** (variables) tab and encrypted at rest. They apply f
 
 RunPanel adds `NODE_ENV=production` and, for native runtimes, `PORT` (3000 if not set). Variables from a [linked service](databases.md) take precedence over those with the same name: the tab lists them read-only under **Dai database collegati** (from the linked databases), with the database each comes from, and flags your variable that would be replaced.
 
+### Shared variables
+
+**Variabili condivise** (shared variables, in the menu next to Database) are named groups of encrypted variables that several projects receive: SMTP credentials, a Stripe key, a common domain. A group is changed in one place and every project that uses it picks the change up at its next deploy or restart; after a change the group's page offers **Ridistribuisci i progetti interessati** (redeploy the affected projects), which deploys those that are running and leaves stopped ones alone. The page also lists which projects use the group, directly or through a reference.
+
+A project attaches any number of groups from the **Variabili** tab, in an order it chooses. When the same name is set in more than one place, the app receives, highest first:
+
+1. the value of an enabled [database link](databases.md) (as before: turning the link off, or giving it another variable name, lets the others through);
+2. the project's own variable;
+3. the groups, a later group winning over an earlier one.
+
+The links stay on top because projects already rely on them replacing a stale `DATABASE_URL` of their own: putting the project's value above them would hand those apps the old value at their next deploy without a word. **Cosa riceve l'app** (what the app receives) at the bottom of the tab lists every variable once, with where it comes from, what it replaces and when two groups disagree; the row of a variable that replaces a group's says so too.
+
+Groups belong to a server, like its projects: a project uses the groups of the server it runs on, and on a linked server they are created with that server selected. They are not replicated.
+
+### References
+
+A value can read another value instead of repeating it:
+
+| Reference | What it reads |
+|---|---|
+| `${{ shared.GROUP.NAME }}` | the variable `NAME` of the group `GROUP`, without attaching the whole group |
+| `${{ db.NAME.field }}` | a database with no project |
+| `${{ db.PROJECT.NAME.field }}` | the database `NAME` linked to the project `PROJECT` (its slug) |
+| `${{ project.SLUG.field }}` | how to reach another project of the same server |
+
+Database fields: `url`, `host`, `port`, `user`, `password`, `database`. Project fields: `url`, `host`, `port`. Host and port are the ones the app sees, as for the injected `DATABASE_URL`: from a container a database is reached by name on its inner port, from the host on `localhost` and the published port; another project is reached on its published port, at `localhost` from the host and `host.docker.internal` from a container (a Compose stack has to declare it in `extra_hosts`). `$${{` writes `${{` as it is. A reference names exactly one thing: a database linked to a project is always written with the project, so unlinking or deleting one can never quietly turn a reference into somebody else's database.
+
+References are expanded at every deploy and restart, and for scheduled tasks that run on the host (those in a container run with what the app was started with). One that does not resolve — a missing group, variable, database or project, an empty value, a loop of references — **stops the deploy before anything is touched**, with a sentence naming the variable ("La variabile SMTP_URL usa ${{ shared.smtp.HOST }}, ma il gruppo «smtp» non esiste su questo server"); a restart refuses in the same words, and a scheduled task is skipped with them. An empty value is never handed over in its place. The tab lists those problems before the deploy finds them, and **Cosa riceve l'app** shows each value already expanded, masked until shown.
+
+Saving a new reference checks it at once: it must resolve, and point only at what you could read yourself.
+
+### Who may use what
+
+Whoever manages a project can make its app print what it receives, so handing a project a value is reading it:
+
+- **Attaching a group** needs the **Variabili condivise** permission, which is also what reading, creating and changing groups needs, and the right to read every database and project its values point at. Taking a group off a project, or moving it, needs only the project.
+- **A new reference** needs the Variabili condivise permission for `shared`, the database's credentials (manage on it, or on the project it is linked to) for `db`, and seeing the project for `project`. A reference somebody else wrote can be kept as it is by whoever saves the variables; one to something you cannot see is refused in the same words as one to something that does not exist.
+- **Showing a value** in **Cosa riceve l'app** follows the same rule, per variable: the project's own need the right to see its values, a group's the permission, a database's its credentials, and one built from references the right to read each of them.
+- A group that reaches a project running on the host (a native runtime, Compose, host networking) can only be changed with **Accesso all'host**, as that project's own variables: a `NODE_OPTIONS` is code.
+- A group, or one of its variables, that a reference still names cannot be deleted or renamed: the panel names who uses it. Deleting a group only attached detaches it from its projects, which the confirmation lists.
+
+Over the API: `GET /api/projects/<id>/env/effective`, `GET`/`PUT /api/projects/<id>/env-groups`, and `/api/env-groups` for the groups (see **AI e API**).
+
 Variables prefixed `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` or `REACT_APP_` also reach the **build** (badge **usata nella build**), because frontends inline them into the bundle: anyone opening the site can read them, so no secrets there. Native runtimes' builds see every variable anyway; Docker gets these as `--build-arg`. The prefix list (`buildEnvPrefixes`) and extra keys (`buildEnv`) are set in the contract.
 
 ## Logs

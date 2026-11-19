@@ -44,6 +44,13 @@ Tre passi, e il progetto viene creato solo alla fine: sorgente (GitHub o ZIP tra
 - **Attività pianificate** (Impostazioni › Automazioni): un comando con un orario, eseguito nel progetto («ogni notte alle 3 svuota la cache»), con storico, output ed esito di ogni esecuzione, «Esegui ora», un limite di tempo e un avviso se fallisce. Non parte mai due volte insieme né durante un deploy.
 - **Log**: ricerca, solo errori, pausa, download. Il pannello conserva il log di ogni app su disco, a rotazione, e lo si cerca anche dopo un riavvio.
 
+## Variabili condivise
+
+- **Variabili condivise** (nel menu, accanto a Database): gruppi di variabili cifrate, con un nome — le credenziali SMTP, una chiave di un'API — che più progetti ricevono e che si cambiano in un posto solo. La pagina di un gruppo elenca i progetti che lo usano e, dopo una modifica, offre **Ridistribuisci i progetti interessati**.
+- Un progetto collega i gruppi dalla scheda **Variabili**, nell'ordine che vuole. Le variabili del progetto vincono sui gruppi, un gruppo più in basso su uno più in alto, e un database collegato vince ancora su tutto, come prima. **Cosa riceve l'app** mostra ogni variabile una volta, con da dove arriva, cosa sostituisce e i conflitti tra gruppi.
+- **Riferimenti**: un valore può leggerne un altro — `${{ shared.smtp.HOST }}`, `${{ db.cache.url }}`, `${{ project.api.url }}` — risolto a ogni deploy e riavvio. Uno che non si risolve ferma il deploy prima che tocchi qualcosa, nominando la variabile: all'app non arriva mai un valore vuoto.
+- Un nuovo permesso, **Variabili condivise**, legge, modifica e collega i gruppi; un riferimento può portare solo a cose che chi lo scrive potrebbe leggere. I gruppi appartengono a un server: un progetto usa quelli del server su cui gira. Vedi [Variabili condivise](deploy.md#variabili-condivise).
+
 ## La pagina del database
 
 Stesso header della pagina progetto e schede Panoramica, Connessione, Console, **Dati**, Database interni, Backup, Impostazioni. In **Dati** si guardano tabelle e righe (PostgreSQL, MySQL), chiavi (Redis) e documenti (MongoDB), e si scrivono query: sempre in sola lettura, con un limite di righe e di tempo, e ogni lettura finisce nel registro attività. Alla creazione nome e porta libera vengono proposti dal pannello. Le card Nginx, Apache e Caddy, che non facevano niente, sono state tolte.

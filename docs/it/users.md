@@ -107,11 +107,12 @@ Con più server un accesso può puntare a un progetto o servizio di qualunque se
 
 ### Permessi del pannello
 
-Interruttori per account: Crea progetti e servizi, GitHub, Registry, Storage, Backup, Ripristino, Monitor, Avvio automatico, Diagnostica, Notifiche, Aggiornamenti, Accesso all'host, Gestione utenti, Registro attività, Server collegati. Menu e pulsanti li seguono, ma il controllo vero lo fa il server su ogni richiesta e su ogni stream.
+Interruttori per account: Crea progetti e servizi, GitHub, Registry, Variabili condivise, Storage, Backup, Ripristino, Monitor, Avvio automatico, Diagnostica, Notifiche, Aggiornamenti, Accesso all'host, Gestione utenti, Registro attività, Server collegati. Menu e pulsanti li seguono, ma il controllo vero lo fa il server su ogni richiesta e su ogni stream.
 
 Da dare con attenzione:
 
 - **Accesso all'host.** Runtime nativi (PM2), Compose, cartelle condivise (anche sui servizi), cap Docker, rete host, comandi una tantum e modifica del codice di un progetto (file, upload, repository) escono dal container e arrivano fino al database del pannello e alla sua chiave segreta. Senza questo permesso, anche chi ha Gestione su un progetto lavora solo con container Docker semplici.
+- **Variabili condivise.** Leggere, creare e modificare i gruppi di [variabili condivise](deploy.md#variabili-condivise), e collegarli ai progetti che si gestiscono: collegare un gruppo consegna i suoi valori all'app, e chi gestisce il progetto può leggerli attraverso di essa. Un gruppo che arriva a un progetto che gira sull'host richiede anche Accesso all'host per essere modificato.
 - **Backup e Ripristino.** Chi non è proprietario salva e ripristina solo i progetti e i servizi che gestisce, uno per uno. Il backup del pannello e quello con la chiave segreta restano al proprietario.
 - **Gestione utenti.** Non permette di toccare il proprietario né sé stessi, di concedere un permesso o un livello che non si possiede, né di modificare, reimpostare o eliminare un account con più accessi dei propri.
 - **Server collegati.** Collegare, diagnosticare, cambiare ruolo e revocare i server del cluster, e rigenerare il segreto condiviso. Non dà accesso ai progetti degli altri server, che seguono i permessi di sempre.
