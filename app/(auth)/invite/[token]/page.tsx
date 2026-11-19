@@ -1,22 +1,29 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TextField, Label, Input, Button, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
 import { Panel } from "@/components/ui/Panel";
 import { FieldHint } from "@/components/ui/Hint";
+import { GithubButton, OrDivider, startGithubFlow } from "@/components/github/GithubSignIn";
+import { githubResultMessage } from "@/lib/github-login-messages";
 
 type State =
   | { phase: "loading" }
   | { phase: "invalid"; message: string }
-  | { phase: "ready"; email: string; kind: "invite" | "reset" };
+  | { phase: "ready"; email: string; kind: "invite" | "reset"; github: boolean };
 
 /**
  * Where an invitation or reset link lands: choose a password, then straight
  * into the panel. The link works once and expires; past that, it says so and
  * points back at whoever sent it.
+ *
+ * Where the owner has set up sign-in with GitHub, an invitation (never a reset
+ * link) can be accepted with GitHub instead: the person's GitHub account is
+ * linked to this one and becomes how they sign in. A return from GitHub that
+ * went wrong lands back here (`?github=<code>`), so another way can be tried.
  */
 export default function InvitePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
@@ -25,6 +32,24 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [saving, setSaving] = useState(false);
+  // A failed return from GitHub, read once from the address: only the spinner is drawn until the link is checked.
+  const [githubError, setGithubError] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : githubResultMessage(new URLSearchParams(window.location.search).get("github"))
+  );
+  const [githubElsewhere, setGithubElsewhere] = useState<string | null>(null);
+  const [githubPending, setGithubPending] = useState(false);
+  const cleaned = useRef(false);
+
+  useEffect(() => {
+    // Off the address bar, so a reload does not show the old error again.
+    if (cleaned.current) return;
+    cleaned.current = true;
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("github")) {
+      url.searchParams.delete("github");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -32,7 +57,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) setState({ phase: "invalid", message: data.error || "Link non valido o scaduto." });
-        else setState({ phase: "ready", email: data.email, kind: data.kind === "reset" ? "reset" : "invite" });
+        else setState({ phase: "ready", email: data.email, kind: data.kind === "reset" ? "reset" : "invite", github: data.github === true });
       })
       .catch(() => {
         if (!controller.signal.aborted) setState({ phase: "invalid", message: "Impossibile raggiungere il pannello." });
@@ -76,6 +101,20 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
     }
   }
 
+  async function acceptWithGithub() {
+    setGithubError(null);
+    setGithubElsewhere(null);
+    setGithubPending(true);
+    const result = await startGithubFlow({ intent: "invite", token });
+    // On success the browser is already on its way to GitHub.
+    if (!result.ok) {
+      setGithubPending(false);
+      setGithubError(result.error);
+      // This same invitation, on the address GitHub knows.
+      setGithubElsewhere(result.url ? new URL(window.location.pathname, result.url).toString() : null);
+    }
+  }
+
   if (state.phase === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -83,6 +122,8 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
       </div>
     );
   }
+
+  const offerGithub = state.phase === "ready" && state.kind === "invite" && state.github;
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
@@ -132,10 +173,37 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
                 />
               </TextField>
             </div>
-            <Button variant="primary" className="w-full" isPending={saving} onPress={save}>
+            <Button variant="primary" className="w-full" isPending={saving} isDisabled={githubPending} onPress={save}>
               {state.kind === "reset" ? "Salva la password" : "Crea l'account"}
             </Button>
           </>
+        )}
+
+        {offerGithub && (
+          <div className="space-y-3">
+            <OrDivider />
+            <GithubButton isPending={githubPending} isDisabled={saving} onPress={() => void acceptWithGithub()}>
+              Accedi con GitHub
+            </GithubButton>
+            <FieldHint className="mt-0 text-center">
+              Senza password: il tuo account GitHub viene collegato a questo, ed entrerai con quello. Potrai aggiungere una
+              password dalla pagina Account.
+            </FieldHint>
+          </div>
+        )}
+
+        {githubError && state.phase === "ready" && (
+          <p role="alert" className="text-danger text-sm">
+            {githubError}
+            {githubElsewhere && (
+              <>
+                {" "}
+                <a href={githubElsewhere} className="text-accent font-medium hover:underline">
+                  Apri il pannello da lì
+                </a>
+              </>
+            )}
+          </p>
         )}
       </Panel>
     </div>

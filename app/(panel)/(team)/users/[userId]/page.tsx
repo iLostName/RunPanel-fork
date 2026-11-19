@@ -34,6 +34,9 @@ interface Detail {
     createdAt: string;
     lastLoginAt: string | null;
     inviteExpiresAt: string | null;
+    hasPassword?: boolean;
+    /** The GitHub account it may sign in with on this panel, or null. */
+    githubLogin?: string | null;
   };
   access: AccessValue | null;
   editable: boolean;
@@ -104,7 +107,9 @@ export default function UserPage({ params }: { params: Promise<{ userId: string 
   const { user, editable } = detail.data;
   const status = STATUS_LABEL[user.status] ?? STATUS_LABEL.active;
   const disabled = user.status === "disabled";
+  // Accepted its invitation — with a password, or with GitHub: a new link is then one to choose a password.
   const hasPassword = user.status === "active" || (disabled && user.lastLoginAt !== null);
+  const githubOnly = Boolean(user.githubLogin) && user.hasPassword === false;
 
   return (
     <>
@@ -144,7 +149,9 @@ export default function UserPage({ params }: { params: Promise<{ userId: string 
                   ? `Invito in attesa, scade ${formatWhen(user.inviteExpiresAt)}`
                   : user.status === "invite_expired"
                     ? "L'invito è scaduto: generane uno nuovo"
-                    : "Un link monouso per scegliere una nuova password"
+                    : githubOnly
+                      ? "Entra solo con GitHub: un link monouso gli fa scegliere una password"
+                      : "Un link monouso per scegliere una nuova password"
               }
             />
             <div className="flex flex-wrap gap-2">
@@ -179,7 +186,14 @@ export default function UserPage({ params }: { params: Promise<{ userId: string 
           />
         )}
 
-        {!user.isOwner && editable && <UserSecurity userId={user.id} email={user.email} />}
+        {!user.isOwner && editable && (
+          <UserSecurity
+            userId={user.id}
+            email={user.email}
+            githubLogin={user.githubLogin ?? null}
+            hasPassword={user.hasPassword !== false}
+          />
+        )}
 
         {!user.isOwner && editable && (
           <DangerZone

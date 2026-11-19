@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@heroui/react";
 import { Badge } from "@/components/ui/Badge";
+import { GithubMark } from "@/components/github/GithubMark";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { FieldHint } from "@/components/ui/Hint";
 import { LoadError } from "@/components/ui/LoadError";
@@ -17,13 +18,24 @@ import { MSG } from "@/lib/copy";
 import { toast } from "@/lib/toast";
 
 /**
- * How another account signs in, for whoever may change it: whether the second
- * step is on, a way to turn it off for someone who lost the phone and the
- * recovery codes, and the devices signed in.
+ * How another account signs in, for whoever may change it: with GitHub or
+ * not, whether the second step is on, a way to turn it off for someone who
+ * lost the phone and the recovery codes, and the devices signed in.
  *
  * Only rendered for an account the viewer may edit; the routes check again.
  */
-export function UserSecurity({ userId, email }: { userId: string; email: string | null }) {
+export function UserSecurity({
+  userId,
+  email,
+  githubLogin = null,
+  hasPassword = true,
+}: {
+  userId: string;
+  email: string | null;
+  /** The GitHub account it may sign in with on this panel. */
+  githubLogin?: string | null;
+  hasPassword?: boolean;
+}) {
   const status = useResource<{ enabled: boolean; enabledAt: string | null }>(`/api/users/${userId}/two-factor`);
   const { isSolo } = useNode();
   const [confirm, setConfirm] = useState(false);
@@ -47,6 +59,30 @@ export function UserSecurity({ userId, email }: { userId: string; email: string 
 
   return (
     <>
+      {/* Only when there is one: most panels never turn GitHub sign-in on. */}
+      {githubLogin && (
+        <Panel className="space-y-3">
+          <PanelHeader
+            title="Accesso con GitHub"
+            description={hasPassword ? "Può entrare con la password o con GitHub" : "Entra solo con GitHub: non ha una password"}
+            actions={
+              <Badge tone={hasPassword ? "success" : "warning"}>
+                <GithubMark size={12} />@{githubLogin}
+              </Badge>
+            }
+          />
+          {hasPassword ? (
+            <FieldHint>Lo collega e lo scollega chi usa l&apos;account, dalla sua pagina Account.</FieldHint>
+          ) : (
+            <FieldHint>
+              Se l&apos;accesso con GitHub venisse spento non potrebbe più entrare: mandagli prima un link per scegliere una
+              password, con «Crea link per nuova password» qui sopra.
+            </FieldHint>
+          )}
+          {!isSolo && <FieldHint>Vale per questo server: sugli altri pannelli del cluster ha uno stato a parte.</FieldHint>}
+        </Panel>
+      )}
+
       <Panel className="space-y-3">
         <PanelHeader
           title="Verifica in due passaggi"
