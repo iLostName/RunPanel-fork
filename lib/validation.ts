@@ -51,6 +51,8 @@ import {
   cleanText,
   entryKey,
 } from "./status-page";
+import { NOTIFY_EVENTS, NOTIFY_FILTERS } from "./notify-events";
+import { PUSH_DEVICE_NAME_MAX, isPushAuthSecret, isPushPublicKey } from "./push-rules";
 
 
 
@@ -1874,3 +1876,68 @@ export const statusPageSchema = z
   .strict();
 
 export type StatusPageInput = z.infer<typeof statusPageSchema>;
+
+// --- Notifications on a person's own devices (Web Push) ----------------------------
+
+const pushDeviceNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Dai un nome al dispositivo")
+  .max(PUSH_DEVICE_NAME_MAX, `Il nome è troppo lungo: al massimo ${PUSH_DEVICE_NAME_MAX} caratteri`);
+
+const pushEventsSchema = z
+  .array(z.enum(NOTIFY_EVENTS, { message: "Uno degli eventi non esiste più: ricarica la pagina" }))
+  .max(NOTIFY_EVENTS.length * 2);
+
+const pushFilterSchema = z.enum(NOTIFY_FILTERS, { message: "Scegli «Tutto» o «Solo quando qualcosa va storto»" });
+
+const pushEndpointSchema = z
+  .string()
+  .trim()
+  .min(1, "Manca l'indirizzo del servizio push")
+  .max(2048, "L'indirizzo del servizio push è troppo lungo");
+
+/**
+ * A browser turning notifications on: what `PushSubscription.toJSON()` gives,
+ * the name the list will show, and what it should receive. Which push
+ * services are accepted is decided by the route (`pushEndpointProblem` in
+ * lib/push-rules.ts), since the operator can add one in the environment.
+ *
+ * `previousEndpoint` is the subscription this browser had before, when it
+ * subscribed again: its row is kept. `applicationServerKey` is the panel key
+ * the browser used, so a page loaded before the panel's keys changed is told
+ * to subscribe again instead of storing a subscription nothing can reach.
+ */
+export const pushSubscribeSchema = z
+  .object({
+    subscription: z.object({
+      endpoint: pushEndpointSchema,
+      expirationTime: z.number().nullable().optional(),
+      keys: z.object({
+        p256dh: z.string().max(200).refine(isPushPublicKey, "La chiave che il browser ha dato per le notifiche non è valida"),
+        auth: z.string().max(100).refine(isPushAuthSecret, "Il segreto che il browser ha dato per le notifiche non è valido"),
+      }),
+    }),
+    name: pushDeviceNameSchema,
+    events: pushEventsSchema.optional(),
+    filter: pushFilterSchema.optional(),
+    previousEndpoint: pushEndpointSchema.nullable().optional(),
+    applicationServerKey: z.string().max(200).optional(),
+  })
+  .strict();
+
+export type PushSubscribeInput = z.infer<typeof pushSubscribeSchema>;
+
+/** Renaming a device, choosing what it receives, switching it off: at least one of them. */
+export const pushDeviceUpdateSchema = z
+  .object({
+    name: pushDeviceNameSchema.optional(),
+    events: pushEventsSchema.optional(),
+    filter: pushFilterSchema.optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict()
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), "Non c'è niente da modificare");
+
+/** A browser asking which device it is, by the endpoint only it and the panel know. */
+export const pushSyncSchema = z.object({ endpoint: pushEndpointSchema }).strict();
