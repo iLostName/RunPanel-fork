@@ -63,7 +63,8 @@ export function UserMenu() {
   return (
     <Dropdown>
       <Button variant="ghost" size="sm" aria-label={`Account: ${me.email ?? "senza email"}`} className="h-9 gap-2 px-1.5">
-        <span className="bg-surface-tertiary text-foreground border-border grid size-7 place-items-center rounded-full border text-[11px] font-semibold">
+        {/* The initials are a picture of the account, which the label names in full. */}
+        <span aria-hidden className="bg-surface-tertiary text-foreground border-border grid size-7 place-items-center rounded-full border text-[11px] font-semibold">
           {initialsOf(me.email)}
         </span>
         <Icon icon="solar:alt-arrow-down-linear" width={12} className="text-muted hidden sm:block" aria-hidden />

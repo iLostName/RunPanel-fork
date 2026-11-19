@@ -62,6 +62,9 @@ export function ResourceHeader({
   // On a phone "Altro" opens an action sheet rather than a dropdown.
   const phone = useIsPhone();
   const [sheetOpen, setSheetOpen] = useState(false);
+  // The word on the button first, then what its menu is about: a name that
+  // leaves out the visible "Altro" fails whoever says what they see (WCAG 2.5.3).
+  const moreLabel = `Altro: ${menuLabel.charAt(0).toLowerCase()}${menuLabel.slice(1)}`;
 
   function startEditing() {
     setDraft(name);
@@ -174,7 +177,7 @@ export function ResourceHeader({
           {actions}
           {ordered.length > 0 && phone && (
             <>
-              <Button variant="outline" size="sm" aria-label={menuLabel} onPress={() => setSheetOpen(true)}>
+              <Button variant="outline" size="sm" aria-label={moreLabel} onPress={() => setSheetOpen(true)}>
                 <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />
                 Altro
               </Button>
@@ -183,7 +186,7 @@ export function ResourceHeader({
           )}
           {ordered.length > 0 && !phone && (
             <Dropdown>
-              <Button variant="outline" size="sm" aria-label={menuLabel}>
+              <Button variant="outline" size="sm" aria-label={moreLabel}>
                 <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />
                 {/* Named on a phone too, where it is a tile like the others. */}
                 Altro

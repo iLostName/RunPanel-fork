@@ -26,7 +26,9 @@ export function SearchButton({ className }: { className?: string }) {
     >
       <Icon icon="solar:magnifier-linear" width={16} className="shrink-0" aria-hidden />
       <span className="hidden flex-1 truncate text-left sm:inline">Cerca progetti, database, pagine…</span>
-      <kbd className="border-border text-meta hidden rounded border px-1.5 py-0.5 font-sans sm:inline-block">Ctrl K</kbd>
+      {/* Said by `aria-keyshortcuts`; read out as well, it made the visible text
+          something the button's name does not contain (WCAG 2.5.3). */}
+      <kbd aria-hidden className="border-border text-meta hidden rounded border px-1.5 py-0.5 font-sans sm:inline-block">Ctrl K</kbd>
     </button>
   );
 }
