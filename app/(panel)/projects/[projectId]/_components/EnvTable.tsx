@@ -35,6 +35,7 @@ export function EnvTable({
   problems,
   buildPrefixes,
   overrides,
+  shadows,
   focusId,
   context,
 }: {
@@ -44,6 +45,8 @@ export function EnvTable({
   buildPrefixes: (key: string) => string | null;
   /** Name → the linked database that replaces it at every deploy. */
   overrides: ReadonlyMap<string, string>;
+  /** Name → the shared groups this value replaces ("gruppo «smtp»"), as saved. */
+  shadows?: ReadonlyMap<string, string>;
   focusId: number | null;
   context: EnvRowContext;
 }) {
@@ -64,6 +67,7 @@ export function EnvTable({
             valueError={problems.get(row.id)?.value}
             buildPrefix={buildPrefixes(row.key)}
             override={overrides.get(row.key.trim()) ?? null}
+            shadow={shadows?.get(row.key.trim()) ?? null}
             autoFocus={row.id === focusId}
             context={context}
           />
@@ -84,6 +88,7 @@ const EnvRowView = memo(function EnvRowView({
   valueError,
   buildPrefix,
   override,
+  shadow,
   autoFocus,
   context,
 }: {
@@ -93,6 +98,7 @@ const EnvRowView = memo(function EnvRowView({
   valueError?: string;
   buildPrefix: string | null;
   override: string | null;
+  shadow: string | null;
   autoFocus: boolean;
   context: EnvRowContext;
 }) {
@@ -153,7 +159,7 @@ const EnvRowView = memo(function EnvRowView({
         </div>
       </div>
 
-      {(buildPrefix || override) && (
+      {(buildPrefix || override || shadow) && (
         <div className="flex flex-wrap gap-1.5">
           {buildPrefix && (
             <TipText
@@ -183,6 +189,11 @@ const EnvRowView = memo(function EnvRowView({
               <Badge tone="warning" icon="solar:database-linear">
                 {`vince il database ${override}`}
               </Badge>
+            </TipText>
+          )}
+          {shadow && !override && (
+            <TipText content={`Anche ${shadow} imposta ${row.key.trim()}: vince questo valore, perché le variabili del progetto vincono sui gruppi.`}>
+              <Badge icon="solar:key-square-linear">{`sostituisce ${shadow}`}</Badge>
             </TipText>
           )}
         </div>
