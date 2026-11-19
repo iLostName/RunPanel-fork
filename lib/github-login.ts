@@ -128,13 +128,25 @@ export async function setGithubLoginEnabled(enabled: boolean): Promise<void> {
   const current = parseStoredApp(await getSetting(GITHUB_LOGIN_SETTING));
   if (!current) return;
   await setSetting(GITHUB_LOGIN_SETTING, JSON.stringify({ ...current, enabled, updatedAt: nowIso() }));
+  if (!enabled) await dropGithubSignInsUnderWay();
 }
 
 /** Forget the app. The links stay: GitHub's ids are the same for any app, so a new one finds them. */
 export async function clearGithubLoginConfig(): Promise<void> {
   const db = await getDb();
   await db.deleteFrom("settings").where("key", "in", [GITHUB_LOGIN_SETTING, GITHUB_LOGIN_SECRET_SETTING]).execute();
+  await dropGithubSignInsUnderWay();
+}
+
+/**
+ * Off means off at once: a sign-in that left for GitHub before the switch, or
+ * came back and is waiting to be finished (or for its code), ends here rather
+ * than slipping through in the minutes after.
+ */
+async function dropGithubSignInsUnderWay(): Promise<void> {
+  const db = await getDb();
   await db.deleteFrom("github_login_states").execute();
+  await db.deleteFrom("login_challenges").where("via", "=", "github").execute();
 }
 
 // --- where GitHub is -----------------------------------------------------------------

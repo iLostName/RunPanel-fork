@@ -478,10 +478,21 @@ export async function run({ base, dataDir, repoRoot }) {
   await owner.call("/api/github-login", put({ enabled: true }));
   const inFlight = browser(base);
   const inFlightTrip = await trip(inFlight, { intent: "login" }, ownerGithub, { skipCallback: true });
+  const halfway = browser(base);
+  const halfwayTrip = await trip(halfway, { intent: "login" }, ownerGithub);
   await owner.call("/api/github-login", put({ enabled: false }));
   const lateReturn = await inFlight.call(inFlightTrip.returnPath);
-  r.check("a return after GitHub was turned off opens nothing", lateReturn.location === "/login?github=off" && (await me(inFlight)) === null, String(lateReturn.location));
+  r.check("a return after GitHub was turned off opens nothing", lateReturn.location?.endsWith("github=expired") && (await me(inFlight)) === null, String(lateReturn.location));
+  r.check(
+    "nor does a sign-in that came back before, still waiting to be finished",
+    halfwayTrip.landing === "/login?github=continue" && (await finish(halfway)).status === 401 && (await me(halfway)) === null
+  );
   await owner.call("/api/github-login", put({ enabled: true }));
+  // Enabled, but changed under a sign-in's feet: the callback reads the switch again.
+  const raced = browser(base);
+  const racedTrip = await trip(raced, { intent: "login" }, ownerGithub, { skipCallback: true });
+  await owner.call("/api/github-login", put({ clientId: CLIENT_ID }));
+  r.check("a save of the app leaves sign-ins under way alone", (await raced.call(racedTrip.returnPath)).location === "/login?github=continue");
 
   // --- unlinking ------------------------------------------------------------------------------------------------------------
   r.check("the owner can unlink", (await owner.call("/api/auth/github", { method: "DELETE" })).status === 200);
