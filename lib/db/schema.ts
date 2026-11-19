@@ -172,8 +172,49 @@ export interface ProjectsTable {
   environment_of: string | null;
   /** `'staging'` | `'preview'` with `environment_of`, NULL otherwise. */
   environment: EnvironmentKind | null;
+  /** JSON — see `PreviewSettings` in lib/previews.ts; NULL means every default (off). Migration 054. */
+  preview_settings: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** `'waiting'` a fork's commit nobody approved; `'active'`; `'stopped'` — see migration 054. */
+export type PreviewState = "waiting" | "active" | "stopped";
+export type PreviewStopReason = "limit" | "idle" | "manual";
+
+/** A pull request the panel knows of, and its preview project once there is one. */
+export interface ProjectPreviewsTable {
+  id: string;
+  production_id: string;
+  /** NULL while a fork's commit waits to be approved. No foreign key: see migration 054. */
+  project_id: string | null;
+  pr_number: number;
+  title: string;
+  author: string;
+  url: string;
+  head_ref: string;
+  head_sha: string;
+  head_repo: string | null;
+  /** 0 | 1 */
+  fork: number;
+  approved_sha: string | null;
+  state: PreviewState;
+  stopped_reason: PreviewStopReason | null;
+  last_activity_at: string;
+  address_problem: string | null;
+  status_problem: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** The variables every preview of a project receives over what it inherits. */
+export interface PreviewEnvVarsTable {
+  id: string;
+  project_id: string;
+  key: string;
+  /** AES-256-GCM ciphertext */
+  value: string;
+  created_at: string;
 }
 
 /**
@@ -1137,6 +1178,8 @@ export interface Database {
   env_groups: EnvGroupsTable;
   env_group_vars: EnvGroupVarsTable;
   project_env_groups: ProjectEnvGroupsTable;
+  project_previews: ProjectPreviewsTable;
+  preview_env_vars: PreviewEnvVarsTable;
   one_time_commands: OneTimeCommandsTable;
   services: ServicesTable;
   service_databases: ServiceDatabasesTable;
