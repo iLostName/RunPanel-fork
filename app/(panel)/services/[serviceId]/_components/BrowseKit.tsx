@@ -158,63 +158,107 @@ export function BrowseGrid({
   ariaLabel: string;
 }) {
   const cutSet = new Set(cut.map(([r, c]) => `${r}:${c}`));
+  /** One value: a line in the table, up to three wrapped lines in a card, where the column is narrow. */
+  const cell = (value: BrowseCell, r: number, c: number, card = false) => {
+    const isCut = cutSet.has(`${r}:${c}`);
+    const open = value !== null && needsDialog(value, isCut);
+    const text = cn("text-foreground block font-mono text-xs", card ? "line-clamp-3 [overflow-wrap:anywhere]" : "truncate");
+    return open ? (
+      <button
+        type="button"
+        onClick={() => onOpen({ row: r, column: c })}
+        className="group block w-full min-w-0 text-left"
+        aria-label={`Mostra tutto il valore di ${columns[c]?.name ?? "questa colonna"}, riga ${offset + r + 1}`}
+      >
+        <span className={text}>
+          <CellPreview value={value} />
+        </span>
+        <span className="text-accent text-meta group-hover:underline">mostra tutto</span>
+      </button>
+    ) : (
+      <span className={text}>
+        <CellPreview value={value} />
+      </span>
+    );
+  };
+  const keyIcon = (column: BrowseColumn | undefined) =>
+    typeof column?.key === "number" && (
+      <Icon icon="solar:key-minimalistic-linear" width={13} className="text-accent shrink-0" aria-label="chiave primaria" />
+    );
+  const columnName = (column: BrowseColumn | undefined) => column?.name || <span className="text-muted italic">senza nome</span>;
+
   return (
-    <div className="border-border max-h-[65vh] overflow-auto rounded-[var(--radius)] border">
-      <table className="min-w-full border-collapse text-left text-sm" aria-label={ariaLabel}>
-        <thead className="bg-surface-secondary sticky top-0 z-10">
-          <tr>
-            <th scope="col" className="text-muted text-meta w-10 px-2 py-2 text-right font-normal">
-              #
-            </th>
-            {columns.map((column, i) => (
-              <th key={i} scope="col" className="px-3 py-2 align-bottom font-medium whitespace-nowrap">
-                <span className="text-foreground inline-flex items-center gap-1">
-                  {column.name || <span className="text-muted italic">senza nome</span>}
-                  {typeof column.key === "number" && (
-                    <Icon icon="solar:key-minimalistic-linear" width={13} className="text-accent" aria-label="chiave primaria" />
-                  )}
-                </span>
-                {column.type && <span className="text-muted text-meta block font-mono font-normal">{column.type}</span>}
+    <>
+      {/*
+        A phone held upright: a card per row, each value under its column's
+        name. A table there showed the row number and two columns of a page
+        that scrolled sideways inside a box inside a page scrolling down.
+        Turned sideways the phone has the width, and gets the table back with
+        the row number and the first column held at the left edge.
+      */}
+      <ol className="hidden space-y-2 max-md:portrait:block" aria-label={ariaLabel}>
+        {rows.map((row, r) => (
+          <li key={r} className="border-border rounded-[var(--radius)] border">
+            <p className="text-muted text-meta border-border border-b px-3 py-1.5 tabular-nums">Riga {formatCount(offset + r + 1)}</p>
+            <dl className="divide-border divide-y px-3">
+              {row.map((value, c) => (
+                <div key={c} className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-start gap-3 py-1.5">
+                  <dt className="text-muted flex min-w-0 items-center gap-1 text-xs">
+                    <span className="truncate">{columnName(columns[c])}</span>
+                    {keyIcon(columns[c])}
+                  </dt>
+                  <dd className="min-w-0">{cell(value, r, c, true)}</dd>
+                </div>
+              ))}
+            </dl>
+          </li>
+        ))}
+      </ol>
+
+      <div className="border-border max-h-[65vh] overflow-auto rounded-[var(--radius)] border max-md:portrait:hidden">
+        <table className="min-w-full border-collapse text-left text-sm" aria-label={ariaLabel}>
+          <thead className="bg-surface-secondary sticky top-0 z-10">
+            <tr>
+              <th scope="col" className={cn("text-muted text-meta w-10 px-2 py-2 text-right font-normal", STICKY_HEAD, "max-md:left-0 max-md:w-14 max-md:min-w-14")}>
+                #
               </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, r) => (
-            <tr key={r} className="border-border hover:bg-surface-hover border-t">
-              <td className="text-muted text-meta px-2 py-1.5 text-right align-top tabular-nums">{offset + r + 1}</td>
-              {row.map((value, c) => {
-                const isCut = cutSet.has(`${r}:${c}`);
-                const open = value !== null && needsDialog(value, isCut);
-                return (
-                  <td key={c} className="max-w-[22rem] px-3 py-1.5 align-top">
-                    {open ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpen({ row: r, column: c })}
-                        className="group block w-full min-w-0 text-left"
-                        aria-label={`Mostra tutto il valore di ${columns[c]?.name ?? "questa colonna"}, riga ${offset + r + 1}`}
-                      >
-                        <span className="text-foreground block truncate font-mono text-xs">
-                          <CellPreview value={value} />
-                        </span>
-                        <span className="text-accent text-meta group-hover:underline">mostra tutto</span>
-                      </button>
-                    ) : (
-                      <span className="text-foreground block truncate font-mono text-xs">
-                        <CellPreview value={value} />
-                      </span>
-                    )}
-                  </td>
-                );
-              })}
+              {columns.map((column, i) => (
+                <th key={i} scope="col" className={cn("px-3 py-2 align-bottom font-medium whitespace-nowrap", i === 0 && STICKY_HEAD, i === 0 && "max-md:left-14")}>
+                  <span className="text-foreground inline-flex items-center gap-1">
+                    {columnName(column)}
+                    {keyIcon(column)}
+                  </span>
+                  {column.type && <span className="text-muted text-meta block font-mono font-normal">{column.type}</span>}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((row, r) => (
+              <tr key={r} className="border-border hover:bg-surface-hover border-t">
+                <td className={cn("text-muted text-meta px-2 py-1.5 text-right align-top tabular-nums", STICKY_CELL, "max-md:left-0 max-md:w-14 max-md:min-w-14")}>
+                  {offset + r + 1}
+                </td>
+                {row.map((value, c) => (
+                  <td
+                    key={c}
+                    className={cn("max-w-[22rem] px-3 py-1.5 align-top", c === 0 && STICKY_CELL, c === 0 && "max-md:left-14 max-md:max-w-[40vw]")}
+                  >
+                    {cell(value, r, c)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
+
+/** Held at the left edge on a phone turned sideways: the row number and the first column. */
+const STICKY_HEAD = "max-md:sticky max-md:z-20 max-md:bg-surface-secondary";
+const STICKY_CELL = "max-md:sticky max-md:z-[1] max-md:bg-surface max-md:shadow-[inset_-1px_0_0_var(--color-border)]";
 
 /** Pretty JSON when the value is a JSON object or array, else null. */
 function prettyJson(value: string): string | null {

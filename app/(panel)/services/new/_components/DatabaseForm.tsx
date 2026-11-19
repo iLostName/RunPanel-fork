@@ -290,7 +290,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
       </Advanced>
 
       <div className="flex justify-end">
-        <Button variant="primary" isPending={saving} onPress={create}>
+        <Button variant="primary" className="max-md:w-full" isPending={saving} onPress={create}>
           Crea database
         </Button>
       </div>

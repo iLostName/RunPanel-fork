@@ -9,6 +9,7 @@ import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadError } from "@/components/ui/LoadError";
 import { LinkButton } from "@/components/ui/LinkButton";
+import { Fab } from "@/components/ui/Fab";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Code } from "@/components/ui/Hint";
@@ -58,7 +59,9 @@ const ServiceRow = memo(function ServiceRow({
   const running = service.status === "running";
 
   return (
-    <Panel interactive padding="compact" className="flex items-center gap-3">
+    // On a phone the whole card opens the database, as a row of an app's list
+    // does (`ListRow`), with the buttons lifted above the link.
+    <Panel interactive padding="compact" className="flex items-center gap-3 max-md:relative max-md:active:bg-surface-hover">
       <Icon
         icon={TYPE_ICONS[service.type] ?? "solar:database-linear"}
         width={20}
@@ -66,7 +69,7 @@ const ServiceRow = memo(function ServiceRow({
         aria-hidden
       />
 
-      <Link href={href} className="min-w-0 flex-1">
+      <Link href={href} className="max-md:touch-chrome min-w-0 flex-1 max-md:after:absolute max-md:after:inset-0">
         {/* Wraps: on a phone the buttons leave too little room for name and
             badges on one line, and without it the name was what gave way. */}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -99,7 +102,7 @@ const ServiceRow = memo(function ServiceRow({
       </Link>
 
       {rowAllows(service, SERVICE_ACTIONS.control) && (
-        <div className="flex shrink-0 gap-1.5">
+        <div className="flex shrink-0 gap-1.5 max-md:relative max-md:z-10">
           {running ? (
             <>
               <Button variant="ghost" size="sm" isIconOnly aria-label="Riavvia" onPress={() => onControl(service, "restart")}>
@@ -182,8 +185,9 @@ export default function ServicesPage() {
         actions={
           <>
             <ServerFilter />
+            {/* On a phone this is the floating button at the end of the page. */}
             {canCreate && (
-              <LinkButton href={href("/services/new")} variant="secondary">
+              <LinkButton href={href("/services/new")} variant="secondary" className="max-md:hidden">
                 <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
                 Nuovo servizio
               </LinkButton>
@@ -248,6 +252,8 @@ export default function ServicesPage() {
           ))}
         </div>
       )}
+
+      {canCreate && <Fab href={href("/services/new")} label="Nuovo database" />}
     </>
   );
 }
