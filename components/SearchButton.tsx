@@ -30,6 +30,8 @@ export function SearchButton({ className }: { className?: string }) {
       <Icon icon="solar:magnifier-linear" width={16} className="shrink-0" aria-hidden />
       {/* The whole sentence, cut by the width: a literal "…" was text the name could not contain. */}
       <span className="hidden flex-1 truncate text-left sm:inline">Cerca progetti, database, pagine e azioni</span>
+      {/* Not drawn in a flex row, but it keeps "azioni" and "Ctrl" two words for whoever reads the text. */}
+      {" "}
       <kbd className="border-border text-meta hidden rounded border px-1.5 py-0.5 font-sans sm:inline-block">Ctrl K</kbd>
     </button>
   );
