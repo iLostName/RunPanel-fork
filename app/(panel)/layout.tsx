@@ -18,6 +18,7 @@ import { UpdateBanner } from "@/components/UpdateBanner";
 import { InboxProvider } from "@/components/notifications/InboxProvider";
 import { InstallDialog } from "@/components/pwa/InstallDialog";
 import { InstallHint } from "@/components/pwa/InstallHint";
+import { PushRuntime } from "@/components/pwa/PushRuntime";
 import { panelRelease } from "@/services/panel-update/release";
 
 export default async function PanelLayout({
@@ -111,6 +112,8 @@ export default async function PanelLayout({
           the one-time suggestion on a phone. Both render nothing until needed. */}
       <InstallDialog />
       <InstallHint />
+      {/* The unread count on the app's icon, and this browser's notifications kept in step. */}
+      <PushRuntime />
     </div>
     </InboxProvider>
     </PanelUpdateProvider>

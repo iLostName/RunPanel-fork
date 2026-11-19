@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -9,6 +10,7 @@ import { Section } from "@/components/ui/Section";
 import { ThemeModePicker } from "@/components/ui/ThemeModePicker";
 import { ExpertModeToggle } from "@/components/ui/ExpertModeToggle";
 import { SessionList } from "@/components/ui/SessionList";
+import { PushSection } from "@/components/notifications/PushSettings";
 import { useMe } from "@/lib/hooks/useMe";
 import { TwoFactorPanel } from "./_components/TwoFactorPanel";
 
@@ -20,6 +22,8 @@ import { TwoFactorPanel } from "./_components/TwoFactorPanel";
  */
 export default function AccountPage() {
   const me = useMe();
+  // `?open=push` comes from the bell, the Notifiche page and the channels list.
+  const openSection = useSearchParams()?.get("open") ?? null;
   const [email, setEmail] = useState(me.email ?? "");
   const [emailPassword, setEmailPassword] = useState("");
   const [emailSaving, setEmailSaving] = useState(false);
@@ -144,6 +148,8 @@ export default function AccountPage() {
         <Section title="Dispositivi" summary="Dove sei entrato con questo account">
           <SessionList />
         </Section>
+
+        <PushSection defaultExpanded={openSection === "push"} />
 
         <Section title="Aspetto" summary="Tema, e quanti dettagli tecnici vedere" defaultExpanded>
           <div className="flex flex-wrap items-center justify-between gap-3">

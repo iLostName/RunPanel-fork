@@ -11,9 +11,10 @@ import { Panel } from "./Panel";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Technical } from "./Technical";
 import { ChannelDialog } from "@/components/notifications/ChannelDialog";
+import { PushChannelRow } from "@/components/notifications/PushSettings";
 import { useResource } from "@/lib/hooks/useResource";
 import { useMe } from "@/lib/hooks/useMe";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNode, useNodeApi } from "@/lib/hooks/useNode";
 import { formatRelative, formatWhen } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
@@ -68,6 +69,7 @@ function eventsText(count: number): string {
  */
 export function NotificationSettings() {
   const api = useNodeApi();
+  const { isRemote } = useNode();
   const me = useMe();
   const { data, loading, error, refresh } = useResource<ChannelsResponse>(api("/api/notifications/channels"));
 
@@ -138,6 +140,17 @@ export function NotificationSettings() {
         Le notifiche compaiono sempre nella campanella in alto. Qui scegli dove mandarle anche fuori dal pannello, e per
         quali eventi: per esempio «avvisami su Telegram quando un deploy fallisce».
       </p>
+
+      {/*
+        The one channel that is not the panel's but each person's: listed here
+        so whoever sets up the channels knows it exists, managed in Account.
+        Of the panel serving the page, so not shown with another server selected.
+      */}
+      {!isRemote && (
+        <Panel nested padding="flush" className="overflow-hidden">
+          <PushChannelRow />
+        </Panel>
+      )}
 
       {channels.length === 0 ? (
         <div className="border-border flex flex-col items-center rounded-[var(--radius)] border border-dashed px-6 py-8 text-center">
