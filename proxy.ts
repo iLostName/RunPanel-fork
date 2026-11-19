@@ -121,6 +121,19 @@ export const config = {
    * authenticates with an HMAC over the body instead — and a fresh install
    * asking to join the cluster with a one-time token.
    *
+   * Signing in includes signing in with GitHub, `auth/github/*`: leaving for
+   * GitHub, the return GitHub sends the browser back to — a navigation from
+   * github.com, carrying a `state` and this browser's own cookie rather than
+   * a session — and finishing it from the sign-in page. Each checks what it
+   * needs itself, and `authz-coverage-unit` names them one by one. The owner's
+   * settings for it, `/api/github-login`, are not under `auth/` and are
+   * covered here like everything else.
+   *
+   * What under `auth/` does need a session — two-step sign-in, one's own
+   * GitHub link — sits there on purpose as well: this proxy is what marks an
+   * API token as a session, so outside its matcher a token never is one, and
+   * how a person signs in is for that person in a browser.
+   *
    * Two more are kept out for a different reason. Next clones the body of
    * every request the proxy matches so the proxy and the handler can both read
    * it, buffering the clone in memory and cutting it off at 10 MB. The ZIP

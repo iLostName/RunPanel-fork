@@ -4,6 +4,7 @@ import { audit } from "@/lib/audit";
 import { canEditUser } from "@/lib/authz";
 import { reinviteSchema } from "@/lib/users-schema";
 import { clampInviteHours, getUser, getUserAccess, issueInvite } from "@/lib/users";
+import { githubLinkOf } from "@/lib/github-login";
 
 type Params = { params: Promise<{ userId: string }> };
 
@@ -32,7 +33,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   const hours = parsed.success ? clampInviteHours(parsed.data.hours) : null;
   if (!hours) return NextResponse.json({ error: "Durata del link non valida (da 1 ora a 30 giorni)" }, { status: 400 });
 
-  const kind = target.password_hash ? "reset" : "invite";
+  // An account that signs in with GitHub alone has accepted its invitation:
+  // its link is one to choose a password, the way out if GitHub sign-in is
+  // turned off.
+  const kind = target.password_hash || (await githubLinkOf(userId)) ? "reset" : "invite";
   const invite = await issueInvite(userId, kind, hours, denied.session.user.id);
   await audit({ userId: denied.session.user.id, category: "security", action: `user.${kind}`, scope: "user", scopeId: userId, detail: `${hours}h`, request });
   return NextResponse.json(
