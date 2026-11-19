@@ -394,11 +394,11 @@ export default function BackupsPage() {
                       {policy.cron && policy.timezone ? ` (ora di ${policy.timezone})` : ""} ·{" "}
                       {destinationsPhrase(policyDestinations(policy))}
                     </p>
-                    <p className="text-muted/80 mt-0.5 truncate text-meta">
+                    <p className="text-muted mt-0.5 truncate text-meta">
                       {policy.targets.map((t) => describeTarget(t, catalogFor(policy.memberId))).join(" · ")}
                     </p>
                     {/* The column on the right is not drawn on a phone. */}
-                    <p className="text-muted/80 mt-0.5 truncate text-meta sm:hidden">
+                    <p className="text-muted mt-0.5 truncate text-meta sm:hidden">
                       prossima {formatRelative(policy.nextRunAt)} · ultima {formatRelative(policy.lastRunAt)}
                     </p>
                   </div>

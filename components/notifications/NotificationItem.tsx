@@ -64,7 +64,7 @@ export function NotificationItem({
           {!item.read && <span className="bg-accent mt-1.5 size-2 shrink-0 rounded-full" role="img" aria-label="Da leggere" />}
         </div>
         <NotifyBody html={item.body} className={cn("text-muted mt-0.5 text-xs leading-relaxed", compact && "line-clamp-2")} />
-        <p className="text-muted/80 text-meta mt-1">
+        <p className="text-muted text-meta mt-1">
           <time dateTime={item.createdAt} title={formatWhen(item.createdAt)}>
             {formatRelative(item.createdAt)}
           </time>
