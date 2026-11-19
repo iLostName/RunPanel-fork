@@ -67,7 +67,8 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
           aria-hidden
           className={cn(
             "text-muted border-border text-meta rounded border px-1.5 py-0.5 font-sans transition-opacity",
-            active ? "opacity-70" : "opacity-0 group-hover:opacity-70"
+            // Full strength when shown: at 70% the muted text fell under 4.5:1 on the selected row.
+            active ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           )}
         >
           {item.keys}
@@ -108,7 +109,7 @@ export function AppSidebar({ version }: { version: string }) {
           return (
             <div key={group.id} className="space-y-0.5">
               {group.label && (
-                <p className="text-muted/60 text-meta px-3 pt-4 pb-1.5 tracking-wider uppercase">
+                <p className="text-muted text-meta px-3 pt-4 pb-1.5 tracking-wider uppercase">
                   {group.label}
                 </p>
               )}
@@ -130,7 +131,7 @@ export function AppSidebar({ version }: { version: string }) {
         {/* Read rather than written down. The literal that used to live here
             said v0.1.0 while package.json — which the backup manifest reads —
             was free to say something else. */}
-        <p className="text-muted/60 text-meta flex items-center gap-1.5 px-3 pt-2 pb-1 font-mono">
+        <p className="text-muted text-meta flex items-center gap-1.5 px-3 pt-2 pb-1 font-mono">
           {version}
           {updateReady && (
             <>
