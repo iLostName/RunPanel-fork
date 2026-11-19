@@ -77,6 +77,23 @@ export async function loadOwnVars(projectId: string): Promise<{ vars: EnvPair[];
   return { vars, unreadable };
 }
 
+/**
+ * The variables every preview of a production project receives over what it
+ * inherits (migration 054), decrypted; unreadable ones by name.
+ */
+export async function loadPreviewVars(productionId: string): Promise<{ vars: EnvPair[]; unreadable: string[] }> {
+  const db = await getDb();
+  const rows = await db.selectFrom("preview_env_vars").select(["key", "value"]).where("project_id", "=", productionId).orderBy("key").execute();
+  const vars: EnvPair[] = [];
+  const unreadable: string[] = [];
+  for (const row of rows) {
+    const value = tryDecrypt(row.value);
+    if (value === null) unreadable.push(row.key);
+    else vars.push({ key: row.key, value });
+  }
+  return { vars, unreadable };
+}
+
 /** A way to read any shared variable's raw value, for following references. */
 export function sharedReader(groups: readonly LoadedGroup[]): (group: string, key: string) => string | null {
   const byName = new Map(groups.map((g) => [g.name, new Map(g.vars.map((v) => [v.key, v.value]))]));

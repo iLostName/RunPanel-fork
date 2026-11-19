@@ -49,7 +49,7 @@ export interface EnvPreview {
   vars: PreviewVar[];
   problems: number;
   /** For an environment: the projects it inherits from, lowest first (lib/environments.ts). */
-  inherits: { id: string; name: string; environment: "production" | "staging" }[];
+  inherits: { id: string; name: string; environment: "production" | "staging" | "previews" }[];
   /** Inherited variables not handed down, with the sentence that says why. */
   withheld: { key: string; source: EnvSource; reason: string }[];
 }

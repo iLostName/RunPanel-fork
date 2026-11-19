@@ -785,6 +785,25 @@ export const createEnvironmentSchema = z.object({
   databaseIds: z.array(z.string().min(1).max(32)).max(20).optional(),
 });
 
+/** "Anteprime delle pull request" — see `PreviewSettings` in lib/previews.ts. */
+export const previewSettingsSchema = z.object({
+  enabled: z.boolean(),
+  maxPreviews: z.number().int().min(1, "Almeno 1").max(10, "Al massimo 10"),
+  idleDays: z.number().int().min(1, "Almeno 1 giorno").max(90, "Al massimo 90 giorni"),
+  domainId: z.string().min(1).max(32).nullable(),
+  commitStatus: z.boolean(),
+});
+
+/**
+ * What can be done to one preview. `approve` names the commit that was shown:
+ * a fork's pull request that moved on in between is refused, not approved.
+ */
+export const previewActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("approve"), commitSha: commitShaSchema }),
+  z.object({ action: z.literal("redeploy") }),
+  z.object({ action: z.literal("stop") }),
+]);
+
 /** "Promuovi in produzione": the commit the confirmation showed, which must still be what staging runs. */
 export const promoteSchema = z.object({
   commitSha: commitShaSchema,

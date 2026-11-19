@@ -166,6 +166,11 @@ export async function deleteProject(project: ProjectsTable, opts: { deleteServic
       await db.selectFrom("project_hosts").select("hostname").where("project_id", "=", projectId).execute()
     ).map((row) => row.hostname);
 
+    // A preview's record goes with it: it names the project, with no key to
+    // cascade on (migration 054), and a record left behind would read as a
+    // preview waiting to be made again.
+    await db.deleteFrom("project_previews").where("project_id", "=", projectId).execute();
+
     // Child rows go with the parent: the schema declares ON DELETE CASCADE on
     // deployments, env_vars, services, webhook_deliveries and project_hosts, so
     // a single delete is enough — no hand-rolled ordering to get wrong.

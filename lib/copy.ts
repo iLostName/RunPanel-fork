@@ -54,7 +54,10 @@ export const SHARED_VARS = {
  */
 export function envSourceLabel(source: { kind: string; name?: string; via?: string; environment?: string }): string {
   if (source.kind === "group") return source.via ? `gruppo «${source.name}» di «${source.via}»` : `gruppo «${source.name}»`;
-  if (source.kind === "inherited") return `${source.environment === "staging" ? "staging" : "produzione"} «${source.name}»`;
+  if (source.kind === "inherited") {
+    if (source.environment === "previews") return `anteprime di «${source.name}»`;
+    return `${source.environment === "staging" ? "staging" : "produzione"} «${source.name}»`;
+  }
   if (source.kind === "database") return `database «${source.name}»`;
   if (source.kind === "panel") return "RunPanel";
   return "progetto";

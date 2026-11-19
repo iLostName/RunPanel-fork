@@ -193,13 +193,14 @@ export function mentionsReference(value: string): boolean {
  *
  * `inherited` is the own variable of the project an environment inherits
  * from — production, or for a preview its staging — and `environment` says
- * which (lib/environments.ts). A group reached that way carries `via`, the
+ * which (lib/environments.ts); `previews` is one of the variables production
+ * sets for all its previews (lib/previews.ts). A group reached that way carries `via`, the
  * name of that project: the group is the same one, received through it.
  */
 export type EnvSource =
   | { kind: "own" }
   | { kind: "group"; id: string; name: string; via?: string }
-  | { kind: "inherited"; id: string; name: string; environment: "production" | "staging" }
+  | { kind: "inherited"; id: string; name: string; environment: "production" | "staging" | "previews" }
   | { kind: "database"; id: string; name: string }
   | { kind: "panel" };
 

@@ -18,8 +18,8 @@ export interface EnvSourceRef {
   name?: string;
   /** A group received through the project an environment inherits from. */
   via?: string;
-  /** Whose own variable an inherited one is. */
-  environment?: "production" | "staging";
+  /** Whose own variable an inherited one is; `previews` for production's variables of its previews. */
+  environment?: "production" | "staging" | "previews";
 }
 
 /** A row of `GET /api/projects/{id}/env/effective`. */
@@ -39,7 +39,7 @@ export interface EnvPreview {
   vars: EnvPreviewVar[];
   problems: number;
   /** Optional: a server on an older release does not send them. */
-  inherits?: { id: string; name: string; environment: "production" | "staging" }[];
+  inherits?: { id: string; name: string; environment: "production" | "staging" | "previews" }[];
   withheld?: { key: string; source: EnvSourceRef; reason: string }[];
 }
 

@@ -15,9 +15,9 @@ import {
   type RefTarget,
   type Resolution,
 } from "@/lib/env-refs";
-import { inheritanceChain, readsDatabaseOf } from "@/lib/environments";
+import { environmentKindOf, inheritanceChain, readsDatabaseOf } from "@/lib/environments";
 import { buildConnectionString, serviceEndpoint, serviceEnvKey, serviceLabel, type ConnectionOrigin } from "@/lib/service-env";
-import { attachedGroupIds, loadGroups, loadOwnVars, type LoadedGroup } from "./env-groups";
+import { attachedGroupIds, loadGroups, loadOwnVars, loadPreviewVars, type LoadedGroup } from "./env-groups";
 import { internalPort } from "./service-provisioner";
 
 /**
@@ -84,7 +84,8 @@ interface ProjectRow {
 
 /** One project an environment inherits from, with what it would hand down. */
 export interface InheritedSource {
-  project: { id: string; name: string; slug: string; environment: "production" | "staging" };
+  /** `previews`: production's variables for its previews, over staging's and under the preview's own. */
+  project: { id: string; name: string; slug: string; environment: "production" | "staging" | "previews" };
   /** Its groups, first to last. */
   groups: LoadedGroup[];
   own: EnvPair[];
@@ -154,6 +155,18 @@ export async function loadSnapshot(projectId: string): Promise<EnvSnapshot> {
       };
     })
   );
+  // A preview also receives what production sets for all its previews, over
+  // what it inherits and under what it says itself.
+  const production = chain[0];
+  if (self && production && environmentKindOf(self) === "preview") {
+    const overrides = await loadPreviewVars(production.id);
+    inherited.push({
+      project: { id: production.id, name: production.name, slug: production.slug, environment: "previews" },
+      groups: [],
+      own: overrides.vars,
+      ownUnreadable: overrides.unreadable,
+    });
+  }
   return {
     own: own.vars,
     ownUnreadable: own.unreadable,
@@ -297,7 +310,7 @@ export function effectiveVars(snap: EnvSnapshot): EffectiveVar[] {
       source.kind === "own"
         ? snap.ownUnreadable.includes(v.key)
         : source.kind === "inherited"
-          ? snap.inherited.find((from) => from.project.id === source.id)?.ownUnreadable.includes(v.key)
+          ? snap.inherited.find((from) => from.project.id === source.id && from.project.environment === source.environment)?.ownUnreadable.includes(v.key)
           : source.kind === "group" && snap.groups.find((g) => g.id === source.id)?.unreadable.includes(v.key);
     if (!unreadable) return v;
     const where = source.kind === "group" ? ` del gruppo «${source.name}»` : source.kind === "inherited" ? ` di «${source.name}»` : "";
@@ -332,7 +345,11 @@ export function resolveFor(snap: EnvSnapshot, origin: ConnectionOrigin): Project
   const production = snap.productionSlug;
   const held = new Set(
     production
-      ? resolution.vars.filter((v) => isInherited(v.source) && !skip.has(v.key) && readsDatabaseOf(v.refs, production)).map((v) => v.key)
+      ? resolution.vars
+          // Written for the previews, on purpose: the explicit choice, like an environment's own.
+          .filter((v) => !(v.source.kind === "inherited" && v.source.environment === "previews"))
+          .filter((v) => isInherited(v.source) && !skip.has(v.key) && readsDatabaseOf(v.refs, production))
+          .map((v) => v.key)
       : []
   );
   const withheld: WithheldVar[] = resolution.vars
@@ -408,7 +425,8 @@ export async function loadProjectEnv(
   }
   for (const from of snap.inherited) {
     const count = from.own.length + from.groups.reduce((n, g) => n + g.vars.length, 0);
-    summary.push(`Variabili ereditate da «${from.project.name}»: ${count}. Quelle di questo ambiente vincono.`);
+    const whose = from.project.environment === "previews" ? `«${from.project.name}» per le anteprime` : `«${from.project.name}»`;
+    summary.push(`Variabili ereditate da ${whose}: ${count}. Quelle di questo ambiente vincono.`);
   }
   const withheld = resolved.get(origins[0])?.withheld ?? [];
   if (withheld.length > 0) {

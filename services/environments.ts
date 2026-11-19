@@ -46,6 +46,8 @@ export interface EnvironmentBrief {
   /** The commit of its live deployment — what it runs — when one worked. */
   liveCommit: string | null;
   createdAt: string;
+  /** For a preview: its pull request (migration 054). */
+  pr: { number: number; title: string; author: string; url: string; fork: boolean } | null;
 }
 
 export interface Family {
@@ -81,7 +83,7 @@ async function briefs(rows: readonly ProjectsTable[]): Promise<EnvironmentBrief[
   if (rows.length === 0) return [];
   const db = await getDb();
   const ids = rows.map((row) => row.id);
-  const [hosts, commits] = await Promise.all([
+  const [hosts, commits, pulls] = await Promise.all([
     db
       .selectFrom("project_hosts")
       .select(["project_id", "hostname", "status"])
@@ -91,9 +93,11 @@ async function briefs(rows: readonly ProjectsTable[]): Promise<EnvironmentBrief[
       .orderBy("hostname", "asc")
       .execute(),
     liveCommits(ids),
+    db.selectFrom("project_previews").select(["project_id", "pr_number", "title", "author", "url", "fork"]).where("project_id", "in", ids).execute(),
   ]);
   return rows.map((row) => {
     const host = hosts.find((h) => h.project_id === row.id);
+    const pull = pulls.find((p) => p.project_id === row.id);
     return {
       id: row.id,
       name: row.name,
@@ -105,6 +109,7 @@ async function briefs(rows: readonly ProjectsTable[]): Promise<EnvironmentBrief[
       url: host ? `${host.status === "active" ? "https" : "http"}://${host.hostname}` : null,
       liveCommit: commits.get(row.id) ?? null,
       createdAt: row.created_at,
+      pr: pull ? { number: pull.pr_number, title: pull.title, author: pull.author, url: pull.url, fork: pull.fork === 1 } : null,
     };
   });
 }

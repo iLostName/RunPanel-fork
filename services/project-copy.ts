@@ -59,6 +59,12 @@ export interface CopyRowInput {
    * about a push. A plain copy starts with none of them.
    */
   settings?: boolean;
+  /**
+   * Who may reach the port only, for a preview: it runs production's code and
+   * must not be more open than production, but starts at no boot and
+   * restarts on no schedule — it comes and goes with its pull request.
+   */
+  access?: boolean;
   autoDeploy?: boolean;
   deployTrigger?: DeployTrigger | null;
   /** A commit to hold the copy at, for a preview: its pull request's head. */
@@ -71,7 +77,8 @@ export async function insertProjectCopy(input: CopyRowInput): Promise<ProjectsTa
   const db = await getDb();
   const id = generateId();
   const now = nowIso();
-  const restricted = input.settings === true && source.access_mode === "restricted";
+  const copyAccess = input.settings === true || input.access === true;
+  const restricted = copyAccess && source.access_mode === "restricted";
 
   await db
     .insertInto("projects")
@@ -96,13 +103,17 @@ export async function insertProjectCopy(input: CopyRowInput): Promise<ProjectsTa
       backup_settings: source.backup_settings,
       environment_of: input.environment?.of ?? null,
       environment: input.environment?.kind ?? null,
-      ...(input.settings
+      ...(copyAccess
         ? {
             access_mode: source.access_mode,
             access_allow: source.access_allow,
             // Allocated now and kept, as the settings do: the first deploy
             // brings the gate up on it (services/deploy-pipeline.ts).
             access_port: restricted ? await allocateLoopbackPort() : null,
+          }
+        : {}),
+      ...(input.settings
+        ? {
             autostart: source.autostart,
             autostart_order: source.autostart_order,
             autostart_delay_s: source.autostart_delay_s,

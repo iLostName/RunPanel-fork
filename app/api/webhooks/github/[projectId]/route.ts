@@ -15,6 +15,8 @@ import { readBodyCapped } from "@/lib/read-body";
 import { verifyWebhookSignature } from "@/services/git-manager";
 import { enqueueDeploy } from "@/services/deploy-queue";
 import type { GitHubPushPayload } from "@/lib/github";
+import { parsePullRequest } from "@/lib/previews";
+import { handlePullRequest } from "@/services/previews";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -133,6 +135,23 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (event === "ping") {
     await recordDelivery("accepted", { event, contentType, formEncoded });
     return NextResponse.json({ message: "Pong — RunPanel received this webhook" });
+  }
+
+  /*
+    A pull request opened, pushed to or closed: the previews of production
+    (services/previews.ts). The hook asks for these only while previews are
+    on, and whatever arrives otherwise is filed as ignored, with the reason.
+  */
+  if (event === "pull_request") {
+    const action = typeof payload.action === "string" ? payload.action.slice(0, 40) : "";
+    const pr = parsePullRequest(payload.pull_request);
+    if (!pr) {
+      await recordDelivery("ignored", { event, action, reason: "unreadable pull request" });
+      return NextResponse.json({ message: "Event ignored" });
+    }
+    const outcome = await handlePullRequest(project, action, pr, "webhook");
+    await recordDelivery(outcome.status, { event, ...outcome.summary }, outcome.deploymentId);
+    return NextResponse.json({ message: outcome.message });
   }
 
   if (event !== "push") {
