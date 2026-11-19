@@ -9,6 +9,11 @@ export const PERMISSION_GROUPS: { title: string; items: { key: GlobalPermission;
       { key: "projects.create", label: "Crea progetti e database", description: "Chi crea un progetto o un database ne riceve la gestione." },
       { key: "github", label: "GitHub", description: "Usa il token salvato per elencare e clonare i repository." },
       { key: "registries", label: "Registry", description: "Usa e gestisce le credenziali dei registry privati." },
+      {
+        key: "variables",
+        label: "Variabili condivise",
+        description: "Vede e modifica i gruppi di variabili condivise e li collega ai progetti che gestisce: ne legge i valori.",
+      },
       { key: "backup", label: "Backup", description: "Pianifica e scarica i backup dei progetti e dei database che gestisce." },
       { key: "restore", label: "Ripristino", description: "Ripristina un backup: sovrascrive i dati, va dato con cura." },
     ],
