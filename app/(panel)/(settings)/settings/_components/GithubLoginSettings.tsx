@@ -257,8 +257,8 @@ function GithubLoginForm({ data, onSaved }: { data: GithubLoginData; onSaved: ()
             </li>
             <li className="space-y-2">
               <p>Compila i due indirizzi così, copiandoli da qui:</p>
-              {data.homepageUrl && <CopyField label="Homepage URL" value={data.homepageUrl} />}
-              <CopyField label="Authorization callback URL" value={data.callbackUrl} />
+              {data.homepageUrl && <CopyField label="Homepage URL" value={data.homepageUrl} wrap />}
+              <CopyField label="Authorization callback URL" value={data.callbackUrl} wrap />
               <FieldHint className="mt-0">
                 Deve essere identico, fino all&apos;ultima lettera. Lascia spento «Enable Device Flow», poi «Register
                 application».
@@ -291,6 +291,8 @@ function GithubLoginForm({ data, onSaved }: { data: GithubLoginData; onSaved: ()
                         toast.success("Nuovo URL di callback salvato");
                         await onSaved();
                       }
+                    } catch {
+                      toast.error(MSG.unreachable);
                     } finally {
                       setSaving(false);
                     }

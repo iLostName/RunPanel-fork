@@ -179,31 +179,37 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
           </>
         )}
 
-        {offerGithub && (
+        {(offerGithub || (githubError && state.phase === "ready")) && (
           <div className="space-y-3">
-            <OrDivider />
-            <GithubButton isPending={githubPending} isDisabled={saving} onPress={() => void acceptWithGithub()}>
-              Accedi con GitHub
-            </GithubButton>
-            <FieldHint className="mt-0 text-center">
-              Senza password: il tuo account GitHub viene collegato a questo, ed entrerai con quello. Potrai aggiungere una
-              password dalla pagina Account.
-            </FieldHint>
-          </div>
-        )}
-
-        {githubError && state.phase === "ready" && (
-          <p role="alert" className="text-danger text-sm">
-            {githubError}
-            {githubElsewhere && (
+            {offerGithub && (
               <>
-                {" "}
-                <a href={githubElsewhere} className="text-accent font-medium hover:underline">
-                  Apri il pannello da lì
-                </a>
+                <OrDivider />
+                <GithubButton isPending={githubPending} isDisabled={saving} onPress={() => void acceptWithGithub()}>
+                  Accedi con GitHub
+                </GithubButton>
               </>
             )}
-          </p>
+            {/* Under the button it is about: what went wrong on the way back from GitHub. */}
+            {githubError && (
+              <p role="alert" className="text-danger text-sm">
+                {githubError}
+                {githubElsewhere && (
+                  <>
+                    {" "}
+                    <a href={githubElsewhere} className="text-accent font-medium hover:underline">
+                      Apri il pannello da lì
+                    </a>
+                  </>
+                )}
+              </p>
+            )}
+            {offerGithub && (
+              <FieldHint className="mt-0 text-center">
+                Senza password: il tuo account GitHub viene collegato a questo, ed entrerai con quello. Potrai aggiungere
+                una password dalla pagina Account.
+              </FieldHint>
+            )}
+          </div>
         )}
       </Panel>
     </div>
