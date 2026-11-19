@@ -44,6 +44,7 @@ import * as pushDevices from "./049-push-devices";
 import * as githubLogin from "./050-github-login";
 import * as livePort from "./052-live-port";
 import * as sharedVariables from "./051-shared-variables";
+import * as environments from "./053-environments";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -98,6 +99,7 @@ export const migrations: Record<string, Migration> = {
   "050-github-login": githubLogin,
   "052-live-port": livePort,
   "051-shared-variables": sharedVariables,
+  "053-environments": environments,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

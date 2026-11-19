@@ -44,6 +44,8 @@ export type OneTimeCommandStatus = "queued" | "claimed" | "done" | "failed";
 // Declared where the column semantics live, so the two cannot disagree.
 export type { AccessMode } from "../access-columns";
 import type { AccessMode } from "../access-columns";
+export type { EnvironmentKind } from "../environments";
+import type { EnvironmentKind } from "../environments";
 import type { TaskRunStatus, TaskRunsIn, TaskTrigger } from "../tasks-rules";
 import type { ColumnType } from "kysely";
 
@@ -163,6 +165,13 @@ export interface ProjectsTable {
    * every default, and is what every project created before migration 021 has.
    */
   backup_settings: string | null;
+  /**
+   * The production project this one is an environment of, or NULL for an
+   * ordinary project. No foreign key: see migration 053.
+   */
+  environment_of: string | null;
+  /** `'staging'` | `'preview'` with `environment_of`, NULL otherwise. */
+  environment: EnvironmentKind | null;
   created_at: string;
   updated_at: string;
 }
