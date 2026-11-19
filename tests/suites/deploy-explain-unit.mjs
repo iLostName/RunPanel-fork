@@ -13,7 +13,7 @@ export const meta = { name: "deploy-explain-unit", needsDocker: false, drivers: 
 
 export async function run({ repoRoot }) {
   const r = createReporter("deploy-explain-unit");
-  const { explainDeployError, deployPhase, deploymentSucceeded, deploymentActive, ROLLBACK_NOTE } = await import(pathToFileURL(join(repoRoot, "lib", "deploy-explain.ts")).href);
+  const { explainDeployError, deployPhase, deploymentSucceeded, deploymentActive, ROLLBACK_NOTE, KEPT_ONLINE_NOTE } = await import(pathToFileURL(join(repoRoot, "lib", "deploy-explain.ts")).href);
   const code = (message, log) => explainDeployError(message, log).code;
 
   r.check("cancelled", code("Deploy interrotto dall'operatore") === "cancelled");
@@ -45,6 +45,12 @@ export async function run({ repoRoot }) {
 
   const rolled = explainDeployError(`Health check failed after 30s: port 3000 not responding on / — ${ROLLBACK_NOTE}`);
   r.check("a rolled-back deploy keeps its cause and says the old version is back", rolled.code === "health-no-answer" && rolled.hint.startsWith("Intanto è tornata online"));
+  const kept = explainDeployError(`Health check failed after 30s: port 3000 not responding on / — ${KEPT_ONLINE_NOTE}`);
+  r.check(
+    "a deploy without downtime that failed says the old version never stopped",
+    kept.code === "health-no-answer" && kept.title.includes("3000") && kept.hint.startsWith("Intanto l'app continua a funzionare")
+  );
+  r.check("phase: nginx moving to the new version is still the check's phase", deployPhase("--- Health check ---\nok\n\n--- Switching traffic ---") === "health");
   r.check("a live or replaced deploy is one that worked", deploymentSucceeded("running") && deploymentSucceeded("superseded") && !deploymentSucceeded("failed") && !deploymentSucceeded("success"));
   r.check("only pending and building are in progress", deploymentActive("pending") && deploymentActive("building") && !deploymentActive("running") && !deploymentActive("failed"));
 

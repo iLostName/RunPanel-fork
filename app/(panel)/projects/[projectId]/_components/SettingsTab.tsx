@@ -70,7 +70,11 @@ export function SettingsTab({
 }) {
   const [section, setSection] = useUrlTab(SECTION_IDS, "general", "section");
   const [saving, setSaving] = useState(false);
-  const form = useDeployForm(project, (updated) => onProjectChange(updated));
+  // Merged rather than replaced: the save answers with the row, and what only
+  // the GET works out — the names nginx serves, whether nginx can take a
+  // switch, the version folders — would otherwise vanish until the next load,
+  // and the settings would say a deploy without downtime cannot work here.
+  const form = useDeployForm(project, (updated) => onProjectChange((prev) => ({ ...prev, ...updated })));
 
   /** Sections with unsaved edits that save through their own endpoint. */
   const [pending, setPending] = useState<Record<string, PendingSave>>({});

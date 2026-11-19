@@ -141,6 +141,20 @@ export async function run({ base }) {
     res.body.hosts?.length === 1 && res.body.hosts[0].url === "http://app.esempio.it" && res.body.hosts[0].locked === true,
     show(res)
   );
+  // Deploys without downtime: what the settings read, and the switch saved through the contract.
+  r.check(
+    "the project says it has no live port and that this nginx cannot take a switch",
+    res.body.live_port === null && res.body.zeroDowntime?.proxyReady === false,
+    show(res)
+  );
+  res = await owner.call(`/api/projects/${projectId}`, json("PATCH", { builderConfig: { zeroDowntime: { enabled: true, drainSec: 30 } } }));
+  r.check(
+    "the switch for deploys without downtime is saved from the panel",
+    res.status === 200 && JSON.parse(res.body.builder_config ?? "{}").zeroDowntime?.drainSec === 30,
+    show(res)
+  );
+  res = await owner.call(`/api/projects/${projectId}`, json("PATCH", { builderConfig: { zeroDowntime: { drainSec: 900 } } }));
+  r.check("a drain past nginx's 300 seconds is a 400", res.status === 400, show(res));
   for (const [label, auth] of [
     ["a user with a colon", { user: "ad:min", password: "una-password" }],
     ["a user with a newline", { user: "admin\nroot", password: "una-password" }],

@@ -6,7 +6,7 @@ import { getDb } from "@/lib/db";
 import { getSetting } from "@/lib/settings";
 import { hostnameFor, wwwTwin } from "@/lib/proxy-names";
 import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
-import { listenPort, readAccess } from "@/lib/access-columns";
+import { readAccess, upstreamPort } from "@/lib/access-columns";
 import { createHostSchema } from "@/lib/validation";
 import {
   addressProblem,
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const db = await getDb();
     const project = await db
       .selectFrom("projects")
-      .select(["id", "port", "access_mode", "access_allow", "access_port"])
+      .select(["id", "port", "access_mode", "access_allow", "access_port", "live_port"])
       .where("id", "=", projectId)
       .executeTakeFirst();
     if (!project) return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
@@ -100,7 +100,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
     // Checked again at every apply, since the port can change after: this is
     // only so the refusal comes with a reason instead of a name left out.
-    const conflict = upstreamConflict(await claimedPorts(), projectId, listenPort(project, project.port));
+    const conflict = upstreamConflict(await claimedPorts(), projectId, upstreamPort(project, project.port));
     if (conflict) return NextResponse.json({ error: conflict }, { status: 409 });
 
     const { domainId, subdomain, publicAccess, www } = parsed.data;

@@ -13,6 +13,12 @@ export const LABEL_PROJECT = "runpanel.project";
 export const LABEL_KIND = "runpanel.kind";
 export const LABEL_DEPLOYMENT = "runpanel.deployment";
 export const LABEL_SERVICE = "runpanel.service";
+/**
+ * The loopback port an app container deployed without downtime is published
+ * on (lib/zero-downtime.ts). Read back at boot, so the store can be put right
+ * from the containers themselves after a deploy cut short.
+ */
+export const LABEL_LIVE_PORT = "runpanel.live-port";
 /** Stamped by compose itself, which refuses `--label` on `up`. */
 export const LABEL_COMPOSE_PROJECT = "com.docker.compose.project";
 const LABEL_COMPOSE_ONE_OFF = "com.docker.compose.oneoff";
@@ -24,6 +30,8 @@ export interface OwnershipLabels {
   kind?: ResourceKind;
   deployment?: string;
   service?: string;
+  /** Only on a create: see `LABEL_LIVE_PORT`. Never a filter. */
+  livePort?: number;
 }
 
 /** `--label k=v` arguments for a create/run/build command. */
@@ -33,6 +41,7 @@ export function labelArgs(labels: OwnershipLabels): string[] {
   if (labels.kind) pairs.push([LABEL_KIND, labels.kind]);
   if (labels.deployment) pairs.push([LABEL_DEPLOYMENT, labels.deployment]);
   if (labels.service) pairs.push([LABEL_SERVICE, labels.service]);
+  if (labels.livePort) pairs.push([LABEL_LIVE_PORT, String(labels.livePort)]);
 
   return pairs.flatMap(([key, value]) => ["--label", `${key}=${value}`]);
 }
@@ -142,6 +151,14 @@ export function foreignOwner(slug: string, labels: Record<string, string>, reser
 // RunPanel-owned name looks like.
 
 export const appContainerName = (slug: string) => `runpanel-${slug}`;
+/**
+ * The other two names an app container can have, for the length of a deploy
+ * without downtime: the new version while it is checked, and the old one
+ * while it drains. With an underscore, which no slug can contain, so neither
+ * can ever be another project's live name.
+ */
+export const nextAppContainerName = (slug: string) => `runpanel-${slug}_next`;
+export const oldAppContainerName = (slug: string) => `runpanel-${slug}_old`;
 export const imageRepo = (slug: string) => `runpanel/${slug}`;
 export const networkName = (slug: string) => `runpanel-net-${slug}`;
 

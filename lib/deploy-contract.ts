@@ -150,6 +150,26 @@ export const deployContractSchema = z.object({
   rollback: z
     .object({ enabled: z.boolean().default(true), native: z.boolean().default(false) })
     .default({ enabled: true, native: false }),
+
+  /**
+   * Deploy without taking the app offline: the new version starts next to the
+   * one online, on a loopback port of its own, and nginx moves to it only
+   * once it answers; the old one stops after `drainSec`, the time it gets to
+   * finish the requests it is serving. See lib/zero-downtime.ts.
+   *
+   * Off by default and panel-only, like `rollback.native`: it changes how the
+   * app is published on the host (no longer on its own port) and runs two
+   * copies of it for a while, so it is asked for project by project and a
+   * pushed `runpanel.json` cannot switch it on. Docker behind the managed
+   * nginx only; where that is not the case a deploy is an ordinary one, and
+   * says why in its log.
+   */
+  zeroDowntime: z
+    .object({
+      enabled: z.boolean().default(false),
+      drainSec: z.number().int().min(0).max(300).default(15),
+    })
+    .default({ enabled: false, drainSec: 15 }),
 });
 
 export type DeployContract = z.infer<typeof deployContractSchema>;
@@ -174,6 +194,11 @@ const legacySchema = z.object({
    * one is dropped rather than failing the row: the commands beside it matter more.
    */
   rollback: z.object({ enabled: z.boolean().optional(), native: z.boolean().optional() }).optional().catch(undefined),
+  /** The same reasoning for the other opt-in of the same kind. */
+  zeroDowntime: z
+    .object({ enabled: z.boolean().optional(), drainSec: z.number().int().min(0).max(300).optional() })
+    .optional()
+    .catch(undefined),
 });
 
 /**
@@ -262,6 +287,7 @@ function normalizeRaw(raw: unknown): RawObject {
   if (legacy.packageManager) out.packageManager = legacy.packageManager;
   if (legacy.dockerImage) out.docker = { image: legacy.dockerImage };
   if (legacy.rollback && Object.keys(legacy.rollback).length > 0) out.rollback = legacy.rollback;
+  if (legacy.zeroDowntime && Object.keys(legacy.zeroDowntime).length > 0) out.zeroDowntime = legacy.zeroDowntime;
 
   return out;
 }
@@ -333,6 +359,10 @@ export function parseContractJson(json: string | null | undefined): DeployContra
  * from on the host, and whether the project folder's build output is removed:
  * an opt-in a pushed commit could switch on by itself would not be one.
  *
+ * `zeroDowntime` for the same reason: it takes the app off its own port on
+ * the host and runs two copies of it at once, sharing its volumes. The drain
+ * goes with the switch, so the operator's figure is the only one.
+ *
  * A project starts life with `builder_config` of `"{}"`, so without this every
  * one of these fields would come from the repository until an operator happened
  * to set it by hand.
@@ -349,6 +379,8 @@ const PANEL_ONLY_FIELDS: readonly (readonly [string, string])[] = [
   ["healthcheck", "port"],
   ["healthcheck", "path"],
   ["rollback", "native"],
+  ["zeroDowntime", "enabled"],
+  ["zeroDowntime", "drainSec"],
 ];
 
 export interface StrippedContract {

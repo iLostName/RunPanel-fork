@@ -5,7 +5,14 @@ import { processManager } from "@/services/process-manager";
 import { containerStats, dockerSnapshot, type DockerSnapshot } from "@/services/docker/stats";
 import { isDockerAvailable } from "@/services/docker/cli";
 import { composeProjectName } from "@/services/docker/compose";
-import { LABEL_MANAGED, appContainerName, foreignOwner, type ContainerRow } from "@/services/docker/labels";
+import {
+  LABEL_MANAGED,
+  appContainerName,
+  foreignOwner,
+  nextAppContainerName,
+  oldAppContainerName,
+  type ContainerRow,
+} from "@/services/docker/labels";
 import { hostMetrics } from "@/services/host-metrics";
 import { serviceDisplayName } from "@/lib/service-name";
 import { appProcessInfo, stackProcessInfo } from "@/lib/docker-snapshot";
@@ -170,7 +177,12 @@ export async function GET() {
   // a standalone database had no CPU or memory row anywhere in the panel.
   const standaloneServices = services.filter((s) => !s.project_id).map(enrich);
 
-  const known = new Set([...services.map((s) => s.container_name), ...projects.map((p) => appContainerName(p.slug))]);
+  // With the two names a deploy without downtime uses for a few seconds: they
+  // are the project's, not "other containers" on the machine.
+  const known = new Set([
+    ...services.map((s) => s.container_name),
+    ...projects.flatMap((p) => [appContainerName(p.slug), nextAppContainerName(p.slug), oldAppContainerName(p.slug)]),
+  ]);
   const stacks = new Set(projects.map((p) => composeProjectName(p.slug)));
 
   return NextResponse.json(

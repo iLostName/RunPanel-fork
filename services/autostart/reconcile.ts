@@ -337,13 +337,17 @@ async function waitProjectReady(candidate: Candidate, emit: (line: string) => vo
 
   const port = project.port ?? 0;
   const access = readAccess(project);
-  const listenOn = access.mode === "restricted" && access.port !== null ? listenPort(project, port) : port;
+  // Deployed without downtime, the container is only on its live loopback
+  // port (lib/zero-downtime.ts), and a health check port can only be the
+  // project's own there.
+  const live = project.live_port && project.live_port > 0 ? project.live_port : null;
+  const listenOn = live ?? (access.mode === "restricted" && access.port !== null ? listenPort(project, port) : port);
 
   const result = await waitForHealthy({
     slug: project.slug,
     runtimeType: project.runtime_type,
     port: probePort ? listenOn : 0,
-    contract: { ...contract, healthcheck: probePort ? healthcheck : { ...healthcheck, port: undefined } },
+    contract: { ...contract, healthcheck: probePort && !live ? healthcheck : { ...healthcheck, port: undefined } },
     onLog: () => undefined,
   });
   emit(result.healthy ? `  ${candidate.name} è pronto` : `  ${candidate.name} non ha passato l'health check: ${result.reason ?? "nessuna risposta"}`);

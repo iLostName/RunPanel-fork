@@ -33,6 +33,8 @@ export function buildStartOpts(ctx: {
   cwd: string;
   port: number;
   loopbackPort?: number;
+  /** Deployed without downtime: where the container is published, see `StartOpts.livePort`. */
+  livePort?: number;
   deploymentId?: string;
   onLog?: (line: string) => void;
 }): StartOpts {
@@ -93,6 +95,7 @@ export function buildStartOpts(ctx: {
     env,
     port: ctx.port,
     loopbackPort: ctx.loopbackPort,
+    livePort: ctx.livePort,
     deploymentId: ctx.deploymentId,
     onLog: ctx.onLog,
     restartPolicy: contract.runtime.restartPolicy,

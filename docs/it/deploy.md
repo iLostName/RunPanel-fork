@@ -72,6 +72,7 @@ Quello che a RunPanel serve sapere per distribuire un progetto. I campi sono neu
 | `commands.release` | container usa-e-getta prima dell'avvio | comando nella cartella del repository |
 | `healthcheck` | sondato da RunPanel dopo l'avvio | identico |
 | `rollback.enabled` / `rollback.native` | `enabled` (acceso di serie) rimette online l'immagine di prima | servono tutti e due: `native` (spento di serie, solo dal pannello) accende le cartelle per versione |
+| `zeroDowntime.enabled` / `drainSec` | spento di serie, solo dal pannello: la nuova versione parte accanto alla vecchia e nginx passa a lei quando risponde; la vecchia si ferma dopo `drainSec` (15 s, al massimo 300). Vedi [Deploy senza interruzioni](#deploy-senza-interruzioni) | non applicabile |
 | `runtime.restartPolicy` | `--restart` | `autorestart` di PM2 |
 | `runtime.memory` / `cpus` / `shmSize` | limiti del container | `max_memory_restart` dove applicabile |
 | `docker.network` / `hostname` / `capAdd` / `extraHosts` | flag di `docker run` | non applicabile |
@@ -95,7 +96,7 @@ Un repository può dichiarare come vuole essere distribuito:
 
 Dove entrambi indicano un valore vince il pannello. Un file non valido viene ignorato per intero.
 
-Alcuni campi sono **solo del pannello** e vengono scartati se arrivano dal repository, con una riga nel log del deploy: `docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts`, `docker.context`, `docker.dockerfile`, `docker.target`, `envFile.path`, `healthcheck.path`, `healthcheck.port` e `rollback.native`. Decidono cosa il progetto raggiunge fuori dal proprio container, dove finiscono i segreti decifrati, cosa sonda il pannello e da quale cartella del server gira un'app nativa: un repository non deve poterli scegliere da sé. Per lo stesso motivo i [comandi una tantum](automation.md#comandi-una-tantum) stanno fuori dal contratto.
+Alcuni campi sono **solo del pannello** e vengono scartati se arrivano dal repository, con una riga nel log del deploy: `docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts`, `docker.context`, `docker.dockerfile`, `docker.target`, `envFile.path`, `healthcheck.path`, `healthcheck.port`, `rollback.native` e `zeroDowntime`. Decidono cosa il progetto raggiunge fuori dal proprio container, dove finiscono i segreti decifrati, cosa sonda il pannello, da quale cartella del server gira un'app nativa e come l'app è pubblicata sul server: un repository non deve poterli scegliere da sé. Per lo stesso motivo i [comandi una tantum](automation.md#comandi-una-tantum) stanno fuori dal contratto.
 
 ## Variabili d'ambiente
 
@@ -129,7 +130,7 @@ Via API: `GET /api/projects/<id>/logs/app` (le ultime righe, con `lines`, `q` e 
 3. **Contratto**: preset, `runpanel.json`, impostazioni del pannello.
 4. **Build**: install e build secondo il runtime, con l'output in diretta. Un progetto nativo con le cartelle per versione accese costruisce nella cartella della nuova versione, mentre la vecchia resta online.
 5. **Release command**: eseguito una volta, al massimo 10 minuti. Se fallisce la nuova versione non parte e la vecchia resta su: è il posto per le migrazioni.
-6. **Avvio**: la versione vecchia si ferma solo adesso (sui runtime nativi Windows, prima del build), poi PM2 o Docker avviano la nuova con policy e limiti del contratto.
+6. **Avvio**: la versione vecchia si ferma solo adesso (sui runtime nativi Windows, prima del build), poi PM2 o Docker avviano la nuova con policy e limiti del contratto. Con il [deploy senza interruzioni](#deploy-senza-interruzioni) non si ferma niente: la nuova versione parte accanto alla vecchia.
 7. **Health check**: RunPanel sonda l'app ogni 2 secondi, dopo 3 secondi di attesa e per al massimo 30 (`startPeriodSec`, `timeoutSec`). Passa qualsiasi risposta HTTP, a meno che il contratto indichi `expectStatus`; un container senza porta deve solo restare acceso.
 
 Se l'health check fallisce, il deploy è segnato come fallito con le ultime 40 righe del processo nel log. Con **Se non risponde, rimetti online la versione precedente** acceso (**Impostazioni › Build e avvio**) torna online la versione di prima, dove si può: vedi sotto. Altrimenti il progetto va in errore, e per tornare indietro c'è [Tornare a un commit](automation.md#tornare-a-un-commit). Un release command fallito non tocca la versione che gira: si ferma prima.
@@ -152,6 +153,33 @@ Come funziona per i nativi:
 - **Spento di nuovo**: il deploy compila nella cartella del progetto come prima, senza niente da rimettere a posto: i dati non l'hanno mai lasciata. I file nuovi dell'ultima versione passano alla cartella del progetto, e le cartelle delle versioni vengono cancellate dopo il primo deploy riuscito. È anche la strada per un progetto che non si costruisce bene in una cartella separata.
 
 Limiti: un file di build fuori dalle cartelle note che la cartella del progetto ha già — un `public/bundle.js` ignorato da git e lasciato da un deploy sul posto — è in comune tra le versioni: la build nuova lo riscrive lì, e il ritorno indietro non lo rimette com'era. Basta cancellarlo una volta dalla cartella del progetto: dal deploy dopo, ogni versione ha il suo. Un'app che cancella e ricrea una cartella in comune ne crea una sua dentro la versione, che passa alla cartella del progetto al deploy successivo. La cartella del progetto spostata su un altro disco funziona, ma le versioni restano nella cartella dati del pannello.
+
+### Deploy senza interruzioni
+
+Un progetto Docker servito dall'nginx del pannello si può distribuire senza andare offline: **Impostazioni › Build e avvio › Deploy senza interruzioni** (segnato **Nuovo**), spento di serie e da accendere progetto per progetto. Vale dal deploy successivo.
+
+**Dove funziona.** Runtime Docker, una porta, il controllo di salute acceso (senza una porta sua diversa da quella dell'app), rete **project** o **bridge**, almeno un indirizzo servito da nginx ([Domini](domains.md)), nginx pronto sul server, nessun limite per IP sulla porta e niente **una sola copia** in Risorse. Altrove l'interruttore non compare e il pannello dice perché. Un progetto che smette di rientrarci dopo averlo acceso — indirizzo tolto, nginx fermo, controllo di salute spento — fa un deploy normale, con il motivo nel log.
+
+**Cosa fa un deploy.**
+
+1. Build, release command e i comandi una tantum "prima dell'avvio" girano mentre la vecchia versione continua a servire. Il release command quindi gira con la versione precedente **ancora online**: una migrazione deve andare bene anche per lei (una colonna si aggiunge adesso, si toglie o si rinomina in un deploy successivo).
+2. Il nuovo container parte come `runpanel-<slug>_next`, pubblicato solo su `127.0.0.1`, su una porta che il pannello sceglie a ogni deploy fra **21000 e 21999** — una che nessun progetto, database o il pannello occupa e su cui niente ascolta sul server.
+3. Il controllo di salute interroga il nuovo container su quella porta. I comandi una tantum "a deploy riuscito" girano quando risponde, prima che nginx passi a lui.
+4. Il passaggio: i blocchi nginx del progetto vengono riscritti cambiando solo la porta di `proxy_pass`, verificati con `nginx -t` e ricaricati — con le unit systemd, sudo o direttamente, come ogni modifica dei [Domini](domains.md#deploy-senza-interruzioni). Nello stesso passo il deploy viene registrato come riuscito.
+5. Il nuovo container prende il nome `runpanel-<slug>`, quello che usano log, terminale, file, attività pianificate e riavvii; il vecchio diventa `runpanel-<slug>_old`, resta acceso per l'**attesa** (15 secondi di serie, da 0 a 300 in **Avanzate**) per finire le richieste che sta servendo, poi viene fermato con 10 secondi di margine e rimosso. Le connessioni ancora aperte a quel punto, come un WebSocket, si chiudono e il browser si ricollega alla nuova versione. Finché l'attesa non finisce il progetto resta occupato: un riavvio o un altro deploy aspettano.
+
+**Quando qualcosa va storto** la versione online non viene mai toccata:
+
+- la nuova versione non risponde mai: viene rimossa e il deploy risulta fallito con "la versione precedente è rimasta online" — non c'è niente da rimettere online, quindi il ritorno automatico non parte;
+- `nginx -t` rifiuta il passaggio, o il ricaricamento non riesce: restano la configurazione e l'upstream di prima, il nuovo container viene rimosso;
+- il progetto viene fermato durante il deploy: il nuovo container viene rimosso e l'app si ferma, come per ogni deploy;
+- il pannello si riavvia a metà: all'avvio, prima di riapplicare nginx, ogni progetto torna ad avere un solo container sotto `runpanel-<slug>` — quello dell'ultimo deploy riuscito, quindi un deploy interrotto prima del passaggio tiene la versione vecchia e uno interrotto dopo tiene la nuova — e nginx viene puntato sulla sua porta.
+
+**La porta.** La porta del progetto resta quella dell'app: quella su cui ascolta dentro il suo container (`PORT`), quella che il pannello mostra e quella che gli altri container della rete del progetto usano con il suo nome. Sul server non è più aperta: il container è pubblicato sulla sua porta in loopback e si entra dall'indirizzo, quindi nel firewall servono solo 80 e 443. nginx, il controllo di salute, quello di uptime e quello di prontezza all'avvio usano la porta in loopback; con la modalità esperto accesa, le impostazioni la mostrano. Un processo nativo sul server che raggiungeva l'app su `localhost:<porta>` deve usare il suo indirizzo.
+
+**Re-build da zero** va allo stesso modo, senza fermare l'app. I **riavvii** — a mano, pianificati, dopo un crash, dopo una modifica dei bind — ricreano il container sulla stessa porta in loopback, con una breve interruzione: senza interruzioni sono solo i deploy. Limitare la porta con regole per IP riporta il progetto alla pubblicazione normale. Spento, il deploy successivo è normale: l'app torna pubblicata sulla sua porta e nginx torna lì.
+
+**Non coperto**: i progetti senza indirizzo, raggiunti direttamente sulla loro porta; tutto quello che ha bisogno di una porta fissa sul server (la rete host); un'app che tiene un file o un volume tutto per sé — un database SQLite con un lock esclusivo, un file di lock — che impedisce alla nuova versione di partire finché la vecchia è accesa (il deploy fallisce senza toccare la versione online, ma conviene lasciarlo spento). Per qualche secondo girano due copie dell'app sugli stessi volumi e bind: devono poterci scrivere insieme.
 
 Fermare un progetto durante un deploy annulla il deploy: il comando in corso viene interrotto, il deploy finisce come fallito, l'app resta ferma e anche un deploy in coda viene scartato. Restart, spostamento del checkout, applicazione dei bind e ripristino di un volume non si sovrappongono: una richiesta di deploy che arriva in quel momento parte appena finiscono.
 

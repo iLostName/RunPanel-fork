@@ -9,6 +9,7 @@ import { labelArgs, networkName } from "./docker/labels";
 import { ensureProjectNetwork } from "./docker-network";
 import { runCommand } from "./builders/run-command";
 import { processManager } from "./process-manager";
+import type { ProcessInfo } from "./process-drivers/types";
 
 /**
  * The two deploy steps that have to behave the same on both runtimes but reach
@@ -168,6 +169,18 @@ interface HealthOptions {
   contract: DeployContract;
   onLog: (line: string) => void;
   signal?: AbortSignal;
+  /**
+   * Whether the process is up. The project's own by default; a deploy
+   * without downtime asks about the new container, which is not yet the one
+   * under the project's name (lib/zero-downtime.ts).
+   */
+  status?: () => Promise<ProcessInfo>;
+  /**
+   * The port the messages name, when the one probed is not the one the
+   * operator knows: the new container's loopback port means nothing to them,
+   * the app's port does — and the deploy explanation reads it back.
+   */
+  shownPort?: number;
 }
 
 export interface HealthResult {
@@ -204,7 +217,7 @@ export async function waitForHealthy(opts: HealthOptions): Promise<HealthResult>
     if (opts.signal?.aborted) return { healthy: false, reason: "interrotto" };
 
     attempt++;
-    const info = await processManager.status(opts.slug, opts.runtimeType);
+    const info = opts.status ? await opts.status() : await processManager.status(opts.slug, opts.runtimeType);
 
     if (!info.running) {
       lastReason = "the process is not running";
@@ -219,7 +232,7 @@ export async function waitForHealthy(opts: HealthOptions): Promise<HealthResult>
       return { healthy: true };
     }
 
-    const probe = await probeHttp(port, healthcheck.path, healthcheck.expectStatus);
+    const probe = await probeHttp(port, healthcheck.path, healthcheck.expectStatus, opts.shownPort ?? port);
     if (probe.ok) {
       opts.onLog(`Health check passed — ${healthcheck.path} responded ${probe.status}.`);
       return { healthy: true };
@@ -240,7 +253,8 @@ export async function waitForHealthy(opts: HealthOptions): Promise<HealthResult>
 async function probeHttp(
   port: number,
   path: string,
-  expectStatus: number[]
+  expectStatus: number[],
+  shownPort: number = port
 ): Promise<{ ok: true; status: number } | { ok: false; reason: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3000);
@@ -287,7 +301,7 @@ async function probeHttp(
       reason: `${path} responded ${res.status}, expected ${expectStatus.join(" or ")}`,
     };
   } catch {
-    return { ok: false, reason: `port ${port} not responding on ${path}` };
+    return { ok: false, reason: `port ${shownPort} not responding on ${path}` };
   } finally {
     clearTimeout(timer);
   }

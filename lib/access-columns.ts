@@ -83,3 +83,13 @@ export function listenPort(row: AccessRow, publicPort: number): number {
   const access = readAccess(row);
   return access.mode === "restricted" && access.port ? access.port : publicPort;
 }
+
+/**
+ * Where the panel and nginx reach a project from the host: the loopback port
+ * of its live container when it is deployed without downtime (`live_port`,
+ * lib/zero-downtime.ts), `listenPort` otherwise. The project's own port stays
+ * the one the app listens on inside its container.
+ */
+export function upstreamPort(row: AccessRow & { live_port?: number | null }, publicPort: number): number {
+  return row.live_port && row.live_port > 0 ? row.live_port : listenPort(row, publicPort);
+}

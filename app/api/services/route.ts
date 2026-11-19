@@ -153,9 +153,11 @@ export async function POST(request: NextRequest) {
     // with a free port to use instead.
     const [servicePorts, projectPorts] = await Promise.all([
       db.selectFrom("services").select(["name", "port", "access_port"]).execute(),
-      db.selectFrom("projects").select(["name", "port", "access_port"]).execute(),
+      db.selectFrom("projects").select(["name", "port", "access_port", "live_port"]).execute(),
     ]);
-    const portOwner = [...servicePorts, ...projectPorts].find((row) => row.port === port || row.access_port === port);
+    const portOwner = [...servicePorts, ...projectPorts].find(
+      (row) => row.port === port || row.access_port === port || ("live_port" in row && row.live_port === port)
+    );
     if (portOwner) {
       const free = firstFreePort(port, portsInUse([...servicePorts, ...projectPorts]));
       return NextResponse.json(

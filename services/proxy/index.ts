@@ -8,7 +8,7 @@ import { getEnv } from "@/lib/env";
 import { getSetting } from "@/lib/settings";
 import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
 import { generateId } from "@/lib/utils";
-import { listenPort, readAccess } from "@/lib/access-columns";
+import { readAccess, upstreamPort as upstreamPortOf } from "@/lib/access-columns";
 import { compileRules } from "@/lib/ip-access";
 import { checkDns, routingCouldHelp, unmatchedAddresses, type DnsCheck, type DnsState } from "@/lib/dns-check";
 import { isInstantHostname, isPanelAddress } from "@/lib/proxy-names";
@@ -47,6 +47,7 @@ import {
   renderSite,
   renewalChallenge,
   renewalConfPath,
+  retargetUpstream,
   siteFileName,
   type Challenge,
   type PanelSiteInput,
@@ -302,6 +303,7 @@ async function loadHosts() {
       "projects.access_mode",
       "projects.access_allow",
       "projects.access_port",
+      "projects.live_port",
       "domains.cloudflare",
     ])
     .orderBy("project_hosts.hostname")
@@ -322,7 +324,7 @@ type HostRow = Awaited<ReturnType<typeof loadHosts>>[number];
 export async function claimedPorts(): Promise<Map<number, string | null>> {
   const db = await getDb();
   const [projects, services] = await Promise.all([
-    db.selectFrom("projects").select(["id", "port", "access_port"]).execute(),
+    db.selectFrom("projects").select(["id", "port", "access_port", "live_port"]).execute(),
     db.selectFrom("services").select(["port", "access_port"]).execute(),
   ]);
   const claimed = new Map<number, string | null>();
@@ -340,6 +342,8 @@ export async function claimedPorts(): Promise<Map<number, string | null>> {
   for (const project of projects) {
     claim(project.port, project.id);
     claim(project.access_port, project.id);
+    // Where a project deployed without downtime is published: nginx's upstream for it.
+    claim(project.live_port, project.id);
   }
   return claimed;
 }
@@ -406,7 +410,9 @@ function siteFor(
     access.mode === "restricted" && !row.public_access && !redirect
       ? compileRules(access.allow).map((rule) => rule.text)
       : null;
-  const upstreamPort = listenPort(row, row.port);
+  // A project deployed without downtime is on the loopback port of its live
+  // container, which moves at every deploy (lib/zero-downtime.ts).
+  const upstreamPort = upstreamPortOf(row, row.port);
   const conflict = upstreamConflict(claimed, row.project_id, upstreamPort);
   if (conflict) return conflict;
 
@@ -654,6 +660,113 @@ export function applyProxy(): Promise<ApplyResult> {
 export function applyProxySoon(): void {
   void applyProxy().then((result) => {
     if (!result.ok) console.warn(`[proxy] ${result.message}`);
+  });
+}
+
+/** Every file of the live set, as it is on disk now. */
+function readSites(): Map<string, string> {
+  const files = new Map<string, string>();
+  for (const name of fs.readdirSync(SITES_DIR)) {
+    const file = path.join(SITES_DIR, name);
+    if (fs.statSync(file).isFile()) files.set(name, fs.readFileSync(file, "utf8"));
+  }
+  return files;
+}
+
+export interface UpstreamSwitch {
+  ok: boolean;
+  message: string;
+  /** nginx took the new upstream, the store could not record it, and nginx could not be put back. */
+  stuck?: boolean;
+}
+
+/**
+ * The switch of a deploy without downtime: every block of the project sent
+ * to `port`, and nothing else changed (lib/zero-downtime.ts).
+ *
+ * Not an ordinary apply. That one renders everything from the store and,
+ * when nginx refuses a block, sets the name aside and applies the rest — here
+ * that would take the app offline to put a new version online. So the set on
+ * disk is copied with only the project's `proxy_pass` lines moved, tested,
+ * and reloaded; anything nginx refuses leaves the old set and the old
+ * upstream exactly as they were, and the caller removes the new container.
+ *
+ * `commit` records the new port in the store, and runs inside the apply
+ * chain right after the reload: an apply queued meanwhile renders from the
+ * store, and must not find the old port there and send nginx back to the
+ * container that is about to go. If it fails, nginx is put back too.
+ */
+export function switchProjectUpstream(projectId: string, port: number, commit: () => Promise<void>): Promise<UpstreamSwitch> {
+  return serialised(async () => {
+    const found = await proxyProbe();
+    if (!canApply(found)) return { ok: false, message: `nginx non è pronto: ${found.detail}` };
+
+    let current: Map<string, string>;
+    const next = new Map<string, string>();
+    let moved = 0;
+    try {
+      const db = await getDb();
+      const hosts = await db.selectFrom("project_hosts").select("hostname").where("project_id", "=", projectId).execute();
+      recoverInterruptedSwap();
+      current = readSites();
+      for (const [name, content] of current) next.set(name, content);
+      for (const { hostname } of hosts) {
+        const file = siteFileName(hostname);
+        const block = current.get(file);
+        if (block === undefined) continue;
+        const retargeted = retargetUpstream(block, port);
+        // A twin that only redirects has no upstream; one already there needs nothing.
+        if (retargeted === null || retargeted === block) continue;
+        next.set(file, retargeted);
+        moved++;
+      }
+    } catch (err) {
+      return { ok: false, message: `Configurazione di nginx non leggibile: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    if (moved === 0) {
+      // Nothing on disk sends the project anywhere else — no block yet, or
+      // every block already on `port`. The store is what the next apply
+      // renders from, so recording the port is the whole switch.
+      try {
+        await commit();
+      } catch (err) {
+        return { ok: false, message: `Il nuovo stato non è stato salvato: ${err instanceof Error ? err.message : String(err)}` };
+      }
+      return { ok: true, message: "nginx non aveva blocchi da spostare per questo progetto: il prossimo aggiornamento lo manda sulla nuova versione." };
+    }
+
+    const swap = stage(next);
+    const test = await nginx(found, "test");
+    if (!test.ok) {
+      swap.rollback();
+      return { ok: false, message: `nginx ha rifiutato il passaggio alla nuova versione: ${lastLines(test.output)}` };
+    }
+    const reload = await nginx(found, "reload");
+    if (!reload.ok) {
+      swap.rollback();
+      return { ok: false, message: `nginx non si è ricaricato sulla nuova versione: ${lastLines(reload.output)}` };
+    }
+    swap.commit();
+
+    try {
+      await commit();
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      const back = stage(current);
+      const reverted = await nginx(found, "reload");
+      if (reverted.ok) {
+        back.commit();
+        return { ok: false, message: `Il nuovo stato non è stato salvato (${why}): nginx è tornato sulla versione di prima.` };
+      }
+      // Leave on disk what nginx is serving: the new upstream.
+      back.rollback();
+      return { ok: false, stuck: true, message: `Il nuovo stato non è stato salvato (${why}) e nginx non è tornato indietro.` };
+    }
+    return {
+      ok: true,
+      message: `nginx ora manda le richieste alla nuova versione (127.0.0.1:${port}): configurazione verificata con nginx -t e ricaricata.`,
+    };
   });
 }
 

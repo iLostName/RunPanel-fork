@@ -83,6 +83,26 @@ export async function run({ repoRoot }) {
     r.check("but can still turn the return off, as before", resolveContract({}, repo.contract).rollback.enabled === false && resolveContract({}, repo.contract).rollback.native === false);
     r.check("the operator's opt-in is a valid contract", deployContractSchema.safeParse({ rollback: { native: true } }).success && isContractInput({ rollback: { native: true } }));
   }
+  {
+    // Deploys without downtime: off unless the operator asks, and never from the repository.
+    const plain = parseContractJson("{}");
+    r.check("deploys without downtime are off by default, with a 15 s drain", plain.zeroDowntime.enabled === false && plain.zeroDowntime.drainSec === 15);
+    const repo = stripPanelOnlyFields({ zeroDowntime: { enabled: true, drainSec: 120 }, healthcheck: { timeoutSec: 60 } });
+    r.check(
+      "a repository can switch on neither the feature nor its drain",
+      repo.rejected.includes("zeroDowntime.enabled") && repo.rejected.includes("zeroDowntime.drainSec"),
+      repo.rejected.join()
+    );
+    const merged = resolveContract({}, repo.contract);
+    r.check("so a pushed runpanel.json leaves it off", merged.zeroDowntime.enabled === false && merged.zeroDowntime.drainSec === 15);
+    r.check("while the rest of its contract still applies", merged.healthcheck.timeoutSec === 60);
+    const panel = resolveContract({ zeroDowntime: { enabled: true, drainSec: 30 } }, repo.contract);
+    r.check("the panel's switch is what counts", panel.zeroDowntime.enabled === true && panel.zeroDowntime.drainSec === 30);
+    r.check("a drain past nginx's 300 s is refused", !deployContractSchema.safeParse({ zeroDowntime: { drainSec: 301 } }).success);
+    r.check("the operator's opt-in is a valid contract input", isContractInput({ zeroDowntime: { enabled: true } }));
+    const old = parseContract({ startCmd: "npm start", zeroDowntime: { enabled: true } });
+    r.check("a row of the old shape keeps the opt-in", old.zeroDowntime.enabled === true && old.commands.start === "npm start");
+  }
 
   const templated = parseContract({ dockerTemplate: "nginx", dockerFields: { rootDir: "/srv" }, dockerImage: "nginx:1.27" });
   r.check("a legacy template row keeps its image", templated.docker.image === "nginx:1.27", templated.docker.image);

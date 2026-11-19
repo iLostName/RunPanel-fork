@@ -94,6 +94,17 @@ nginx forwards to the port the app really listens on, over loopback, with `Host`
 
 The addresses a project answers on are also shown under its title, so it opens with one click without going through Settings; a lock marks the ones behind a password.
 
+## Deploys without downtime
+
+A Docker project with [deploys without downtime](deploy.md#deploys-without-downtime) on is not proxied to its own port: its container is published on `127.0.0.1` at a port the panel picks for each deploy (21000–21999), and the block's `proxy_pass` points there. At each deploy the new version starts on a new port and, once it answers, the panel switches nginx with a change of its own, not an ordinary apply:
+
+- it copies the blocks nginx is using and changes **only** the `proxy_pass` port of the project's names — every other line and every other name stay byte for byte, whatever else is waiting to be applied;
+- the new set goes through `nginx -t` and a reload, the same way as every apply (the systemd path units, sudo, or directly as root). If nginx refuses it, the previous set comes back, nothing is reloaded, and the old version keeps serving: no name is set aside, which an ordinary apply would do with a refused block;
+- the new port is written to the store in the same step, inside the apply queue, so an apply that comes right after renders the same upstream rather than the old one;
+- the old container stays up for the drain: nginx's old workers finish the requests they had, then it is stopped.
+
+After a restart of the panel in the middle of a deploy, the containers are settled first and nginx is applied again from the store, which by then names the port of the one container left.
+
 ## The panel itself over HTTPS
 
 The panel can open on a name of yours, with the padlock — `https://panel.example.com` instead of `http://203.0.113.7:3000` — through the same nginx and certbot. Owner only, from **Impostazioni › Pannello › Metti il pannello su HTTPS**:

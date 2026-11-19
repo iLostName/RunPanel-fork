@@ -232,6 +232,29 @@ function proxyLocation(input: SiteInput): string[] {
   ];
 }
 
+/** The one line of a project's block that names its upstream, as `proxyLocation` writes it. */
+const UPSTREAM_LINE = /^(\s*proxy_pass http:\/\/127\.0\.0\.1:)(\d{1,5})(;\s*)$/gm;
+
+/**
+ * A project's block with its upstream moved to `port`, and nothing else
+ * changed — the switch of a deploy without downtime (lib/zero-downtime.ts).
+ *
+ * Worked on the block as it is on disk rather than rendered again from the
+ * store: the switch must change the port and only the port, whatever else is
+ * waiting to be applied, so the `nginx -t` that follows judges that alone.
+ * Every port in the block moves, whichever it was: it is one app's block.
+ * Null when there is no upstream to move — a twin that only redirects.
+ */
+export function retargetUpstream(block: string, port: number): string | null {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`Porta non valida: ${port}`);
+  let found = false;
+  const moved = block.replace(UPSTREAM_LINE, (_line, head: string, _old: string, tail: string) => {
+    found = true;
+    return `${head}${port}${tail}`;
+  });
+  return found ? moved : null;
+}
+
 /** A `location /` that only sends the visitor on, with the path and query they asked for. */
 function redirectLocation(target: string): string[] {
   return ["    location / {", `        return 301 ${target}$request_uri;`, "    }"];
