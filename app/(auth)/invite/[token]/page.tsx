@@ -11,18 +11,19 @@ import { githubResultMessage } from "@/lib/github-login-messages";
 import { AuthCard } from "../../_components/AuthCard";
 
 /**
- * An address longer than the screen, as invitations to a company address
- * often are: it breaks before the @ when it has to, and inside a part only
- * when that part alone is still too long.
+ * An address longer than the line, as invitations to a company address often
+ * are: it breaks before the @, and inside a part only when that part alone is
+ * still too long. Each part is a block of its own on the line because a
+ * hyphen is a break too, and the line used to end at "@agenzia-".
  */
 function BreakableEmail({ email }: { email: string }) {
   const at = email.lastIndexOf("@");
   if (at <= 0) return <>{email}</>;
   return (
     <>
-      {email.slice(0, at)}
+      <span className="inline-block max-w-full">{email.slice(0, at)}</span>
       <wbr />
-      {email.slice(at)}
+      <span className="inline-block max-w-full">{email.slice(at)}</span>
     </>
   );
 }
