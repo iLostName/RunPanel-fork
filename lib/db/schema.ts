@@ -150,6 +150,12 @@ export interface ProjectsTable {
   access_mode: AccessMode | null;
   access_allow: string | null;
   access_port: number | null;
+  /**
+   * The loopback port the live container is published on, for a project
+   * deployed without downtime; NULL for every other one, published on `port`.
+   * Runtime state the deploys write, not a setting. See migration 052.
+   */
+  live_port: number | null;
   /** Where the Overview files this project. NULL is the root. See migration 019. */
   folder_id: string | null;
   /**
