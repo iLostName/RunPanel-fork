@@ -61,11 +61,42 @@ const suiteFiles = readdirSync(join(HERE, "suites")).filter((f) => f.endsWith(".
 const results = [];
 const skipped = [];
 
+/*
+  A promise rejected with nobody listening, or an `error` event nobody
+  handles, ends a Node process — here, the whole run, with every result
+  collected so far. Standalone suites share this process, so one stray
+  rejection from code under test cost the report of a hundred suites and
+  said only which error, not where it came from. It is recorded instead as a
+  failure of the suite that was running, with its stack, and the run goes on:
+  still red, but readable.
+*/
+let currentSuite = "(between suites)";
+const strays = [];
+const recordStray = (kind) => (reason) => {
+  const detail = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+  strays.push({ suite: currentSuite, description: `${kind} during the suite`, detail });
+  console.log(`    FAIL ${kind} in ${currentSuite}  <- ${detail.split("\n").slice(0, 6).join(" | ")}`);
+};
+process.on("unhandledRejection", recordStray("unhandled rejection"));
+process.on("uncaughtException", recordStray("uncaught exception"));
+
+function withStrays(result) {
+  const mine = strays.filter((stray) => stray.suite === currentSuite);
+  if (mine.length === 0) return result;
+  for (const stray of mine) strays.splice(strays.indexOf(stray), 1);
+  return {
+    ...result,
+    failed: result.failed + mine.length,
+    failures: [...result.failures, ...mine.map(({ description, detail }) => ({ description, detail }))],
+  };
+}
+
 for (const file of suiteFiles) {
   const suite = await import(pathToFileURL(join(HERE, "suites", file)).href);
   const { meta, run } = suite;
 
   if (requested.length > 0 && !requested.includes(meta.name)) continue;
+  currentSuite = meta.name;
 
   if (meta.needsDocker && !hasDocker) {
     skipped.push(`${meta.name} (needs docker)`);
@@ -80,7 +111,10 @@ for (const file of suiteFiles) {
   // Pure suites need no server at all.
   if (meta.standalone) {
     console.log(`▸ ${meta.name}`);
-    results.push(await run({ repoRoot: REPO_ROOT }));
+    const result = await run({ repoRoot: REPO_ROOT });
+    // A stray from this suite may surface a tick after it returned.
+    await new Promise((resolve) => setImmediate(resolve));
+    results.push(withStrays(result));
     console.log("");
     continue;
   }
@@ -110,7 +144,7 @@ for (const file of suiteFiles) {
         env: typeof meta.env === "function" ? await meta.env() : (meta.env ?? {}),
       });
       const result = await run({ base: server.base, dataDir: server.dataDir, repoRoot: REPO_ROOT });
-      results.push({ ...result, name: `${result.name} [${driver}]` });
+      results.push({ ...withStrays(result), name: `${result.name} [${driver}]` });
     } catch (err) {
       console.log(`    FAIL suite crashed: ${err instanceof Error ? err.message : err}`);
       results.push({ name: `${meta.name} [${driver}]`, passed: 0, failed: 1, failures: [{ description: "suite crashed", detail: String(err) }] });
@@ -119,6 +153,17 @@ for (const file of suiteFiles) {
     }
     console.log("");
   }
+}
+
+// Strays that surfaced after their suite had already been reported.
+await new Promise((resolve) => setImmediate(resolve));
+if (strays.length > 0) {
+  results.push({
+    name: "(stray errors)",
+    passed: 0,
+    failed: strays.length,
+    failures: strays.map(({ suite, description, detail }) => ({ description: `${description} (${suite})`, detail })),
+  });
 }
 
 // --- summary ----------------------------------------------------------------
