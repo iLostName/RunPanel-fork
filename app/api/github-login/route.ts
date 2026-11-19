@@ -89,6 +89,21 @@ export async function PUT(request: NextRequest) {
   const input = parsed.data;
   const userId = denied.session.user.id;
 
+  // Before anything is written, so a refused switch-off saves nothing else either.
+  if (input.enabled === false && !input.force) {
+    const stranded = await passwordlessGithubUsers();
+    if (stranded.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Alcuni utenti entrano solo con GitHub e non hanno una password: spegnendo, resterebbero fuori.",
+          code: "passwordless_users",
+          users: stranded,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   if (input.clientId !== undefined) {
     const suggested = callbackUrlFor((await panelBaseUrl(request))?.origin);
     if (!suggested.ok) {
@@ -123,25 +138,11 @@ export async function PUT(request: NextRequest) {
 
   if (input.enabled !== undefined) {
     const config = await readGithubLoginConfig();
-    if (input.enabled) {
-      if (!isGithubLoginReady(config)) {
-        return NextResponse.json(
-          { error: config?.secretUnreadable ? UNREADABLE_SECRET : "Prima salva Client ID e Client secret dell'app" },
-          { status: 409 }
-        );
-      }
-    } else {
-      const stranded = await passwordlessGithubUsers();
-      if (stranded.length > 0 && !input.force) {
-        return NextResponse.json(
-          {
-            error: "Alcuni utenti entrano solo con GitHub e non hanno una password: spegnendo, resterebbero fuori.",
-            code: "passwordless_users",
-            users: stranded,
-          },
-          { status: 409 }
-        );
-      }
+    if (input.enabled && !isGithubLoginReady(config)) {
+      return NextResponse.json(
+        { error: config?.secretUnreadable ? UNREADABLE_SECRET : "Prima salva Client ID e Client secret dell'app" },
+        { status: 409 }
+      );
     }
     if (config && config.enabled !== input.enabled) {
       await setGithubLoginEnabled(input.enabled);
