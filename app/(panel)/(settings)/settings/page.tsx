@@ -154,7 +154,9 @@ export default function PanelSettingsPage() {
 
   return (
     <>
-      <PageHeader title="Pannello" description="Preferenze e integrazioni, per tutti gli account" />
+      {/* Named as its tab and the phone's top bar name it: under "Generale",
+          a heading saying "Pannello" read as another page. */}
+      <PageHeader title="Generale" description="Preferenze e integrazioni del pannello, per tutti gli account" />
 
       <div className="max-w-3xl space-y-4">
         {isRemote && (

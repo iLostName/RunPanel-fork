@@ -162,7 +162,7 @@ export default function ServersPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Server"
+        title="Server collegati"
         description="Gli altri RunPanel collegati a questo: stessi account, un solo pannello."
         actions={
           <>
@@ -225,6 +225,8 @@ export default function ServersPage() {
                         <span className={cn("font-mono", versionMismatch && "text-warning")} title={versionMismatch ? `Questo pannello: ${data?.selfVersion}` : undefined}>
                           {m.version}
                           {versionMismatch ? " ≠" : ""}
+                          {/* The tooltip's comparison, written out where there are no tooltips. */}
+                          {versionMismatch && <span className="hidden pointer-coarse:inline"> {data?.selfVersion} qui</span>}
                         </span>
                       )}
                     </div>
