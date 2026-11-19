@@ -177,6 +177,9 @@ export function PreviewsSection({ project, registerPending }: { project: Project
                 label={<span className="text-sm">Scrivi sulla pull request lo stato del commit, con l&apos;indirizzo dell&apos;anteprima</span>}
                 description="Solo se il token GitHub lo consente (Commit statuses: Read and write): altrimenti si salta, e lo trovi scritto nell'elenco delle anteprime."
               />
+              {form.commitStatus && data.previews.find((p) => p.statusProblem)?.statusProblem && (
+                <p className="text-warning text-meta mt-1 leading-relaxed">{data.previews.find((p) => p.statusProblem)?.statusProblem}</p>
+              )}
             </div>
           </div>
         )}

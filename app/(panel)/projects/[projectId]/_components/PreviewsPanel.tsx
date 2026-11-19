@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button, Dropdown } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
@@ -14,6 +15,9 @@ import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Code, Hint } from "@/components/ui/Hint";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ActionSheet, type SheetAction } from "@/components/ui/ActionSheet";
+import { useIsPhone } from "@/lib/hooks/useMediaQuery";
+import { cn } from "@/lib/utils";
 import type { PreviewRow, PreviewsResponse, Project } from "./types";
 
 const STOPPED_TEXT = {
@@ -23,6 +27,45 @@ const STOPPED_TEXT = {
 } as const;
 
 type Pending = { kind: "approve" | "delete"; preview: PreviewRow } | null;
+
+/** The ⋯ of a row: a menu on a desktop, a sheet from the bottom on a phone, as everywhere else. */
+function PreviewMenu({ label, actions }: { label: string; actions: SheetAction[] }) {
+  const phone = useIsPhone();
+  const [open, setOpen] = useState(false);
+  const ordered = [...actions.filter((a) => !a.danger), ...actions.filter((a) => a.danger)];
+  const trigger = (
+    <Button size="sm" variant="ghost" isIconOnly aria-label={label} onPress={phone ? () => setOpen(true) : undefined}>
+      <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />
+    </Button>
+  );
+  if (phone) {
+    return (
+      <>
+        {trigger}
+        <ActionSheet isOpen={open} onOpenChange={setOpen} title={label} actions={ordered} />
+      </>
+    );
+  }
+  return (
+    <Dropdown>
+      {trigger}
+      <Dropdown.Popover placement="bottom end">
+        <Dropdown.Menu
+          aria-label={label}
+          disabledKeys={ordered.filter((a) => a.disabled).map((a) => a.id)}
+          onAction={(key) => ordered.find((a) => a.id === key)?.onAction()}
+        >
+          {ordered.map((action) => (
+            <Dropdown.Item key={action.id} id={action.id} textValue={action.label} className={cn(action.danger && "text-danger")}>
+              {action.icon && <Icon icon={action.icon} width={14} aria-hidden />}
+              {action.label}
+            </Dropdown.Item>
+          ))}
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
+  );
+}
 
 /**
  * The previews of production's pull requests, on production's page: number,
@@ -36,6 +79,7 @@ type Pending = { kind: "approve" | "delete"; preview: PreviewRow } | null;
 export function PreviewsPanel({ project }: { project: Project }) {
   const api = useNodeApi();
   const href = useServerHref();
+  const router = useRouter();
   const poll = usePollInterval(10000);
   const { data, refresh } = useResource<PreviewsResponse>(api(`/api/projects/${project.id}/previews`), { intervalMs: poll });
   const [pending, setPending] = useState<Pending>(null);
@@ -139,44 +183,40 @@ export function PreviewsPanel({ project }: { project: Project }) {
                   </a>
                 ) : null}
                 {canOperate && (
-                  <Dropdown>
-                    <Button size="sm" variant="ghost" isIconOnly aria-label={`Altre azioni sull'anteprima della PR #${preview.prNumber}`}>
-                      <Icon icon="solar:menu-dots-linear" width={16} aria-hidden />
-                    </Button>
-                    <Dropdown.Popover placement="bottom end">
-                      <Dropdown.Menu
-                        aria-label={`Azioni sull'anteprima della PR #${preview.prNumber}`}
-                        disabledKeys={[
-                          ...(preview.needsApproval ? ["redeploy"] : []),
-                          ...(preview.project && preview.state !== "stopped" ? [] : ["stop"]),
-                          ...(preview.project ? [] : ["page"]),
-                          ...(canManage ? [] : ["delete"]),
-                        ]}
-                        onAction={(key) => {
-                          if (key === "redeploy") void act(preview, { action: "redeploy" }, `Anteprima della PR #${preview.prNumber} ridistribuita`);
-                          if (key === "stop") void act(preview, { action: "stop" }, `Anteprima della PR #${preview.prNumber} fermata`);
-                          if (key === "delete") setPending({ kind: "delete", preview });
-                        }}
-                      >
-                        <Dropdown.Item id="redeploy" textValue="Ridistribuisci">
-                          <Icon icon="solar:refresh-linear" width={14} aria-hidden />
-                          Ridistribuisci
-                        </Dropdown.Item>
-                        <Dropdown.Item id="stop" textValue="Ferma">
-                          <Icon icon="solar:stop-linear" width={14} aria-hidden />
-                          Ferma
-                        </Dropdown.Item>
-                        <Dropdown.Item id="page" textValue="Pagina dell'anteprima" href={preview.project ? href(`/projects/${preview.project.id}`) : undefined}>
-                          <Icon icon="solar:widget-2-linear" width={14} aria-hidden />
-                          Pagina dell&apos;anteprima
-                        </Dropdown.Item>
-                        <Dropdown.Item id="delete" textValue="Elimina" className="text-danger">
-                          <Icon icon="solar:trash-bin-minimalistic-linear" width={14} aria-hidden />
-                          Elimina…
-                        </Dropdown.Item>
-                      </Dropdown.Menu>
-                    </Dropdown.Popover>
-                  </Dropdown>
+                  <PreviewMenu
+                    label={`Altre azioni sull'anteprima della PR #${preview.prNumber}`}
+                    actions={[
+                      {
+                        id: "redeploy",
+                        label: "Ridistribuisci",
+                        icon: "solar:refresh-linear",
+                        disabled: preview.needsApproval,
+                        onAction: () => void act(preview, { action: "redeploy" }, `Anteprima della PR #${preview.prNumber} ridistribuita`),
+                      },
+                      {
+                        id: "stop",
+                        label: "Ferma",
+                        icon: "solar:stop-linear",
+                        disabled: !preview.project || preview.state === "stopped",
+                        onAction: () => void act(preview, { action: "stop" }, `Anteprima della PR #${preview.prNumber} fermata`),
+                      },
+                      {
+                        id: "page",
+                        label: "Pagina dell'anteprima",
+                        icon: "solar:widget-2-linear",
+                        disabled: !preview.project,
+                        onAction: () => preview.project && router.push(href(`/projects/${preview.project.id}`)),
+                      },
+                      {
+                        id: "delete",
+                        label: "Elimina…",
+                        icon: "solar:trash-bin-minimalistic-linear",
+                        danger: true,
+                        disabled: !canManage,
+                        onAction: () => setPending({ kind: "delete", preview }),
+                      },
+                    ]}
+                  />
                 )}
               </div>
             </li>
