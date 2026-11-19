@@ -75,11 +75,16 @@ const DeploymentCard = memo(function DeploymentCard({
   return (
     <Panel padding="compact">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
+        {/* On a phone the state goes above the message instead of beside it,
+            where it took a third of the width and cut the message to a few
+            words; the message gets two lines. */}
+        <div className="flex min-w-0 items-start gap-3 max-md:flex-col max-md:gap-1.5">
           <StatusBadge status={deployment.status} className="mt-0.5 shrink-0" />
           <div className="min-w-0">
             <p className="text-foreground flex flex-wrap items-center gap-2 text-sm">
-              <span className="truncate">{deployment.commit_message || TRIGGER_LABEL[deployment.trigger_type] || "Deploy"}</span>
+              <span className="truncate max-md:line-clamp-2 max-md:whitespace-normal">
+                {deployment.commit_message || TRIGGER_LABEL[deployment.trigger_type] || "Deploy"}
+              </span>
               {live && <Badge tone="success">versione attuale</Badge>}
             </p>
             <p className="text-muted mt-0.5 text-xs">

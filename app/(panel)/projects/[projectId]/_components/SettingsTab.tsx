@@ -126,7 +126,7 @@ export function SettingsTab({
   const show = (id: SettingsSectionId) => ({ hidden: section !== id });
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
       {/* A select on phones, a sticky list beside the content from lg up. */}
       <div className="lg:hidden">
         <SelectField

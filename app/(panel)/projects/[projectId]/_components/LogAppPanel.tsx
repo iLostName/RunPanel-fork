@@ -117,11 +117,13 @@ export function LogAppPanel({
             { value: "stderr", label: expert ? "stderr" : "Errori" },
           ]}
         />
+        {/* Glyphs only on a phone, their names kept for screen readers: with
+            the words the toolbar took three lines above the log it is for. */}
         {mode === "live" && (
           <>
             <Button size="sm" variant="secondary" onPress={() => setFrozen(frozen ? null : lines)}>
               <Icon icon={frozen ? "solar:play-linear" : "solar:pause-linear"} width={15} aria-hidden />
-              {frozen ? "Riprendi" : "Pausa"}
+              <span className="max-md:sr-only">{frozen ? "Riprendi" : "Pausa"}</span>
             </Button>
             <Button
               size="sm"
@@ -130,7 +132,7 @@ export function LogAppPanel({
               onPress={() => setClearedAfter(base.at(-1)?.id ?? clearedAfter)}
             >
               <Icon icon="solar:eraser-linear" width={15} aria-hidden />
-              Pulisci
+              <span className="max-md:sr-only">Pulisci</span>
             </Button>
           </>
         )}
@@ -141,7 +143,7 @@ export function LogAppPanel({
             aria-label="Scarica tutto il log salvato dell'app"
           >
             <Icon icon="solar:download-minimalistic-linear" width={15} aria-hidden />
-            Scarica
+            <span className="max-md:sr-only">Scarica</span>
           </LinkButton>
         )}
       </div>

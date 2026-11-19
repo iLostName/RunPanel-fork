@@ -13,6 +13,7 @@ import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { Section } from "@/components/ui/Section";
 import { Segmented } from "@/components/ui/Segmented";
+import { PhoneMenu } from "@/components/ui/PhoneMenu";
 import { StickySaveBar } from "@/components/ui/StickySaveBar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LoadError } from "@/components/ui/LoadError";
@@ -237,6 +238,10 @@ export function EnvTab({
   const hiddenProblems = rows.filter((row) => problems.has(row.id)).length - shownRows.filter((row) => problems.has(row.id)).length;
   const allRevealed = rows.length > 0 && rows.every((row) => revealed.has(row.id));
 
+  function toggleAllRevealed() {
+    setRevealed(allRevealed ? new Set() : new Set(rows.map((row) => row.id)));
+  }
+
   function addRow() {
     const row = newRow({ key: "", value: "" });
     setRows((current) => [...current, row]);
@@ -448,13 +453,15 @@ export function EnvTab({
                   e.target.value = "";
                 }}
               />
+              {/* On a phone these two are in the ⋯ at the end of the row: with
+                  them the four buttons took two lines above the variables. */}
               {view === "table" && rows.length > 0 && (
-                <Button variant="ghost" size="sm" onPress={() => setRevealed(allRevealed ? new Set() : new Set(rows.map((row) => row.id)))}>
+                <Button variant="ghost" size="sm" className="max-md:hidden" onPress={toggleAllRevealed}>
                   <Icon icon={allRevealed ? "solar:eye-closed-linear" : "solar:eye-linear"} width={16} aria-hidden />
                   {allRevealed ? "Nascondi i valori" : "Mostra i valori"}
                 </Button>
               )}
-              <Button variant="ghost" size="sm" onPress={() => fileInputRef.current?.click()}>
+              <Button variant="ghost" size="sm" className="max-md:hidden" onPress={() => fileInputRef.current?.click()}>
                 <Icon icon="solar:import-linear" width={16} aria-hidden />
                 Importa file
               </Button>
@@ -468,6 +475,23 @@ export function EnvTab({
                   Aggiungi
                 </Button>
               )}
+              <PhoneMenu
+                label="Altre azioni sulle variabili"
+                className="size-9 min-w-9"
+                actions={[
+                  ...(view === "table" && rows.length > 0
+                    ? [
+                        {
+                          id: "reveal",
+                          label: allRevealed ? "Nascondi i valori" : "Mostra i valori",
+                          icon: allRevealed ? "solar:eye-closed-linear" : "solar:eye-linear",
+                          onAction: toggleAllRevealed,
+                        },
+                      ]
+                    : []),
+                  { id: "import", label: "Importa un file .env", icon: "solar:import-linear", onAction: () => fileInputRef.current?.click() },
+                ]}
+              />
             </div>
             )}
           </div>
