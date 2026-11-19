@@ -96,6 +96,21 @@ export async function run({ repoRoot }) {
   }
   r.check("no access satisfies nothing", !satisfies({ level: null, terminal: false }, PROJECT_ACTIONS.view));
 
+  // --- environments: production's grants decide ---------------------------------
+  {
+    // `lib/principal.ts` hands an environment its production's id and folder.
+    const staging = { id: "p1-staging", folderId: "f1", parentId: "p1" };
+    r.check("a grant on production reaches its staging", projectAccess(user([g("project", "p1", "operate")]), staging).level === "operate");
+    r.check("and so does a grant on production's folder", projectAccess(user([g("folder", "f1", "read")]), staging).level === "read");
+    r.check(
+      "a grant left on the environment itself decides nothing",
+      projectAccess(user([g("project", "p1-staging", "manage")]), staging).level === null
+    );
+    r.check("without access to production there is none to its environments", projectAccess(user([g("project", "p2", "manage")]), staging).level === null);
+    const terminal = projectAccess(user([g("project", "p1", "operate", true)]), staging);
+    r.check("the terminal flag comes along", terminal.terminal === true && satisfies(terminal, PROJECT_ACTIONS.terminal));
+  }
+
   // --- services --------------------------------------------------------------
   {
     const u = user([g("folder", "f1", "read")]);
