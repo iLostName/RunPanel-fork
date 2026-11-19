@@ -15,7 +15,10 @@ with live build output, databases on demand and backups that actually restore.
 
 <br>
 
-<img src=".github/assets/overview-en.png" alt="RunPanel overview: warnings, host resources and projects grouped in folders" width="100%">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/overview-dark.webp">
+  <img src=".github/assets/overview-light.webp" alt="RunPanel overview: health at a glance, host resources, recent activity and projects grouped in folders" width="100%">
+</picture>
 
 </div>
 
@@ -165,37 +168,64 @@ Press **Deploy** and the build log scrolls in the browser as it happens: install
 ## 💻 The panel
 
 > [!NOTE]
-> The screenshots on this page are translated to English; the panel itself ships with an Italian interface.
+> The panel ships with an Italian interface, and the screenshots show it as it is: a made-up studio's projects on a demo server, in the light or dark palette to match your GitHub theme. `node scripts/readme-screenshots.mjs` takes them again from a fresh build.
 
 <table>
 <tr>
 <td width="50%" valign="top">
-<img src=".github/assets/projects-en.png" alt="Project list">
-<p align="center"><b>Projects</b>: status, runtime, port and last deploy</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/projects-dark.webp">
+  <img src=".github/assets/projects-light.webp" alt="Project list, grouped in folders">
+</picture>
+<p align="center"><b>Projects</b>: folders, status, runtime, port and last deploy</p>
 </td>
 <td width="50%" valign="top">
-<img src=".github/assets/project-detail-en.png" alt="Project detail">
-<p align="center"><b>Project detail</b>: resources, logs, deploys, variables, files</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/project-dark.webp">
+  <img src=".github/assets/project-light.webp" alt="Project detail">
+</picture>
+<p align="center"><b>Project detail</b>: resources, uptime, logs, deploys, variables, files</p>
 </td>
 </tr>
 <tr>
 <td valign="top">
-<img src=".github/assets/services-en.png" alt="Managed services">
-<p align="center"><b>Services</b>: managed databases and project links</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/variables-dark.webp">
+  <img src=".github/assets/variables-light.webp" alt="A project's environment variables">
+</picture>
+<p align="center"><b>Variables</b>: encrypted, hidden until shown, saved and redeployed in one go</p>
 </td>
 <td valign="top">
-<img src=".github/assets/backups-en.png" alt="Backups">
-<p align="center"><b>Backups</b>: schedules, destinations, history</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/backups-dark.webp">
+  <img src=".github/assets/backups-light.webp" alt="Backups">
+</picture>
+<p align="center"><b>Backups</b>: schedules, several destinations, history</p>
 </td>
 </tr>
 <tr>
 <td valign="top">
-<img src=".github/assets/monitor-en.png" alt="Monitor">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/monitor-dark.webp">
+  <img src=".github/assets/monitor-light.webp" alt="Monitor">
+</picture>
 <p align="center"><b>Monitor</b>: CPU, memory and uptime of every process</p>
 </td>
 <td valign="top">
-<img src=".github/assets/user-detail-en.png" alt="A user's permissions">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/user-detail-dark.webp">
+  <img src=".github/assets/user-detail-light.webp" alt="A user's permissions">
+</picture>
 <p align="center"><b>Access</b>: levels per folder, project and service</p>
+</td>
+</tr>
+<tr>
+<td colspan="2" valign="top">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/phone-dark.webp">
+  <img src=".github/assets/phone-light.webp" alt="RunPanel on a phone: the overview, the projects and a project">
+</picture>
+<p align="center"><b>On a phone</b>: a tab bar under the thumb, "Altro" for the rest, dialogs as bottom sheets; installable as an app</p>
 </td>
 </tr>
 </table>
