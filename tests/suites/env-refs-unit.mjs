@@ -1,6 +1,7 @@
 import { createReporter } from "../harness.mjs";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 
 /**
  * Shared variables and references, as data: the syntax, the precedence and the
@@ -140,6 +141,28 @@ export async function run({ repoRoot }) {
   const closure = sharedClosure(["${{ shared.smtp.URL }}"], (g, k) => groups[g]?.[k] ?? null);
   r.check("the closure follows nested references", closure.has("smtp.URL") && closure.has("smtp.HOST") && closure.has("smtp.PORT"), JSON.stringify([...closure]));
   r.check("and terminates on a cycle", sharedClosure(["${{ shared.loop.A }}"], (g, k) => groups[g]?.[k] ?? null).size === 3);
+
+  // --- the wiring -----------------------------------------------------------
+  // Read from the source: proving it for real takes a deploy, a restart and a
+  // task. What this catches is the next path that starts an app from the rows
+  // again, and hands it a group-less environment with references unexpanded.
+  const source = (...parts) => readFileSync(join(repoRoot, ...parts), "utf8");
+  const pipeline = source("services", "deploy-pipeline.ts");
+  const restart = source("services", "project-restart.ts");
+  const tasks = source("services", "tasks", "target.ts");
+  for (const [name, text] of [["the deploy", pipeline], ["the restart", restart], ["a scheduled task", tasks]]) {
+    r.check(`${name} reads the variables through loadProjectEnv`, text.includes("loadProjectEnv(") && !text.includes('selectFrom("env_vars")'));
+  }
+  r.check(
+    "the deploy resolves them before its first command",
+    pipeline.indexOf("loadProjectEnv(") > 0 && pipeline.indexOf("loadProjectEnv(") < pipeline.indexOf('runPhase("pre-deploy"')
+  );
+  r.check(
+    "the restart resolves them before it closes the gate or starts anything",
+    restart.indexOf("loadProjectEnv(") > 0 &&
+      restart.indexOf("loadProjectEnv(") < restart.indexOf("closeGate(") &&
+      restart.indexOf("loadProjectEnv(") < restart.indexOf("processManager.start(")
+  );
 
   return r.result();
 }
