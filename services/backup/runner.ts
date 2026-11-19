@@ -41,6 +41,7 @@ import {
   exportProjectConfig,
   exportProjectRepo,
   exportProjectVolume,
+  projectRepoDir,
   projectVolumes,
   shouldIncludeRepo,
 } from "./project-export";
@@ -488,6 +489,22 @@ function retentionLine(pruned: { copies: number; runs: number }): string {
 
 // --- Turning selectors into work --------------------------------------------
 
+/**
+ * Whether a project has code on disk worth copying.
+ *
+ * A project that has never received any — created, then never deployed or
+ * uploaded to — has no folder yet, and asking for its repository made every
+ * backup that included it "Parziale" for a file that cannot exist. Skipped
+ * only in that case: once a deploy has happened, a missing folder is a real
+ * problem and still fails its item, so the run says so.
+ */
+async function hasCodeToCopy(project: ProjectsTable): Promise<boolean> {
+  if (fs.existsSync(projectRepoDir(project.slug))) return true;
+  const db = await getDb();
+  const deployed = await db.selectFrom("deployments").select("id").where("project_id", "=", project.id).limit(1).executeTakeFirst();
+  return deployed !== undefined;
+}
+
 async function resolveJobs(
   targets: BackupTarget[],
   includeSecret: boolean,
@@ -538,7 +555,7 @@ async function resolveJobs(
     if (include.includes("config")) {
       push({ kind: "project-config", project }, `config:${project.id}`);
     }
-    if (shouldIncludeRepo(project, include.includes("repo"))) {
+    if (shouldIncludeRepo(project, include.includes("repo")) && (await hasCodeToCopy(project))) {
       push({ kind: "project-repo", project }, `repo:${project.id}`);
     }
     if (include.includes("volumes")) {
