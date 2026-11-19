@@ -3,6 +3,7 @@ import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import { updateEnvGroupSchema } from "@/lib/validation";
+import { findCycle } from "@/lib/env-refs";
 import { groupUsage, loadGroups } from "@/services/env-groups";
 import { hostGuardForGroup, readersText, usageFor } from "@/services/env-group-guard";
 
@@ -80,9 +81,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           { status: 409 }
         );
       }
-      // References waiting for the new name start reading this group.
+      // References waiting for the new name start reading this group: the
+      // projects they are in, and any loop they close, are this change's.
       const noHost = await hostGuardForGroup(denied.principal, await groupUsage({ id: "", name }));
       if (noHost) return noHost;
+      const renamed = (await loadGroups()).map((g) => (g.id === groupId ? { ...g, name } : g));
+      const cycle = findCycle(renamed);
+      if (cycle) {
+        return NextResponse.json(
+          { error: `Con il nome «${name}» alcuni riferimenti farebbero un giro chiuso: ${cycle.join(" → ")}.` },
+          { status: 409 }
+        );
+      }
     }
 
     const updated = {
