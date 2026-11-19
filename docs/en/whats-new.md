@@ -45,6 +45,12 @@ Three steps, and the project is created only at the end: source (GitHub, or a ZI
 - **Scheduled tasks** (Impostazioni › Automazioni): a command with a schedule, run in the project ("every night at 3, clear the cache"), with history, output and outcome of every run, "Esegui ora" (run now), a time limit and an alert when it fails. It never runs twice at once nor during a deploy.
 - **Log**: search, errors only, pause, download. The panel keeps each app's log on disk, rotated, and it can be searched after a restart too.
 
+## Staging and pull request previews
+
+- **Staging** (**Altro › Crea staging**): a copy of production on another branch (`staging` or `develop`), created in one step with its own port, address and resources. It inherits production's variables under its own — never those reading production's databases — and follows production's permissions. The project page shows the environments as a switch at the top.
+- **Promuovi in produzione**: deploys on production exactly the commit staging runs, after a confirmation with the commit, its author and date, and the variables the two do not share; through production's own deploy, rollback and zero-downtime switch.
+- **Anteprime delle pull request** (**Impostazioni › Anteprime**, off by default): a preview per pull request opened against production's branch, at `pr-<n>.<domain>` or an instant address, removed when the pull request closes; at most 3 at once and stopped after 7 idle days by default. Pull requests from forks wait for an approval of each commit. Production cannot be deleted while it has environments, unless they go with it. See [Staging and pull request previews](environments.md).
+
 ## Shared variables
 
 - **Variabili condivise** (in the menu, next to Database): named groups of encrypted variables — SMTP credentials, an API key — that several projects receive and that are changed in one place. A group's page lists the projects that use it and, after a change, offers **Ridistribuisci i progetti interessati** (redeploy the affected projects).
