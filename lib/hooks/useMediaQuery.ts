@@ -29,6 +29,12 @@ export function useMediaQuery(query: string): boolean {
 /** Below Tailwind's `md`, where the panel switches to its phone layout. */
 export const PHONE_QUERY = "(width < 48rem)";
 
+/**
+ * A screen pressed with a finger, whatever its width: a tablet has no hover
+ * either. What only shows on hover has to open on a tap there.
+ */
+export const TOUCH_QUERY = "(hover: none) and (pointer: coarse)";
+
 export function useIsPhone(): boolean {
   return useMediaQuery(PHONE_QUERY);
 }

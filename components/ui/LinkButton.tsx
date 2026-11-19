@@ -58,7 +58,8 @@ export function LinkButton({
   ...rest
 }: Props) {
   const classes = cn(
-    "inline-flex items-center gap-1.5 rounded-[var(--radius)] border transition-colors",
+    // 44px to a finger like HeroUI's buttons (globals.css, `.touch-target`).
+    "touch-target inline-flex items-center gap-1.5 rounded-[var(--radius)] border transition-colors",
     size === "sm" ? "px-3 py-1.5 text-sm" : "px-4 py-2 text-sm",
     VARIANTS[variant],
     className

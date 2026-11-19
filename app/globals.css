@@ -567,7 +567,8 @@
    * Touch screens only — a mouse is precise and the desktop stays as it is.
    */
   @media (pointer: coarse) {
-    .button::after {
+    .button::after,
+    .touch-target::after {
       content: "";
       position: absolute;
       top: 50%;
@@ -575,6 +576,13 @@
       width: max(100%, 44px);
       height: max(100%, 44px);
       transform: translate(-50%, -50%);
+    }
+
+    /* The same for the plain controls that are not HeroUI buttons: a link
+       drawn as a button, the copy and reveal glyphs of a field. HeroUI's
+       `.button` is positioned already; these get it here, on touch only. */
+    .touch-target {
+      position: relative;
     }
   }
 
@@ -720,6 +728,40 @@
     .tab-strip[data-more-start][data-more-end] {
       mask-image: linear-gradient(to right, transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
     }
+  }
+
+  /*
+   * A choice of a few, on a phone (components/ui/Segmented.tsx).
+   *
+   * A desktop has room for every option on one line, where "fill against no
+   * fill" reads at once. A phone wraps them, and HeroUI centres a group: the
+   * options came out as loose words floating in the middle of the card, with
+   * nothing to say they could be pressed. Below `md` they start at the left
+   * edge like the fields around them, and an option that is not chosen gets a
+   * hairline, so every one of them reads as a chip to tap. The guard is the
+   * selected rule's above: HeroUI's focus ring is a box-shadow too.
+   */
+  @media (width < 48rem) {
+    .toggle-button-group--detached {
+      justify-content: flex-start;
+    }
+    .toggle-button-group--detached
+      .toggle-button:not([data-selected="true"]):not(:focus-visible):not([data-focus-visible="true"]) {
+      box-shadow: inset 0 0 0 1px var(--border);
+    }
+  }
+}
+
+/*
+ * Room under the last row for a floating button (components/ui/Fab.tsx).
+ *
+ * The button floats over the end of the list, and without this the last row's
+ * menu sat underneath it, out of reach at the bottom of the scroll. Unlayered,
+ * so it wins over the utilities that set main's own padding.
+ */
+@media (width < 48rem) {
+  #main:has([data-fab]) {
+    padding-bottom: calc(var(--tab-bar-height) + var(--safe-bottom) + 6rem);
   }
 }
 
