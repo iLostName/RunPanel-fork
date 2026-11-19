@@ -61,6 +61,16 @@ export function EnvEffective({ projectId, preview }: { projectId: string; previe
   const [values, setValues] = useState<Map<string, string> | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // A new preview — after a save, a group attached — makes the values read
+  // before it stale: they are asked for again. Adjusted during render, not in
+  // an effect; the preview object only changes when its content does.
+  const [seen, setSeen] = useState(preview);
+  if (seen !== preview) {
+    setSeen(preview);
+    setValues(null);
+    setShown(new Set());
+  }
+
   // Problems first: they are why anyone opens this.
   const vars = useMemo(
     () => [...preview.vars].sort((a, b) => Number(Boolean(b.problem)) - Number(Boolean(a.problem)) || a.key.localeCompare(b.key)),
