@@ -1,3 +1,4 @@
+import { PUSH_BADGE, PUSH_ICON } from "../push-rules";
 import { THEME_COLORS, THEME_COOKIE } from "../theme-mode";
 
 /**
@@ -19,11 +20,18 @@ import { THEME_COLORS, THEME_COOKIE } from "../theme-mode";
  *   in below is the build's id, so every build is a new worker. It waits until
  *   the person presses "Aggiorna" (components/pwa/PwaRuntime.tsx), because
  *   taking over by itself would swap the code under a half-filled form.
+ * - **Notifications on the device** (services/notify/push.ts sends them).
+ *   Each push is shown, always: Safari takes the permission away from a site
+ *   whose pushes show nothing. Its tag is the project or the service it is
+ *   about, so a newer one replaces the older on the screen, silently if the
+ *   older is only a moment old. It carries the unread count of the account's
+ *   notification centre, which goes on the app's icon. Pressing it marks
+ *   it read and opens its page in the panel's window if there is one — the
+ *   page moves there with its own router — or in a new one.
  *
  * Written as text rather than a file in `public/` so that the version can be
  * stamped in per build; no backticks or `${` in the template, so it can be
- * read as the JavaScript it is. The next block adds push notifications here:
- * a `push` and a `notificationclick` listener, at the end.
+ * read as the JavaScript it is.
  */
 
 export const SW_CACHE_PREFIX = "runpanel-";
@@ -171,6 +179,157 @@ async function fromCacheFirst(request) {
   if (response.ok && response.type === "basic") cache.put(request, response.clone());
   return response;
 }
+
+/* --- Notifications on the device: what a payload holds is PushPayload in lib/push-rules.ts --- */
+
+var PUSH_ICON = __PUSH_ICON__;
+var PUSH_BADGE = __PUSH_BADGE__;
+/* A newer notification with the same tag replaces the older one: without sounding again if the older is this recent. */
+var QUIET_REPLACE_MS = 2 * 60 * 1000;
+var MAX_IDS = 50;
+
+/* A path inside the panel, never another site: what a notification opens. */
+function panelPath(raw) {
+  if (typeof raw !== "string" || raw.charAt(0) !== "/" || raw.charAt(1) === "/" || raw.indexOf("\\") !== -1 || raw.length > 512) return "/notifications";
+  return raw;
+}
+
+/* Pictures only from the panel itself: a notification must not fetch anything from elsewhere. */
+function panelAsset(raw, fallback) {
+  return typeof raw === "string" && raw.charAt(0) === "/" && raw.charAt(1) !== "/" ? raw : fallback;
+}
+
+/* The unread count on the app's icon; nothing where the browser has no badge. */
+function setBadge(count) {
+  var nav = self.navigator;
+  if (typeof count !== "number" || !nav) return Promise.resolve();
+  try {
+    if (count > 0 && nav.setAppBadge) return nav.setAppBadge(count).catch(function () {});
+    if (count <= 0 && nav.clearAppBadge) return nav.clearAppBadge().catch(function () {});
+  } catch (error) {
+    /* not supported here */
+  }
+  return Promise.resolve();
+}
+
+self.addEventListener("push", function (event) {
+  var data = {};
+  try {
+    data = (event.data && event.data.json()) || {};
+  } catch (error) {
+    data = {};
+  }
+  event.waitUntil(showPush(data));
+});
+
+async function showPush(data) {
+  var title = typeof data.title === "string" && data.title ? data.title : "RunPanel";
+  var tag = typeof data.tag === "string" && data.tag ? data.tag : "runpanel";
+  var now = Date.now();
+  var ids = Array.isArray(data.ids) ? data.ids.filter(function (id) { return typeof id === "string"; }) : [];
+  var renotify = true;
+  try {
+    var shown = await self.registration.getNotifications({ tag: tag });
+    for (var i = 0; i < shown.length; i++) {
+      var before = shown[i].data || {};
+      if (typeof before.shownAt === "number" && now - before.shownAt < QUIET_REPLACE_MS) renotify = false;
+      /* The one it replaces is still unread: pressing this one marks both. */
+      if (Array.isArray(before.ids)) ids = before.ids.concat(ids);
+    }
+  } catch (error) {
+    /* no list of what is shown: it is simply shown */
+  }
+  await self.registration.showNotification(title, {
+    body: typeof data.body === "string" ? data.body : "",
+    icon: panelAsset(data.icon, PUSH_ICON),
+    badge: panelAsset(data.badge, PUSH_BADGE),
+    tag: tag,
+    renotify: renotify,
+    timestamp: typeof data.at === "number" ? data.at : now,
+    data: { url: panelPath(data.url), ids: ids.slice(-MAX_IDS), shownAt: now },
+  });
+  await setBadge(data.unread);
+}
+
+self.addEventListener("notificationclick", function (event) {
+  var data = (event.notification && event.notification.data) || {};
+  event.notification.close();
+  event.waitUntil(Promise.all([openPanel(panelPath(data.url)), markRead(data.ids)]));
+});
+
+/* The panel's window if there is one, moved to the page by its own router; a new window otherwise. */
+async function openPanel(path) {
+  var windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  var panel = windows.filter(function (client) {
+    var at = new URL(client.url);
+    return at.origin === self.location.origin && at.pathname.indexOf("/status/") !== 0;
+  });
+  var target =
+    panel.find(function (client) { return client.focused; }) ||
+    panel.find(function (client) { return client.visibilityState === "visible"; }) ||
+    panel[0];
+  if (target) {
+    try {
+      target = (await target.focus()) || target;
+    } catch (error) {
+      /* focus is only allowed while the click is being handled; the message still goes */
+    }
+    target.postMessage({ type: "runpanel:open", url: path });
+    return;
+  }
+  if (self.clients.openWindow) await self.clients.openWindow(new URL(path, self.location.origin).href);
+}
+
+async function markRead(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return;
+  try {
+    var res = await fetch("/api/notifications/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ ids: ids.slice(0, 200) }),
+    });
+    if (!res.ok) return;
+    var body = await res.json();
+    await setBadge(body && body.unread);
+  } catch (error) {
+    /* signed out, or the server is away: the bell will say so when the panel opens */
+  }
+}
+
+function toBase64Url(buffer) {
+  var bytes = new Uint8Array(buffer);
+  var text = "";
+  for (var i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
+  return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/* The push service replaced the subscription: tell the panel, which keeps the device's name and choices. */
+self.addEventListener("pushsubscriptionchange", function (event) {
+  event.waitUntil(renewSubscription(event.oldSubscription || null, event.newSubscription || null));
+});
+
+async function renewSubscription(previous, next) {
+  try {
+    var key = previous && previous.options && previous.options.applicationServerKey;
+    var current = next || (key ? await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }) : null);
+    if (!current) return;
+    var usedKey = current.options && current.options.applicationServerKey;
+    await fetch("/api/account/push/devices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        subscription: current.toJSON(),
+        name: "Dispositivo",
+        previousEndpoint: previous ? previous.endpoint : null,
+        applicationServerKey: usedKey ? toBase64Url(usedKey) : undefined,
+      }),
+    });
+  } catch (error) {
+    /* signed out: the next time the panel opens here, it subscribes again */
+  }
+}
 `;
 
 /** The worker for one build. `version` should change with every build: see app/sw.js/route.ts. */
@@ -180,5 +339,7 @@ export function serviceWorkerSource(version: string): string {
   return TEMPLATE.replace("__VERSION__", () => JSON.stringify(version))
     .replace("__PREFIX__", () => JSON.stringify(SW_CACHE_PREFIX))
     .replace("__PRECACHE__", () => JSON.stringify(SW_PRECACHE))
-    .replace("__OFFLINE__", () => JSON.stringify(offlinePage()));
+    .replace("__OFFLINE__", () => JSON.stringify(offlinePage()))
+    .replace("__PUSH_ICON__", () => JSON.stringify(PUSH_ICON))
+    .replace("__PUSH_BADGE__", () => JSON.stringify(PUSH_BADGE));
 }
