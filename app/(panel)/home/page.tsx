@@ -11,6 +11,8 @@ import { useClusterList } from "@/lib/hooks/useClusterList";
 import type { Located } from "@/lib/cluster-merge";
 import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ActionSheet } from "@/components/ui/ActionSheet";
+import { PhoneMenu } from "@/components/ui/PhoneMenu";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { LoadError } from "@/components/ui/LoadError";
 import { Panel } from "@/components/ui/Panel";
@@ -38,6 +40,7 @@ import {
 import { PROJECT_ACTIONS, SERVICE_ACTIONS, rowAllows, type Access } from "@/lib/authz";
 import { cn } from "@/lib/utils";
 import { useCan, useMe } from "@/lib/hooks/useMe";
+import { useIsPhone } from "@/lib/hooks/useMediaQuery";
 import { serviceDisplayName } from "@/lib/service-name";
 import { deployCountLabel, engineLabel, engineWithVersion, runtimeLabel } from "@/lib/labels";
 import { Technical } from "@/components/ui/Technical";
@@ -285,6 +288,67 @@ const ServiceCard = memo(function ServiceCard({
   );
 });
 
+/**
+ * The "⋯" of a folder's section. On a phone it opens an action sheet, like
+ * every other row menu there, instead of a dropdown off a 28px button.
+ */
+function FolderMenu({ name, onAction }: { name: string; onAction: (key: "rename" | "delete") => void }) {
+  const phone = useIsPhone();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const trigger = (onPress?: () => void) => (
+    <Button
+      variant="ghost"
+      size="sm"
+      isIconOnly
+      aria-label={`Azioni per la cartella ${name}`}
+      className="text-muted hover:text-foreground h-7 w-7 min-w-0"
+      onPress={onPress}
+    >
+      <Icon icon="solar:menu-dots-bold" width={16} aria-hidden />
+    </Button>
+  );
+
+  if (phone) {
+    return (
+      <>
+        {trigger(() => setSheetOpen(true))}
+        <ActionSheet
+          isOpen={sheetOpen}
+          onOpenChange={setSheetOpen}
+          title={`Cartella «${name}»`}
+          actions={[
+            { id: "rename", label: "Rinomina", icon: "solar:pen-linear", onAction: () => onAction("rename") },
+            { id: "delete", label: "Elimina", icon: "solar:trash-bin-minimalistic-linear", danger: true, onAction: () => onAction("delete") },
+          ]}
+        />
+      </>
+    );
+  }
+
+  return (
+    <Dropdown>
+      {trigger()}
+      <Dropdown.Popover placement="bottom end">
+        <Dropdown.Menu
+          aria-label={`Cartella ${name}`}
+          onAction={(key) => {
+            if (key === "rename" || key === "delete") onAction(key);
+          }}
+        >
+          <Dropdown.Item id="rename" textValue="Rinomina">
+            <Icon icon="solar:pen-linear" width={14} aria-hidden />
+            Rinomina
+          </Dropdown.Item>
+          <Dropdown.Item id="delete" textValue="Elimina" className="text-danger">
+            <Icon icon="solar:trash-bin-minimalistic-linear" width={14} aria-hidden />
+            Elimina
+          </Dropdown.Item>
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
+  );
+}
+
 function CardGrid({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{children}</div>;
 }
@@ -528,8 +592,10 @@ export default function HomePage() {
             <ServerFilter />
             {canCreate && (
               <>
+                {/* On a phone "Nuova cartella" is in the ⋯ next to the primary
+                    action: side by side the two wrapped the row. */}
                 {canCreateFolder && (
-                  <Button variant="ghost" onPress={() => setFolderDialog({ kind: "create" })}>
+                  <Button variant="ghost" className="max-md:hidden" onPress={() => setFolderDialog({ kind: "create" })}>
                     <Icon icon="solar:folder-with-files-linear" width={16} aria-hidden />
                     Nuova cartella
                   </Button>
@@ -541,6 +607,19 @@ export default function HomePage() {
                   <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
                   Nuovo progetto
                 </LinkButton>
+                {canCreateFolder && (
+                  <PhoneMenu
+                    label="Altre azioni"
+                    actions={[
+                      {
+                        id: "folder",
+                        label: "Nuova cartella",
+                        icon: "solar:folder-with-files-linear",
+                        onAction: () => setFolderDialog({ kind: "create" }),
+                      },
+                    ]}
+                  />
+                )}
               </>
             )}
           </>
@@ -656,35 +735,13 @@ export default function HomePage() {
                   onExpandedChange={(expanded) => rememberExpanded(folder.id, expanded)}
                   actions={
                     rowAllows(folder, { level: "manage" }) && (
-                      <Dropdown>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          isIconOnly
-                          aria-label={`Azioni per la cartella ${folder.name}`}
-                          className="text-muted hover:text-foreground h-7 w-7 min-w-0"
-                        >
-                          <Icon icon="solar:menu-dots-bold" width={16} aria-hidden />
-                        </Button>
-                        <Dropdown.Popover placement="bottom end">
-                          <Dropdown.Menu
-                            aria-label={`Cartella ${folder.name}`}
-                            onAction={(key) => {
-                              const f = folders.find((x) => x.id === folder.id);
-                              if (f && (key === "rename" || key === "delete")) setFolderDialog({ kind: key, folder: f });
-                            }}
-                          >
-                            <Dropdown.Item id="rename" textValue="Rinomina">
-                              <Icon icon="solar:pen-linear" width={14} aria-hidden />
-                              Rinomina
-                            </Dropdown.Item>
-                            <Dropdown.Item id="delete" textValue="Elimina" className="text-danger">
-                              <Icon icon="solar:trash-bin-minimalistic-linear" width={14} aria-hidden />
-                              Elimina
-                            </Dropdown.Item>
-                          </Dropdown.Menu>
-                        </Dropdown.Popover>
-                      </Dropdown>
+                      <FolderMenu
+                        name={folder.name}
+                        onAction={(key) => {
+                          const f = folders.find((x) => x.id === folder.id);
+                          if (f) setFolderDialog({ kind: key, folder: f });
+                        }}
+                      />
                     )
                   }
                 >

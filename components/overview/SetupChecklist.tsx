@@ -53,8 +53,10 @@ export function SetupChecklist({ className }: { className?: string }) {
 
   return (
     <Panel padding="flush" className={cn("overflow-hidden", className)} role="region" aria-labelledby="setup-title">
-      <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-        <div className="min-w-0 flex-1">
+      {/* On a phone the title has the row to itself and the bar runs under it:
+          beside them, the sentence was squeezed into a column of three words. */}
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3 max-md:gap-y-2">
+        <div className="min-w-0 flex-1 max-md:basis-full">
           <h2 id="setup-title" className="text-foreground text-sm font-semibold">
             Prima configurazione
           </h2>
@@ -63,7 +65,7 @@ export function SetupChecklist({ className }: { className?: string }) {
           </p>
         </div>
         <div
-          className="bg-default h-1.5 w-28 overflow-hidden rounded-full"
+          className="bg-default h-1.5 w-28 overflow-hidden rounded-full max-md:w-auto max-md:flex-1"
           role="progressbar"
           aria-label="Configurazione completata"
           aria-valuemin={0}
@@ -99,7 +101,7 @@ export function SetupChecklist({ className }: { className?: string }) {
               <Link
                 href={href(item.href)}
                 className={cn(
-                  "inline-flex h-8 shrink-0 items-center rounded-[var(--radius)] px-3 text-sm font-medium transition-colors",
+                  "touch-target inline-flex h-8 shrink-0 items-center rounded-[var(--radius)] px-3 text-sm font-medium transition-colors",
                   item === next
                     ? "bg-accent text-accent-foreground hover:opacity-90"
                     : "border-border bg-surface text-foreground hover:bg-surface-hover border"
