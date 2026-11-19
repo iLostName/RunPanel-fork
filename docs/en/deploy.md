@@ -74,6 +74,7 @@ What RunPanel needs to know to deploy a project. The fields are runtime-neutral 
 | `commands.release` | throwaway container before start | command in the repository folder |
 | `healthcheck` | probed by RunPanel after start | same |
 | `rollback.enabled` / `rollback.native` | `enabled` (on by default) puts the previous image back online | both are needed: `native` (off by default, panel-only) turns on version folders |
+| `zeroDowntime.enabled` / `drainSec` | off by default, panel-only: the new version starts beside the old one and nginx moves to it once it answers; the old one stops after `drainSec` (15 s, at most 300). See [Deploys without downtime](#deploys-without-downtime) | not applicable |
 | `runtime.restartPolicy` | `--restart` | PM2 `autorestart` |
 | `runtime.memory` / `cpus` / `shmSize` | container limits | `max_memory_restart` where applicable |
 | `docker.network` / `hostname` / `capAdd` / `extraHosts` | `docker run` flags | not applicable |
@@ -97,7 +98,7 @@ A repository can declare how it wants to be deployed:
 
 Where both set a value the panel wins. An invalid file is ignored as a whole.
 
-Some fields are **panel-only** and are dropped when they come from the repository, with a line in the deploy log: `docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts`, `docker.context`, `docker.dockerfile`, `docker.target`, `envFile.path`, `healthcheck.path`, `healthcheck.port` and `rollback.native`. They decide what the project reaches outside its container, where decrypted secrets are written, what the panel probes and which server folder a native app runs from: a repository must not choose them for itself. For the same reason [one-time commands](automation.md#one-time-commands) are kept out of the contract.
+Some fields are **panel-only** and are dropped when they come from the repository, with a line in the deploy log: `docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts`, `docker.context`, `docker.dockerfile`, `docker.target`, `envFile.path`, `healthcheck.path`, `healthcheck.port`, `rollback.native` and `zeroDowntime`. They decide what the project reaches outside its container, where decrypted secrets are written, what the panel probes, which server folder a native app runs from and how the app is published on the host: a repository must not choose them for itself. For the same reason [one-time commands](automation.md#one-time-commands) are kept out of the contract.
 
 ## Environment variables
 
@@ -131,7 +132,7 @@ Over the API: `GET /api/projects/<id>/logs/app` (the last lines, with `lines`, `
 3. **Contract**: preset, `runpanel.json`, panel settings.
 4. **Build**: install and build according to the runtime, with live output. A native project with version folders turned on builds in the new version's folder, while the old one stays online.
 5. **Release command**: run once, at most 10 minutes. If it fails the new version does not start and the old one stays up: this is where migrations go.
-6. **Start**: the old version is stopped only now (on Windows native runtimes, before the build), then PM2 or Docker start the new one with the contract's policy and limits.
+6. **Start**: the old version is stopped only now (on Windows native runtimes, before the build), then PM2 or Docker start the new one with the contract's policy and limits. With [deploys without downtime](#deploys-without-downtime) nothing is stopped: the new version starts beside the old one.
 7. **Health check**: RunPanel probes the app every 2 seconds, after a 3-second wait and for at most 30 (`startPeriodSec`, `timeoutSec`). Any HTTP response passes unless the contract sets `expectStatus`; a container without a port only has to stay up.
 
 If the health check fails, the deploy is marked failed with the process's last 40 lines in the log. With **Se non risponde, rimetti online la versione precedente** on (**Impostazioni › Build e avvio**) the previous version comes back online, where it can: see below. Otherwise the project goes into error, and to go back there is [Going back to a commit](automation.md#going-back-to-a-commit). A failed release command never touches the running version: it stops before that.
@@ -154,6 +155,33 @@ How it works for native projects:
 - **Switched off again**: the deploy builds in the project folder as before, with nothing to put back: the data never left it. The last version's new files go to the project folder, and the version folders are deleted after the first successful deploy. It is also the way out for a project that does not build well in a separate folder.
 
 Limits: a build file outside the known folders that the project folder already has — a `public/bundle.js` git ignores, left by an in-place deploy — is shared between versions: the new build rewrites it there, and going back does not restore it. Deleting it once from the project folder is enough: from the next deploy on, each version has its own. An app that deletes and recreates a shared folder gets one of its own inside the version, which reaches the project folder at the next deploy. A project folder moved to another disk works, but the versions stay in the panel's data directory.
+
+### Deploys without downtime
+
+A Docker project served through the panel's nginx can be deployed without going offline: **Impostazioni › Build e avvio › Deploy senza interruzioni** (marked **Nuovo**), off by default and turned on project by project. It applies from the next deploy.
+
+**Where it works.** Docker runtime, a port, the health check on (with no port of its own other than the app's), **project** or **bridge** network, at least one address nginx serves ([Domains](domains.md)), nginx ready on the server, no IP restriction on the port and no **una sola copia** (single instance) in Risorse. Elsewhere the switch is not offered and the panel says why. A project that stops qualifying after it was turned on — its address removed, nginx down, the health check off — gets an ordinary deploy, with the reason in the log.
+
+**What a deploy does.**
+
+1. Build, release command and the "before start" one-time commands run while the old version keeps serving. The release command therefore runs with the previous version **still online**: a migration has to suit it too (add a column now, drop or rename it in a later deploy).
+2. The new container starts as `runpanel-<slug>_next`, published on `127.0.0.1` only, on a port the panel picks for each deploy between **21000 and 21999** — one no project, database or the panel holds and that nothing on the server listens on.
+3. The health check asks the new container on that port. The "after a successful deploy" one-time commands run once it answers, before nginx moves.
+4. The switch: the project's nginx blocks are rewritten with only the `proxy_pass` port changed, checked with `nginx -t` and reloaded — through the systemd path units, sudo or directly, as for every change of [Domains](domains.md#deploys-without-downtime). In the same step the deploy is recorded as done.
+5. The new container takes the name `runpanel-<slug>`, which logs, terminal, files, scheduled tasks and restarts use; the old one becomes `runpanel-<slug>_old`, stays up for the **drain** (15 seconds by default, from 0 to 300 under **Avanzate**) to finish the requests it is serving, is stopped with 10 seconds' grace and removed. Connections still open after that, like a WebSocket, are closed and the browser reconnects to the new version. Until the drain ends the project's lock is held: a restart or another deploy waits for it.
+
+**When something goes wrong** the version online is never touched:
+
+- the new version never answers: it is removed and the deploy is marked failed with "la versione precedente è rimasta online" — there is nothing to put back, so the automatic return does not run;
+- `nginx -t` refuses the switch, or the reload fails: the previous configuration and upstream stay, the new container is removed;
+- the project is stopped during the deploy: the new container is removed and the app is stopped, as for any deploy;
+- the panel restarts in the middle: at boot, before nginx is applied again, every project is brought back to one container under `runpanel-<slug>` — the one of the last successful deploy, so a deploy cut short before the switch keeps the old version and one cut short after it keeps the new one — and nginx is pointed at its port.
+
+**The port.** The project's port stays the app's own: the one it listens on inside its container (`PORT`), the one the panel shows, and the one other containers on the project network use with its name. On the server it is no longer opened: the container is published on its loopback port and the address is the way in, so the firewall needs nothing but 80 and 443. nginx, the health check, the uptime check and the readiness check at boot use the loopback port; with expert mode on, the settings show it. A native process on the server that reached the app on `localhost:<port>` has to use its address instead.
+
+**Re-build da zero** goes the same way, without stopping the app. **Restarts** — by hand, scheduled, after a crash, after a bind change — recreate the container on the same loopback port, with a brief gap: only deploys go without downtime. Restricting the port with IP rules takes the project back to the ordinary publishing. Turned off, the next deploy is an ordinary one: the app is published on its port again and nginx goes back to it.
+
+**Not covered**: projects without an address, reached on their port directly; anything that needs a fixed host port (the host network); an app that keeps a file or a volume to itself — a SQLite database with an exclusive lock, a lock file — which stops the new version from starting while the old one runs (the deploy fails without touching the version online, but it is better left off). For a few seconds two copies of the app run against the same volumes and bind mounts: both must be able to write there at once.
 
 Stopping a project during a deploy cancels the deploy: the running command is interrupted, the deploy ends as failed, the app stays down and a queued deploy is dropped too. Restarts, checkout moves, bind applies and volume restores never overlap: a deploy requested meanwhile starts as soon as they finish.
 

@@ -94,6 +94,17 @@ nginx inoltra alla porta su cui l'app ascolta davvero, in loopback, passando `Ho
 
 Gli indirizzi su cui risponde un progetto compaiono anche sotto il suo titolo, così si apre con un clic senza passare dalle Impostazioni; un lucchetto segna quelli protetti da password.
 
+## Deploy senza interruzioni
+
+Un progetto Docker con il [deploy senza interruzioni](deploy.md#deploy-senza-interruzioni) acceso non viene inoltrato alla sua porta: il suo container è pubblicato su `127.0.0.1` su una porta che il pannello sceglie a ogni deploy (21000–21999), e il `proxy_pass` del blocco punta lì. A ogni deploy la nuova versione parte su una porta nuova e, quando risponde, il pannello sposta nginx con una modifica a parte, non con un'applicazione normale:
+
+- copia i blocchi che nginx sta usando e cambia **solo** la porta di `proxy_pass` dei nomi del progetto — ogni altra riga e ogni altro nome restano identici, qualunque altra modifica sia in attesa;
+- il nuovo insieme passa da `nginx -t` e da un ricaricamento, come ogni applicazione (le unit systemd, sudo, o direttamente da root). Se nginx lo rifiuta torna l'insieme di prima, non si ricarica niente e la vecchia versione continua a servire: nessun nome viene messo da parte, come farebbe invece un'applicazione normale con un blocco rifiutato;
+- la nuova porta viene scritta nello store nello stesso passo, dentro la coda delle applicazioni, così un'applicazione che arriva subito dopo scrive lo stesso upstream e non quello vecchio;
+- il vecchio container resta acceso per l'attesa: i vecchi worker di nginx finiscono le richieste che avevano, poi viene fermato.
+
+Dopo un riavvio del pannello a metà deploy, prima si sistemano i container e poi nginx viene riapplicato dallo store, che a quel punto indica la porta dell'unico container rimasto.
+
 ## Il pannello stesso in HTTPS
 
 Il pannello può aprirsi da un tuo nome, con il lucchetto — `https://pannello.esempio.it` invece di `http://203.0.113.7:3000` — con gli stessi nginx e certbot. Solo il proprietario, da **Impostazioni › Pannello › Metti il pannello su HTTPS**:
