@@ -9,6 +9,7 @@
  */
 import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // The panel's own tool resolution, imported rather than reimplemented so the
@@ -17,7 +18,32 @@ import { whichSync } from "../services/toolchain.ts";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
-let nextPort = 3900;
+let nextPort = Number(process.env.RUNPANEL_TEST_PORT) || 3900;
+
+/**
+ * Whether nothing listens on a port yet.
+ *
+ * Another run of the suite on the same machine — a second checkout, a second
+ * terminal — starts its servers from the same port. Spawning on a taken port
+ * does not fail where anyone sees it: the new server dies on EADDRINUSE, the
+ * readiness poll below is answered by the *other* server, and the suite then
+ * runs against a panel someone else set up, failing on every login.
+ */
+function portIsFree(port) {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.once("error", () => resolve(false));
+    probe.listen(port, () => probe.close(() => resolve(true)));
+  });
+}
+
+async function nextFreePort() {
+  for (let tries = 0; tries < 200; tries++) {
+    const port = nextPort++;
+    if (await portIsFree(port)) return port;
+  }
+  throw new Error("No free port for a test server");
+}
 
 /** Drop and recreate the public schema, so each Postgres suite starts empty. */
 async function resetPostgres(connectionString) {
@@ -44,7 +70,7 @@ export const SETUP_TOKEN = "test-setup-token";
 
 /** Start a RunPanel server against a throwaway data directory. */
 export async function startServer({ driver = "sqlite", databaseUrl, env = {} } = {}) {
-  const port = allocatePort();
+  const port = await nextFreePort();
   const dataDir = mkdtempSync(join(tmpdir(), "runpanel-test-"));
 
   // SQLite gets isolation for free from a fresh data directory. Postgres does

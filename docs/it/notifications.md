@@ -4,12 +4,13 @@
 
 # Notifiche
 
-Il pannello dice cosa è successo in due posti:
+Il pannello dice cosa è successo in tre posti:
 
 - la **campanella** nella barra in alto, e la pagina **Notifiche** che apre: ogni account ha la sua, e ci vede solo quello che può vedere;
+- le **notifiche push**, sul telefono o sul computer, anche a pannello chiuso: ogni account le attiva per sé, sui propri dispositivi, e riceve solo quello che può vedere;
 - i **canali**, che mandano gli stessi eventi fuori dal pannello: email, Telegram, Discord, Slack, ntfy, o un webhook firmato verso un tuo servizio.
 
-Tutto quello che segue riguarda il server selezionato nella barra: con [più server](multi-server.md) ognuno tiene le sue notifiche e i suoi canali.
+Campanella e canali riguardano il server selezionato nella barra: con [più server](multi-server.md) ognuno tiene le sue notifiche e i suoi canali. Le notifiche push riguardano il pannello che hai aperto (vedi sotto).
 
 ## La campanella
 
@@ -22,6 +23,26 @@ Qui finisce ogni evento, comunque siano impostati i canali. Chi lo vede:
 Lette e da leggere sono per account. Aprire una notifica la segna come letta; **Segna tutte come lette** azzera il conteggio in ogni scheda in cui l'account è aperto. La campanella si aggiorna in tempo reale (Server-Sent Events, una connessione per scheda, chiusa mentre la scheda è in secondo piano); se un proxy trattiene lo stream, ricontrolla da sola ogni minuto.
 
 La pagina **Notifiche** filtra per da leggere, argomento e gravità. Le notifiche restano 30 giorni, e mai più delle ultime 5000.
+
+## Sul telefono e sul computer
+
+In **Account › Notifiche push**, a cui portano anche **Su questo dispositivo** nella pagina Notifiche e, per chi non gestisce i canali, il link in fondo alla campanella. Ogni account le attiva per sé, qualunque permesso abbia, su ognuno dei suoi dispositivi: dal browser o dall'app installata premi **Attiva le notifiche**, rispondi **Consenti** al browser, e arriva subito una prova. Il dispositivo compare in **I tuoi dispositivi** con un nome che puoi cambiare (per esempio «iPhone di Marco»).
+
+- **Cosa arriva.** Per ogni dispositivo scegli gli eventi e cosa inviare, come per un canale, da **Modifica** nel suo menu. Arriva solo quello che quell'account può vedere, con le regole della campanella, controllate quando l'evento succede e di nuovo quando la notifica parte.
+- **Cosa dice.** Un titolo e una frase semplice: «Deploy fallito — api», «Il motivo e il log sono nella pagina del progetto». Mai un errore, una riga di log, un messaggio di commit o un percorso, perché una notifica si legge anche sullo schermo bloccato: i dettagli restano nel pannello. Toccandola si apre la sua pagina, nella finestra del pannello già aperta se c'è, e la notifica diventa letta.
+- **Una per progetto.** Una notifica nuova sullo stesso progetto o servizio prende il posto della vecchia, senza suonare di nuovo se la vecchia ha meno di due minuti. Gli avvisi ravvicinati si uniscono come nei canali, e a un telefono rimasto spento il servizio push consegna, dove lo permette, solo l'ultima di ogni progetto.
+- **Il numero sull'icona.** Sull'icona dell'app installata compare quante notifiche hai da leggere, lo stesso della campanella: si aggiorna con la campanella e a ogni notifica push, e sparisce quando hai letto tutto. Lo mostrano Chrome ed Edge sul computer, Safari sul Mac e l'app sulla schermata Home di iPhone e iPad; su Android l'icona ha il pallino delle notifiche.
+- **Invia una prova** su ogni riga; **Spegni** ferma un dispositivo senza toglierlo; **Rimuovi** lo toglie. Anche **Esci** toglie il dispositivo da cui esci, così chi entra dopo in quel browser non riceve le tue notifiche. Un browser riceve le notifiche di un solo account: se ci entra un altro account, quelle del precedente smettono di arrivare lì.
+
+Cosa serve, e la sezione lo dice quando manca:
+
+- **HTTPS.** I browser mandano notifiche solo a un indirizzo con il lucchetto (o a `localhost`). Su `http://<ip>:3000` la sezione spiega perché e porta a **Impostazioni › Generale › Metti il pannello su HTTPS**.
+- **Su iPhone e iPad** arrivano solo all'app aggiunta alla schermata Home, da iOS 16.4 in poi; nel browser no. La sezione mostra i tre passi per aggiungerla, poi si attivano dall'app.
+- **Il permesso.** Se l'hai negato, il browser non lo chiede più: la sezione dice dove sbloccarlo in quel browser (le impostazioni del sito, o su iPhone Impostazioni › Notifiche › RunPanel).
+
+Come funziona: il pannello usa Web Push (firma VAPID e cifratura `aes128gcm`, RFC 8292 e 8291) senza nessun servizio esterno oltre a quello del browser — Google per Chrome e Android, Mozilla per Firefox, Apple per Safari, Microsoft per Edge su Windows — che inoltra il messaggio cifrato senza poterlo leggere. Le chiavi del pannello si creano la prima volta e sono salvate cifrate con la sua chiave, come l'iscrizione di ogni dispositivo. Un dispositivo che il servizio push non conosce più (risposta 404 o 410) sparisce dall'elenco. Se la chiave del pannello cambia (un backup ripristinato altrove), i dispositivi risultano **Da riattivare** e si riattivano da soli la prima volta che il pannello si apre su di essi. Il pannello manda solo ai servizi push conosciuti; un browser con un servizio suo si aggiunge con `RUNPANEL_PUSH_SERVICES` (vedi [Configurazione](configuration.md)).
+
+**Con più server**, ogni pannello manda le notifiche push dei suoi eventi ai dispositivi che le hanno attivate al suo indirizzo, e il numero sull'icona conta la sua campanella. Per un server collegato con il ruolo Pannello, attivale anche aprendolo dal suo indirizzo. Un nodo non ha un'interfaccia: i suoi eventi restano nella sua campanella (con quel server selezionato) e nei suoi canali, quindi per riceverli sul telefono aggiungi un canale, per esempio ntfy, con quel server selezionato.
 
 ## I canali
 
@@ -141,12 +162,12 @@ Il controllo gira ogni cinque minuti, il primo 90 secondi dopo l'avvio, sul disc
 ## Perché non diventi rumore
 
 - **Una volta ogni quarto d'ora** per lo stesso evento sullo stesso soggetto (un progetto, un disco, una policy): un progetto che continua a cadere non copre un altro, e il messaggio dopo dice quante volte è successo nel frattempo. Deploy, backup e riavvii programmati non vengono mai trattenuti, e nemmeno i due avvisi sulla salute delle app, che aspettano già da soli prima di avvisare e prima del cessato allarme. La campanella conta le ripetizioni sulla notifica che le ha annunciate.
-- **Gli avvisi ravvicinati si uniscono**, canale per canale: il primo parte subito, quelli che arrivano entro un minuto (due per l'email) arrivano insieme, in un messaggio solo che li elenca. Quando si ferma Docker, venti servizi che si fermano con lui sono un messaggio, non venti.
+- **Gli avvisi ravvicinati si uniscono**, canale per canale e dispositivo per dispositivo: il primo parte subito, quelli che arrivano entro un minuto (due per l'email) arrivano insieme, in un messaggio solo che li elenca. Quando si ferma Docker, venti servizi che si fermano con lui sono un messaggio, non venti.
 - **Un nuovo tentativo** dopo un errore temporaneo (timeout, 5xx, 429 rispettando l'attesa richiesta).
 
 ## Se la notifica non parte
 
-Non si blocca niente: un deploy non fallisce perché un canale non risponde. Il motivo compare sulla riga del canale e nel log del pannello, spiegato dove il servizio è criptico: con Telegram, `chat not found` di solito vuol dire che non hai ancora scritto al bot; con l'email, vedi il server di posta qui sopra.
+Non si blocca niente: un deploy non fallisce perché un canale non risponde. Il motivo compare sulla riga del canale e nel log del pannello, spiegato dove il servizio è criptico: con Telegram, `chat not found` di solito vuol dire che non hai ancora scritto al bot; con l'email, vedi il server di posta qui sopra. Per una notifica push lo dice la riga del dispositivo in Account; se non arriva niente nonostante «Ultimo invio riuscito», controlla che le notifiche del browser non siano spente nelle impostazioni del sistema o in «Non disturbare».
 
 ## Dalla versione con il solo Telegram
 

@@ -22,6 +22,7 @@ Per chi usa già il pannello: dove sono finite le cose e cosa c'è di nuovo. Nie
 - **Finestre dal basso**: conferme e moduli si aprono come fogli che salgono dal bordo, con i bottoni sotto il pollice, e si chiudono trascinandoli giù (non se hai già scritto qualcosa). I menu «⋯» diventano un elenco di azioni a tutta larghezza.
 - Le schede scorrono di lato e tengono in vista quella aperta, i campi non fanno più ingrandire la pagina su iPhone, e le notifiche a comparsa non finiscono più sotto la barra.
 - **Sempre dal vivo**: l'app non mostra mai dati vecchi. Senza rete lo dice, e dopo un aggiornamento del pannello propone **Aggiorna** invece di ricaricare da sola.
+- **Notifiche push**: in **Account › Notifiche push** ognuno le attiva sui propri dispositivi, sceglie per ognuno quali eventi ricevere e lo prova con un tocco. Arrivano anche a pannello chiuso, solo per quello che l'account può vedere, una per progetto, e aprono la pagina giusta; sull'icona dell'app compare il numero di notifiche da leggere. Su iPhone, dall'app sulla schermata Home. Vedi [Sul telefono e sul computer](notifications.md#sul-telefono-e-sul-computer).
 
 ## Nuovo progetto
 

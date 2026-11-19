@@ -52,6 +52,29 @@ function Step({ n, icon, children }: { n: number; icon: React.ReactNode; childre
 }
 
 /**
+ * The three taps from Safari's share sheet to the home screen. Here, and on
+ * the notifications of Account, where on an iPhone they are the only way.
+ */
+export function IosInstallSteps() {
+  return (
+    <div className="space-y-4">
+      <SafariBar />
+      <ol className="space-y-3">
+        <Step n={1} icon={<ShareGlyph />}>
+          Tocca <strong>Condividi</strong> nella barra del browser.
+        </Step>
+        <Step n={2} icon={<Icon icon="solar:add-square-linear" width={20} aria-hidden />}>
+          Scegli <strong>Aggiungi alla schermata Home</strong>; se non lo vedi, scorri l&apos;elenco.
+        </Step>
+        <Step n={3} icon={<Icon icon="solar:check-read-linear" width={20} aria-hidden />}>
+          Tocca <strong>Aggiungi</strong>: RunPanel si apre dalla sua icona, a tutto schermo.
+        </Step>
+      </ol>
+    </div>
+  );
+}
+
+/**
  * How to install the panel where the browser offers no button for it.
  *
  * Opened by "Installa l'app" (`startInstall` in lib/pwa/install.ts) when the
@@ -107,22 +130,7 @@ export function InstallDialog() {
               </>
             )}
 
-            {kind === "ios" && (
-              <>
-                <SafariBar />
-                <ol className="space-y-3">
-                  <Step n={1} icon={<ShareGlyph />}>
-                    Tocca <strong>Condividi</strong> nella barra del browser.
-                  </Step>
-                  <Step n={2} icon={<Icon icon="solar:add-square-linear" width={20} aria-hidden />}>
-                    Scegli <strong>Aggiungi alla schermata Home</strong>; se non lo vedi, scorri l&apos;elenco.
-                  </Step>
-                  <Step n={3} icon={<Icon icon="solar:check-read-linear" width={20} aria-hidden />}>
-                    Tocca <strong>Aggiungi</strong>: RunPanel si apre dalla sua icona, a tutto schermo.
-                  </Step>
-                </ol>
-              </>
-            )}
+            {kind === "ios" && <IosInstallSteps />}
 
             {kind === "browser" && (
               <>

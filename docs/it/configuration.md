@@ -21,6 +21,7 @@ Tutto sta in `.env` nella cartella del pannello; `.env.example` è la versione c
 | `RUNPANEL_DISABLE_SCHEDULERS` | spento | `1`, `true` o `yes`: spegne timer e gate d'accesso. Vedi sotto |
 | `RUNPANEL_SETUP_TOKEN` | generato a ogni avvio | Fissa il token del primo avvio, che serve anche a [collegare il server a un cluster](multi-server.md). Non validato |
 | `RUNPANEL_DEV_ORIGINS` | — | Solo `next dev`: host aggiuntivi, separati da virgola, con `*` e `**` come jolly (niente CIDR). Non validato |
+| `RUNPANEL_PUSH_SERVICES` | — | Servizi push in più per le [notifiche push](notifications.md#sul-telefono-e-sul-computer), host separati da virgola: per un browser che usa un servizio push suo. Su questi host il pannello accetta anche http e qualsiasi porta. Non validato |
 
 **La chiave segreta.** Cifra le variabili dei progetti, le credenziali dei servizi, i registry, le destinazioni di backup, il token GitHub, i segreti dei canali di notifica e la password del server di posta. Se cambia o va persa, tutti questi valori diventano illeggibili: salvala insieme ai backup. Con [più server](multi-server.md) ogni installazione ha la propria; il token GitHub condiviso viene cifrato di nuovo da ciascun server.
 

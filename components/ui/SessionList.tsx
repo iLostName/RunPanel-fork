@@ -5,6 +5,7 @@ import { Button } from "@heroui/react";
 import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { LoadError } from "@/components/ui/LoadError";
+import { describeDevice } from "@/lib/device-name";
 import { formatRelative } from "@/lib/format";
 import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
@@ -20,30 +21,6 @@ interface Session {
   expires_at: string;
   /** The session this page is open in. */
   current?: boolean;
-}
-
-/** A user agent string is unreadable; this is the part anyone cares about. */
-function describeDevice(userAgent: string | null): string {
-  if (!userAgent) return "Dispositivo sconosciuto";
-
-  const os =
-    /Windows/i.test(userAgent) ? "Windows"
-    : /Android/i.test(userAgent) ? "Android"
-    : /iPhone|iPad|iOS/i.test(userAgent) ? "iOS"
-    : /Mac OS X|Macintosh/i.test(userAgent) ? "macOS"
-    : /Linux/i.test(userAgent) ? "Linux"
-    : null;
-
-  const browser =
-    /Edg\//i.test(userAgent) ? "Edge"
-    : /OPR\/|Opera/i.test(userAgent) ? "Opera"
-    : /Firefox\//i.test(userAgent) ? "Firefox"
-    : /Chrome\//i.test(userAgent) ? "Chrome"
-    : /Safari\//i.test(userAgent) ? "Safari"
-    : null;
-
-  if (browser && os) return `${browser} su ${os}`;
-  return browser ?? os ?? userAgent.slice(0, 40);
 }
 
 /**

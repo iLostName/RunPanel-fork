@@ -635,6 +635,33 @@ export interface NotificationReadMarksTable {
   read_before: string;
 }
 
+/** A browser or an installed app that receives its account's notifications — see migration 049. */
+export interface PushDevicesTable {
+  id: string;
+  user_id: string;
+  name: string;
+  /** SHA-256 of the endpoint, hex. Unique. */
+  endpoint_hash: string;
+  /** Encrypted JSON `{ endpoint, p256dh, auth }` (purpose `push`). */
+  subscription: string;
+  /** The panel's VAPID public key the browser subscribed with. */
+  vapid_key: string;
+  push_host: string;
+  origin: string | null;
+  user_agent: string | null;
+  /** JSON map of event key → on/off, as a channel's. */
+  events: string;
+  /** `all` | `problems` */
+  filter: string;
+  /** 0 | 1 */
+  enabled: number;
+  last_ok_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Two-step sign-in of one account, on this panel only — see migration 035. */
 export interface UserTwoFactorTable {
   user_id: string;
@@ -1011,6 +1038,7 @@ export interface Database {
   notifications: NotificationsTable;
   notification_reads: NotificationReadsTable;
   notification_read_marks: NotificationReadMarksTable;
+  push_devices: PushDevicesTable;
   users: UsersTable;
   user_permissions: UserPermissionsTable;
   user_grants: UserGrantsTable;

@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "@/lib/toast";
 import { isStandalone } from "@/lib/pwa/install";
+import { panelPath } from "@/lib/push-rules";
 
 /** How often an open panel asks whether it was updated, besides on coming back to the foreground. */
 const CHECK_EVERY_MS = 30 * 60_000;
@@ -30,8 +32,28 @@ const UPDATE_TOAST = "panel-update-ready";
  * **Links to other sites**, inside the installed app, open in the browser: in
  * the app they would replace the panel in its own window, with no address bar
  * to come back by.
+ *
+ * **A notification pressed** while the panel is open: the worker focuses this
+ * window and asks it to show the notification's page, which it does with the
+ * router, keeping everything already loaded — and on the sign-in page too,
+ * where a session that ran out takes it.
  */
 export function PwaRuntime() {
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const container = navigator.serviceWorker;
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: unknown; url?: unknown } | null;
+      if (data?.type === "runpanel:open") router.push(panelPath(data.url));
+    };
+    container.addEventListener("message", onMessage);
+    // A listener added this way, unlike `onmessage`, receives nothing until asked to.
+    container.startMessages();
+    return () => container.removeEventListener("message", onMessage);
+  }, [router]);
+
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") return;
     if (!("serviceWorker" in navigator) || !window.isSecureContext) return;

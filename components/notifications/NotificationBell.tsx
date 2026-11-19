@@ -94,7 +94,7 @@ export function NotificationBell() {
             <Link href={href("/notifications")} onClick={() => setOpen(false)} className="text-accent text-sm hover:underline">
               Vedi tutte
             </Link>
-            {canManage && (
+            {canManage ? (
               <Link
                 href={href("/settings?open=notifications")}
                 onClick={() => setOpen(false)}
@@ -102,6 +102,16 @@ export function NotificationBell() {
               >
                 <Icon icon="solar:tuning-2-linear" width={14} aria-hidden />
                 Dove ricevere gli avvisi
+              </Link>
+            ) : (
+              // Everyone else's way out of the panel: notifications on their own devices.
+              <Link
+                href="/account?open=push"
+                onClick={() => setOpen(false)}
+                className="text-muted hover:text-foreground inline-flex items-center gap-1 text-xs"
+              >
+                <Icon icon="solar:smartphone-2-linear" width={14} aria-hidden />
+                Ricevile su questo dispositivo
               </Link>
             )}
           </div>
