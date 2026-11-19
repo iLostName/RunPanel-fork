@@ -4,6 +4,7 @@ import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { databaseNameSchema } from "@/lib/validation";
 import { databaseAdmin, DatabaseBusyError, serviceTarget } from "@/services/service-databases";
+import { engineLabel } from "@/lib/labels";
 
 type Params = { params: Promise<{ serviceId: string; name: string }> };
 
@@ -34,13 +35,13 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       .executeTakeFirst();
 
     if (!service) {
-      return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+      return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
     }
 
     const admin = databaseAdmin(service.type);
     if (!admin.supported) {
       return NextResponse.json(
-        { error: "Questo tipo di servizio non ha database con un nome." },
+        { error: `${engineLabel(service.type)} non ha database con un nome.` },
         { status: 400 }
       );
     }
@@ -59,14 +60,14 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     // deploy. Dropping it would leave the service pointing at nothing.
     if (name === target.credentials.database) {
       return NextResponse.json(
-        { error: "È il database principale del servizio: per eliminarlo elimina il servizio." },
+        { error: `È il database principale di «${service.name}»: si elimina solo insieme a «${service.name}».` },
         { status: 400 }
       );
     }
 
     if (service.status !== "running") {
       return NextResponse.json(
-        { error: "Il servizio è fermo: avvialo per eliminare un database." },
+        { error: `${engineLabel(service.type)} è fermo: avvialo per eliminare un database.` },
         { status: 409 }
       );
     }

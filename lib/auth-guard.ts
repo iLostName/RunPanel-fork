@@ -93,9 +93,9 @@ export async function requireService(
   const ctx = await requireUser();
   if (isDenied(ctx)) return ctx;
   const ref = await serviceRef(serviceId);
-  if (!ref) return notFound("Servizio");
+  if (!ref) return notFound("Database");
   const access = serviceAccess(ctx.principal, ref);
-  if (access.level === null) return notFound("Servizio");
+  if (access.level === null) return notFound("Database");
   if (!satisfies(access, SERVICE_ACTIONS[action])) return forbidden();
   return { ...ctx, access };
 }

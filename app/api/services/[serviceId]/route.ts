@@ -56,7 +56,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!service) {
-    return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+    return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
   }
 
   // A service reachable by container name is one that shares a network with the
@@ -172,7 +172,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       .executeTakeFirst();
 
     if (!service) {
-      return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+      return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
     }
 
     const { projectId, injectEnv, envKey, access, folderId, restartCron, displayName } = parsed.data;
@@ -387,7 +387,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       .executeTakeFirst();
 
     if (!service) {
-      return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+      return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
     }
 
     // The project slug is part of a service's volume names, so it has to be

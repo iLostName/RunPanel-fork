@@ -353,7 +353,7 @@ export async function dumpServiceDatabase(
   if (!(await isRunning(service.container_name))) {
     // Starting it would change the state of the machine behind the operator's
     // back, at three in the morning, to take a backup. Report instead.
-    throw new DumpSkipped("Il servizio è fermo: non è stato possibile leggerlo");
+    throw new DumpSkipped("Il database è fermo: non è stato possibile leggerlo");
   }
 
   const target = serviceTarget(service);

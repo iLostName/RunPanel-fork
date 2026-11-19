@@ -22,6 +22,7 @@ import { useCan } from "@/lib/hooks/useMe";
 import { serviceDisplayName } from "@/lib/service-name";
 import { useMemberApi, useServerHref } from "@/lib/hooks/useNode";
 import { useClusterList } from "@/lib/hooks/useClusterList";
+import { SUBPAGE_TITLES } from "@/lib/nav";
 import type { Located } from "@/lib/cluster-merge";
 import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
 
@@ -189,7 +190,7 @@ export default function ServicesPage() {
             {canCreate && (
               <LinkButton href={href("/services/new")} variant="secondary" className="max-md:hidden">
                 <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
-                Nuovo servizio
+                {SUBPAGE_TITLES["/services/new"]}
               </LinkButton>
             )}
           </>
@@ -199,12 +200,12 @@ export default function ServicesPage() {
       {/* Read once, then known: closed, so it stops pushing the list down on
           every visit. */}
       <Section
-        title="Come si collegano i servizi"
+        title="Come si collegano i database"
         summary="Dentro un progetto: variabili automatiche. Autonomi: riga di connessione da copiare."
         className="mb-4"
       >
         <p className="text-muted text-sm">
-          Un servizio creato dentro un progetto gli si collega da solo: al deploy l&apos;app riceve{" "}
+          Un database creato dentro un progetto gli si collega da solo: al deploy l&apos;app riceve{" "}
           <Code>DATABASE_URL</Code> (o <Code>REDIS_URL</Code>, <Code>MONGODB_URL</Code>) con host,
           porta e password già giusti. Uno senza progetto resta autonomo e lo usa chiunque: apri la
           sua pagina e copia la riga pronta — da un container si raggiunge su{" "}
@@ -218,24 +219,24 @@ export default function ServicesPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Cerca per nome o tipo…"
-            aria-label="Cerca servizi"
+            aria-label="Cerca database"
           />
         </div>
       )}
 
-      <UnreachableServers failed={failed} what="i servizi" className="mb-4" />
+      <UnreachableServers failed={failed} what="i database" className="mb-4" />
 
       {!data && loadError ? (
-        <LoadError what="i servizi" error={loadError} onRetry={() => void refresh()} />
+        <LoadError what="i database" error={loadError} onRetry={() => void refresh()} />
       ) : filtered.length === 0 ? (
         <Panel>
           <EmptyState
             icon="solar:database-linear"
-            title={services.length === 0 ? "Nessun servizio" : "Nessun risultato"}
+            title={services.length === 0 ? "Nessun database" : "Nessun risultato"}
             description={
               services.length === 0
                 ? "PostgreSQL, MySQL, Redis o MongoDB, provisionati come container con volume dedicato. Aprine uno dal progetto che lo userà e il collegamento è già fatto."
-                : "Nessun servizio corrisponde alla ricerca."
+                : "Nessun database corrisponde alla ricerca."
             }
           />
         </Panel>
@@ -253,7 +254,7 @@ export default function ServicesPage() {
         </div>
       )}
 
-      {canCreate && <Fab href={href("/services/new")} label="Nuovo database" />}
+      {canCreate && <Fab href={href("/services/new")} label={SUBPAGE_TITLES["/services/new"]} />}
     </>
   );
 }

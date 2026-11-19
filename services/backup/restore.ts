@@ -750,7 +750,7 @@ async function requireService(id: string, expectedType: string): Promise<Service
     .where("id", "=", id)
     .executeTakeFirst();
 
-  if (!service) throw new Error("Il servizio di destinazione non esiste più");
+  if (!service) throw new Error("Il database di destinazione non esiste più");
   if (expectedType && service.type !== expectedType) {
     // Checked here and not only in the browser: a mismatched engine would
     // either fail confusingly or, worse, half-apply.
@@ -782,7 +782,7 @@ async function refuseOpenSessions(target: ServiceTarget, env: Record<string, str
       [...execArgs(target, env), "psql", "-U", target.credentials.user, "-d", "postgres", "-tAc", sql],
       { env, timeout: 15_000 }
     );
-    if (!result) throw new Error("Il servizio non risponde: niente è stato toccato.");
+    if (!result) throw new Error("Il database non risponde: niente è stato toccato.");
     busy = result.stdout.trim();
     if (!busy) return;
   }
@@ -867,8 +867,8 @@ async function restoreDatabase(
   // a run ending in success would leave them all locked out with no explanation.
   if (!(await canSignIn(target, engine))) {
     throw new Error(
-      "I dati sono stati ripristinati, ma il dump ha sostituito gli utenti del servizio: " +
-        "le credenziali salvate nel pannello non funzionano più. Servono quelle del servizio di origine."
+      "I dati sono stati ripristinati, ma il dump ha sostituito gli utenti del database: " +
+        "le credenziali salvate nel pannello non funzionano più. Servono quelle del database di origine."
     );
   }
 

@@ -169,7 +169,7 @@ export function UpdateBanner() {
               ? "Il pannello scarica la nuova versione, installa e builda; il riavvio su questo host lo fai tu."
               : "Il pannello scarica la nuova versione, installa, builda e si riavvia."}{" "}
             Le modifiche locali non committate in questa installazione vengono scartate. I progetti
-            e i servizi in esecuzione non vengono toccati.
+            e i database in esecuzione non vengono toccati.
           </>
         }
         onConfirm={apply}

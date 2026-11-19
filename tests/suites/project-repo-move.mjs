@@ -63,6 +63,15 @@ export async function run({ base, dataDir }) {
     `${res.status} ${JSON.stringify(res.body)}`
   );
 
+  // The File tab reads the code and shows an empty state: it once printed the
+  // English sentence meant for the deploy log as an error.
+  res = await api.call(`/api/projects/${projectId}/files`);
+  r.check(
+    "its file listing says there is nothing yet, with a code",
+    res.status === 404 && res.body.code === "no-source" && !/no source yet/i.test(res.body.error ?? ""),
+    `${res.status} ${JSON.stringify(res.body)}`
+  );
+
   // The checkout an upload would have produced, with a nested folder and a
   // dotfile — both are what a naive copy loses.
   mkdirSync(join(link, ".git"), { recursive: true });
@@ -70,6 +79,15 @@ export async function run({ base, dataDir }) {
   writeFileSync(join(link, ".git", "HEAD"), "ref: refs/heads/main\n");
   writeFileSync(join(link, "src", "deep", "file.txt"), "contenuto-originale\n");
   writeFileSync(join(link, ".env.example"), "A=1\n");
+
+  res = await api.call(`/api/projects/${projectId}/files`);
+  r.check(
+    "with a checkout it lists the files, not .git",
+    res.status === 200 &&
+      res.body.entries?.some((entry) => entry.name === "src" && entry.type === "dir") &&
+      !res.body.entries?.some((entry) => entry.name === ".git"),
+    `${res.status} ${JSON.stringify(res.body)}`
+  );
 
   // --- what may never be a destination --------------------------------------
   for (const [what, path] of [

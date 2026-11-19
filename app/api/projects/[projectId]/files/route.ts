@@ -3,6 +3,7 @@ import { isDenied, requireProject } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { isPathShapeSafe, resolveInside } from "@/lib/fs-safe";
 import { LIST_DIRECTORY_NOT_FOUND, LIST_DIRECTORY_SCRIPT, parseDirectoryListing } from "@/lib/container-listing";
+import { NO_FILES_YET } from "@/lib/project-files";
 import { projectFileRoots } from "@/services/project-releases";
 import { appContainerName } from "@/services/docker/labels";
 import { assertOwnAppContainer, ForeignContainerError } from "@/services/process-drivers/docker-driver";
@@ -14,6 +15,17 @@ import path from "path";
 const exec = promisify(execFile);
 
 type Params = { params: Promise<{ projectId: string }> };
+
+/**
+ * Nothing to list yet. The code is what the File tab reads to show its empty
+ * state; the sentence is for any other client of the API.
+ */
+function noFilesYet() {
+  return NextResponse.json(
+    { error: "Il progetto non ha ancora file: arriveranno con il primo deploy.", code: NO_FILES_YET },
+    { status: 404 }
+  );
+}
 
 export async function GET(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
@@ -38,7 +50,9 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   try {
     if (project.runtime_type === "docker") {
-      await assertOwnAppContainer(project.slug);
+      // No container at all is a project never deployed: nothing to list yet,
+      // rather than the daemon's "No such container" as an error.
+      if (!(await assertOwnAppContainer(project.slug))) return noFilesYet();
 
       // The path travels as an argument of the script, never inside its text.
       const { stdout } = await exec("docker", [
@@ -54,17 +68,8 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     // A project whose source was never checked out has no repo directory at
     // all. Reporting that as "Path not found" sends you looking for a missing
-    // folder inside a project that has no code in the first place — the same
-    // confusion the deploy pipeline already words properly.
-    if (!fs.existsSync(repoDir)) {
-      return NextResponse.json(
-        {
-          error:
-            "The project has no source yet — configure a GitHub repository or upload a ZIP, then deploy.",
-        },
-        { status: 404 }
-      );
-    }
+    // folder inside a project that has no code in the first place.
+    if (!fs.existsSync(repoDir)) return noFilesYet();
 
     // Resolved through any symlinks, so a link in the repository cannot be used
     // to list a directory outside it — only into the project folder, where a

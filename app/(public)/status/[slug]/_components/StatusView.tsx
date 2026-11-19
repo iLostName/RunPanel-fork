@@ -9,6 +9,7 @@ import {
   dayTone,
   verdictWords,
   type PageTone,
+  type PublicDay,
   type PublicPageIncident,
   type PublicProject,
   type PublicSnapshot,
@@ -94,36 +95,81 @@ function formats(zone: string): Formats {
   };
 }
 
-function DayBars({ days, f }: { days: PublicProject["days"]; f: Formats }) {
+/** "lun 16 nov · 98,50% · 2 interruzioni (21 min)": a day, as the line under the bars tells it. */
+function dayLine(d: PublicDay, f: Formats): string {
+  // Noon of the day, not its start: the start was cut with today's offset,
+  // and across a change of hour it falls on the day before.
+  const parts = [f.day.format(d.day + HALF_DAY), d.ratio === null ? "nessun dato" : formatUptimePercent(d.ratio)];
+  // Only a count it is sure of: none, or a day the list may not cover, says
+  // nothing, so a missed check is never contradicted by "no outages".
+  const o = d.outages;
+  if (o && o.count > 0) {
+    const what = o.count === 1 ? "1 interruzione" : `${o.count} interruzioni`;
+    parts.push(`${what}${o.open ? " in corso" : ""} (${o.atLeast ? "almeno " : ""}${shortDuration(o.ms)})`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * The last thirty days of one project, a bar each, and what a bar means.
+ *
+ * The meaning used to be a `title` tooltip: a mouse could read it, a finger
+ * never. Each bar is now a choice in a radio group, with no script: tapping
+ * one, or arrowing to it, writes its day on the line under the strip, where
+ * the axis was — the date, the share of answered checks, the outages — and
+ * fades the others. A mouse gets the same line on hover. One stop in the tab
+ * order for the whole strip, and a screen reader reads each day's line as the
+ * name of its choice.
+ */
+function DayBars({ days, f, group }: { days: PublicDay[]; f: Formats; group: string }) {
   if (days.length === 0) return <p className="text-muted text-xs">Nessun dato degli ultimi {PAGE_DAYS} giorni.</p>;
   const good = days.filter((d) => dayTone(d.ratio) === "success").length;
   const none = days.filter((d) => d.ratio === null).length;
   return (
-    <div>
-      <div
-        className="flex h-7 items-stretch gap-[2px]"
-        role="img"
-        aria-label={`Ultimi ${days.length} giorni: ${good} senza interruzioni, ${days.length - good - none} con interruzioni, ${none} senza dati.`}
-      >
-        {days.map((d) => (
-          <span
-            key={d.day}
-            className={cn("min-w-0 flex-1 rounded-[2px]", TONE_BAR[dayTone(d.ratio)])}
-            // Noon of the day, not its start: the start was cut with today's
-            // offset, and across a change of hour it falls on the day before.
-            title={`${f.day.format(d.day + HALF_DAY)}: ${d.ratio === null ? "nessun dato" : formatUptimePercent(d.ratio)}`}
-          />
-        ))}
+    <div
+      role="radiogroup"
+      aria-label={`Ultimi ${days.length} giorni: ${good} senza interruzioni, ${days.length - good - none} con interruzioni, ${none} senza dati.`}
+      className="group/strip relative grid gap-x-[2px]"
+      style={{ gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }}
+    >
+      {/* First, so a day's line, drawn over it in the same cell, wins. The
+          middle words are for a finger only: a mouse finds the line by
+          hovering, but nothing else says that a bar can be tapped. */}
+      <div className="text-muted col-span-full row-start-2 mt-1 grid grid-cols-[auto_1fr_auto] gap-x-2 text-meta" aria-hidden>
+        <span className="whitespace-nowrap">{days.length} giorni fa</span>
+        <span className="hidden min-w-0 text-center pointer-coarse:inline">Tocca un giorno per i dettagli</span>
+        <span className="col-start-3 whitespace-nowrap">Oggi</span>
       </div>
-      <div className="text-muted mt-1 flex justify-between text-meta" aria-hidden>
-        <span>{days.length} giorni fa</span>
-        <span>Oggi</span>
-      </div>
+      {days.map((d, i) => {
+        const line = `${group}-${i}`;
+        return (
+          // No box of its own: its bar takes a column of the first row, its
+          // line the whole second one.
+          <label key={d.day} className="group/day contents">
+            <input type="radio" name={group} aria-labelledby={line} className="peer sr-only" />
+            <span
+              aria-hidden
+              className={cn(
+                "row-start-1 h-7 cursor-pointer rounded-[2px] transition-opacity",
+                TONE_BAR[dayTone(d.ratio)],
+                "group-has-checked/strip:opacity-35 peer-checked:opacity-100!",
+                "peer-focus-visible:outline-focus peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2"
+              )}
+            />
+            <span
+              id={line}
+              className="bg-surface text-foreground col-span-full row-start-2 mt-1 hidden text-xs tabular-nums peer-checked:z-[1] peer-checked:block group-hover/day:z-[2] group-hover/day:block"
+            >
+              {dayLine(d, f)}
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 }
 
-function ProjectRow({ project, now, f }: { project: PublicProject; now: number; f: Formats }) {
+function ProjectRow({ project, now, f, group }: { project: PublicProject; now: number; f: Formats; group: string }) {
   const words = STATE_WORDS[project.state];
   const since = project.state === "down" && project.since !== null ? ` da ${durationWords(now - project.since)}` : "";
   return (
@@ -146,7 +192,7 @@ function ProjectRow({ project, now, f }: { project: PublicProject; now: number; 
           <dd className="text-foreground font-medium tabular-nums">{formatUptimePercent(project.up30d)}</dd>
         </div>
       </dl>
-      <DayBars days={project.days} f={f} />
+      <DayBars days={project.days} f={f} group={group} />
     </li>
   );
 }
@@ -233,7 +279,7 @@ export function StatusView({
           <ul className="border-border bg-surface divide-separator divide-y rounded-[var(--radius)] border shadow-[var(--surface-shadow)]">
             {snapshot.projects.map((project, index) => (
               // The position is the key: the page has no id to show, by design.
-              <ProjectRow key={index} project={project} now={now} f={f} />
+              <ProjectRow key={index} project={project} now={now} f={f} group={`days-${index}`} />
             ))}
           </ul>
           <ul className="text-muted mt-2 flex flex-wrap gap-x-4 gap-y-1 text-meta" aria-label="Legenda delle barre">

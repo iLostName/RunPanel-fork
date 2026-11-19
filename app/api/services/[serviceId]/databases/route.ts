@@ -5,6 +5,7 @@ import { getDb, nowIso } from "@/lib/db";
 import { generateId } from "@/lib/utils";
 import { createDatabaseSchema } from "@/lib/validation";
 import { databaseAdmin, serviceTarget } from "@/services/service-databases";
+import { engineLabel } from "@/lib/labels";
 
 type Params = { params: Promise<{ serviceId: string }> };
 
@@ -31,7 +32,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!service) {
-    return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+    return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
   }
 
   const admin = databaseAdmin(service.type);
@@ -109,20 +110,20 @@ export async function POST(request: NextRequest, { params }: Params) {
       .executeTakeFirst();
 
     if (!service) {
-      return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+      return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
     }
 
     const admin = databaseAdmin(service.type);
     if (!admin.supported) {
       return NextResponse.json(
-        { error: "Questo tipo di servizio non ha database con un nome." },
+        { error: `${engineLabel(service.type)} non ha database con un nome.` },
         { status: 400 }
       );
     }
 
     if (service.status !== "running") {
       return NextResponse.json(
-        { error: "Il servizio è fermo: avvialo per creare un database." },
+        { error: `${engineLabel(service.type)} è fermo: avvialo per creare un database.` },
         { status: 409 }
       );
     }

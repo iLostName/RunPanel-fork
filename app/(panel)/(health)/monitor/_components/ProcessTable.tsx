@@ -253,7 +253,7 @@ export function ProjectTable({
         <EmptyState
           icon="solar:widget-2-linear"
           title="Nessun progetto"
-          description="I progetti creati compariranno qui con i loro processi e servizi."
+          description="I progetti creati compariranno qui con i loro processi e database."
         />
       </Panel>
     );
@@ -273,7 +273,7 @@ export function ProjectTable({
         const meta = statusMeta(project.status);
         const inside = [
           containers.length > 0 ? `${containers.length} container` : null,
-          services.length > 0 ? (services.length === 1 ? "1 servizio" : `${services.length} servizi`) : null,
+          services.length > 0 ? `${services.length} database` : null,
         ]
           .filter(Boolean)
           .join(" e ");

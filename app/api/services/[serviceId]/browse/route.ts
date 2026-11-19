@@ -51,7 +51,7 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const db = await getDb();
   const service = await db.selectFrom("services").selectAll().where("id", "=", serviceId).executeTakeFirst();
-  if (!service) return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+  if (!service) return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
 
   if (!(await isDockerAvailable())) {
     return NextResponse.json({ error: "Docker non è raggiungibile" }, { status: 503 });

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
-import { CRUMBS_WITHOUT_PAGE, NAV_SECTIONS, SEGMENT_LABELS, isActiveNav } from "@/lib/nav";
+import { CRUMBS_WITHOUT_PAGE, NAV_SECTIONS, isActiveNav, titleOfPath } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { SearchButton } from "@/components/SearchButton";
 import { UserMenu } from "@/components/UserMenu";
@@ -30,8 +30,9 @@ function buildCrumbs(pathname: string, named: ReadonlyMap<string, string>): Crum
 
   for (const segment of segments) {
     href += `/${segment}`;
-    // A page-provided name (a project's, a service's) wins over the raw id.
-    const known = named.get(segment) ?? SEGMENT_LABELS[segment];
+    // A name the page gave (a project's, a database's) first, then the shared
+    // title of the path — the one its heading prints — and the raw id last.
+    const known = named.get(segment) ?? titleOfPath(href);
     crumbs.push({
       label: known ?? decodeURIComponent(segment),
       href,
@@ -154,6 +155,9 @@ export function TopBar() {
       <div className="flex h-[var(--top-bar-height)] items-center justify-between gap-3 pr-[max(0.5rem,var(--safe-right))] pl-[max(0.25rem,var(--safe-left))] md:h-14 md:px-6">
         {/* The phone's navigation bar. */}
         <div className="touch-chrome flex min-w-0 flex-1 items-center gap-1 md:hidden">
+          {/* Up to 55% of the bar: the parent is named in full now ("Nuovo
+              progetto", not "Nuovo"), and at 360px 45% cut it to "Nuovo
+              proge…" beside a title that needed far less than the rest. */}
           {parent ? (
             <Link
               href={href(parent.href)}
@@ -165,7 +169,7 @@ export function TopBar() {
                 }
               }}
               aria-label={`Torna a ${parent.label}`}
-              className="text-accent flex h-11 max-w-[45%] shrink-0 items-center gap-0.5 rounded-[var(--radius)] pr-2 pl-1 text-sm transition-opacity active:opacity-60"
+              className="text-accent flex h-11 max-w-[55%] shrink-0 items-center gap-0.5 rounded-[var(--radius)] pr-2 pl-1 text-sm transition-opacity active:opacity-60"
             >
               <Icon icon="solar:alt-arrow-left-linear" width={24} aria-hidden className="shrink-0" />
               <span className="truncate">{parent.label}</span>

@@ -595,11 +595,11 @@ export function describe(event: NotifyEvent): NotifyMessage {
     case "service.crashed":
       return {
         level: "danger",
-        title: "Servizio fermo",
+        title: "Database fermo",
         body: join([
           html`${bold(event.name)} non è più in esecuzione, e non è stato il pannello a fermarlo.`,
           line("Container", code(event.container)),
-          html`Un progetto collegato a questo servizio probabilmente non riesce più a connettersi.`,
+          html`Un progetto collegato a questo database probabilmente non riesce più a connettersi.`,
         ]),
       };
 
@@ -608,7 +608,7 @@ export function describe(event: NotifyEvent): NotifyMessage {
         level: event.ok ? "info" : "danger",
         title: event.ok ? "Riavvio programmato eseguito" : "Riavvio programmato fallito",
         body: join([
-          html`${bold(event.name)} (${escapeHtml(event.kind === "project" ? "progetto" : "servizio")}): ${escapeHtml(event.outcome)}.`,
+          html`${bold(event.name)} (${escapeHtml(event.kind === "project" ? "progetto" : "database")}): ${escapeHtml(event.outcome)}.`,
           event.ok ? null : html`Il pannello non riprova da solo: guarda lo stato e decidi tu.`,
         ]),
       };

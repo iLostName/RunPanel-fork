@@ -356,7 +356,7 @@ function CardGrid({ children }: { children: React.ReactNode }) {
 function countLabel(projects: number, services: number, none = "Vuota"): string {
   const parts: string[] = [];
   if (projects > 0) parts.push(projects === 1 ? "1 progetto" : `${projects} progetti`);
-  if (services > 0) parts.push(services === 1 ? "1 servizio" : `${services} servizi`);
+  if (services > 0) parts.push(`${services} database`);
   return parts.length > 0 ? parts.join(" · ") : none;
 }
 
@@ -441,7 +441,7 @@ function ServerRoot({
           title={
             <span className="flex items-center gap-2">
               <Icon icon="solar:database-linear" width={16} className="text-muted shrink-0" aria-hidden />
-              Servizi senza progetto
+              Database senza progetto
             </span>
           }
           summary={countLabel(0, services.length)}
@@ -586,7 +586,7 @@ export default function HomePage() {
     <>
       <PageHeader
         title="Panoramica"
-        description={isSolo ? "Progetti, servizi e stato della macchina" : "Progetti, servizi e stato di ogni server"}
+        description={isSolo ? "Progetti, database e stato della macchina" : "Progetti, database e stato di ogni server"}
         actions={
           <>
             <ServerFilter />
@@ -676,7 +676,7 @@ export default function HomePage() {
 
       {error && (
         <LoadError
-          what={projectsError ? "i progetti" : "i servizi"}
+          what={projectsError ? "i progetti" : "i database"}
           error={error}
           note="Il pannello riprova da solo."
           onRetry={() => void Promise.all([refreshProjects(), refreshServices()])}
@@ -697,7 +697,7 @@ export default function HomePage() {
 
       <UnreachableServers
         failed={failed}
-        what="i progetti e i servizi"
+        what="i progetti e i database"
         lastKnown={[...offlineProjects, ...offlineServices].map((row) => row.memberId)}
         className="mb-4"
       />
@@ -707,7 +707,7 @@ export default function HomePage() {
           <EmptyState
             icon="solar:widget-2-linear"
             title="Nessun progetto"
-            description="Un progetto contiene un'app e i servizi di cui ha bisogno."
+            description="Un progetto contiene un'app e i database di cui ha bisogno."
             action={
               canCreate ? (
                 <LinkButton href={href("/projects/new")} variant="primary">
@@ -748,8 +748,8 @@ export default function HomePage() {
                   {filedProjects.length === 0 && filedServices.length === 0 ? (
                     <p className="text-muted text-sm">
                       {serverParam
-                        ? "Niente di questo server in questa cartella. Usa il menu ⋯ di un progetto o di un servizio per spostarlo qui."
-                        : "Cartella vuota. Usa il menu ⋯ di un progetto o di un servizio per spostarlo qui."}
+                        ? "Niente di questo server in questa cartella. Usa il menu ⋯ di un progetto o di un database per spostarlo qui."
+                        : "Cartella vuota. Usa il menu ⋯ di un progetto o di un database per spostarlo qui."}
                     </p>
                   ) : (
                     <Cards {...cards} projects={filedProjects} services={filedServices} showServer={showServer} />
@@ -762,7 +762,7 @@ export default function HomePage() {
           {sections.map((section) => {
             const server = servers.find((s) => s.id === section.memberId);
             const content = section.empty ? (
-              !isSolo && <p className="text-muted px-1 text-sm">Nessun progetto né servizio su questo server.</p>
+              !isSolo && <p className="text-muted px-1 text-sm">Nessun progetto né database su questo server.</p>
             ) : (
               <ServerRoot
                 {...cards}

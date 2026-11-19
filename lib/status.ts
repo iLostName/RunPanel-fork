@@ -62,9 +62,9 @@ const STATUS_META: Record<KnownStatus, StatusMeta> = {
 
 /** What a start, stop or restart of a service reads as: the tokens are the API's, not the operator's. */
 const SERVICE_CONTROL = {
-  start: { done: "Servizio avviato", failed: "Avvio non riuscito" },
-  stop: { done: "Servizio fermato", failed: "Arresto non riuscito" },
-  restart: { done: "Servizio riavviato", failed: "Riavvio non riuscito" },
+  start: { done: "Database avviato", failed: "Avvio non riuscito" },
+  stop: { done: "Database fermato", failed: "Arresto non riuscito" },
+  restart: { done: "Database riavviato", failed: "Riavvio non riuscito" },
 } as const;
 
 export function serviceControlText(action: keyof typeof SERVICE_CONTROL): { done: string; failed: string } {

@@ -14,6 +14,7 @@ import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useEventStream } from "@/lib/hooks/useEventStream";
 import { useResource } from "@/lib/hooks/useResource";
+import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatDuration, formatWhen } from "@/lib/format";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
@@ -46,6 +47,8 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
     api(`/api/backups/restore/${restoreId}`),
     { intervalMs: poll3000 }
   );
+  // The trail and the phone's bar print what the heading does, not the id.
+  useCrumbLabel(restoreId, data ? "Ripristino" : null);
 
   const running = data?.status === "running";
   const [streamed, setStreamed] = useState<LogLine[]>([]);

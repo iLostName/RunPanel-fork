@@ -518,7 +518,7 @@ async function resolveJobs(
           targetKind: "service-db",
           refId: id,
           refName: id,
-          reason: "Il servizio non esiste più",
+          reason: "Il database non esiste più",
         },
         `missing:service:${id}`
       );

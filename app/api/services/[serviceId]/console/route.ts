@@ -48,7 +48,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!service) {
-    return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+    return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
   }
 
   const action = parsed.data;
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   // exactly what someone stares at to find out why.
   if (action.mode !== "logs" && service.status !== "running") {
     return NextResponse.json(
-      { error: "Il servizio è fermo: avvialo per aprire una sessione." },
+      { error: "Il database è fermo: avvialo per aprire una sessione." },
       { status: 409 }
     );
   }

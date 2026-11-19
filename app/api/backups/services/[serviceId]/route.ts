@@ -30,7 +30,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
   const db = await getDb();
   const service = await db.selectFrom("services").selectAll().where("id", "=", serviceId).executeTakeFirst();
-  if (!service) return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+  if (!service) return NextResponse.json({ error: "Database non trovato" }, { status: 404 });
 
   const visible = await visiblePolicyIds(denied.principal);
   const policies = (await listPolicies()).filter((policy) => visible === "all" || visible.has(policy.id));

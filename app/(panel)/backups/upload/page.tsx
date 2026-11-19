@@ -15,7 +15,7 @@ import { ListRow, RowMenu } from "@/components/ui/ListRow";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useMe } from "@/lib/hooks/useMe";
 import { useResource } from "@/lib/hooks/useResource";
-import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
+import { SUBPAGE_TITLES } from "@/lib/nav";
 import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 import { formatBytes, formatWhen } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -98,8 +98,6 @@ export default function UploadRestorePage() {
   const api = useNodeApi();
   const href = useServerHref();
   const me = useMe();
-  // The trail would otherwise say "upload".
-  useCrumbLabel("upload", "Da un archivio");
 
   const list = useResource<{ uploads: UploadRecord[] }>(me.isOwner ? api("/api/backups/uploads") : null, {
     intervalMs: 0,
@@ -221,7 +219,7 @@ export default function UploadRestorePage() {
   if (!me.isOwner) {
     return (
       <>
-        <PageHeader title="Ripristina da un archivio" back={{ href: href("/backups"), label: "Torna ai backup" }} />
+        <PageHeader title={SUBPAGE_TITLES["/backups/upload"]} back={{ href: href("/backups"), label: "Torna ai backup" }} />
         <Panel>
           <EmptyState
             icon="solar:lock-keyhole-linear"
@@ -242,7 +240,7 @@ export default function UploadRestorePage() {
   return (
     <>
       <PageHeader
-        title="Ripristina da un archivio"
+        title={SUBPAGE_TITLES["/backups/upload"]}
         description="Un backup scaricato da questo pannello o da un altro server: lo carichi, il pannello lo controlla, e scegli cosa rimettere."
         back={{ href: href("/backups"), label: "Torna ai backup" }}
       />

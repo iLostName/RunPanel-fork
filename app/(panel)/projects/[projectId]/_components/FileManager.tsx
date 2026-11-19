@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import { toast } from "@/lib/toast";
 import { MSG } from "@/lib/copy";
 import { formatBytes } from "@/lib/format";
+import { NO_FILES_YET } from "@/lib/project-files";
 import { cn } from "@/lib/utils";
 import { SkeletonText } from "@/components/ui/Skeletons";
 import { useNodeApi } from "@/lib/hooks/useNode";
@@ -23,13 +24,27 @@ interface FileEntry {
  * bottom of the page, so every log line and every status poll re-rendered a
  * file tree and a textarea holding an entire file — for users who were not even
  * looking at it.
+ *
+ * A project with nothing to list yet is not an error: the route says so with
+ * a code (`NO_FILES_YET`), and `onNoFiles` hands it to the tab, which shows an
+ * empty state in place of this.
  */
-export const FileManager = memo(function FileManager({ projectId, runtimeType }: { projectId: string; runtimeType: string }) {
+export const FileManager = memo(function FileManager({
+  projectId,
+  runtimeType,
+  onNoFiles,
+}: {
+  projectId: string;
+  runtimeType: string;
+  onNoFiles: () => void;
+}) {
   const api = useNodeApi();
   const [currentPath, setCurrentPath] = useState("/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [dirError, setDirError] = useState<string | null>(null);
-  const [loadingDir, setLoadingDir] = useState(false);
+  // Loading from the first paint: false here drew "Cartella vuota" until the
+  // first answer arrived.
+  const [loadingDir, setLoadingDir] = useState(true);
 
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [content, setContent] = useState("");
@@ -42,10 +57,15 @@ export const FileManager = memo(function FileManager({ projectId, runtimeType }:
       fetch(api(`/api/projects/${projectId}/files?path=${encodeURIComponent(dirPath)}`), { signal })
         .then(async (res) => {
           const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+          if (!res.ok && data.code === NO_FILES_YET) return null;
           if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
           return data as { entries?: FileEntry[] };
         })
         .then((data) => {
+          if (!data) {
+            onNoFiles();
+            return;
+          }
           setEntries(data.entries ?? []);
           setCurrentPath(dirPath);
           setDirError(null);
@@ -57,7 +77,7 @@ export const FileManager = memo(function FileManager({ projectId, runtimeType }:
           setEntries([]);
           setLoadingDir(false);
         }),
-    [projectId, api]
+    [projectId, api, onNoFiles]
   );
 
   useEffect(() => {

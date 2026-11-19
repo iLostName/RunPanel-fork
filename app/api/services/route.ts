@@ -141,8 +141,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: projectSlug
-            ? `Il progetto ha già un servizio chiamato "${name}".`
-            : `Esiste già un servizio "${name}". I servizi senza progetto condividono un unico spazio di nomi.`,
+            ? `Il progetto ha già un database chiamato "${name}".`
+            : `Esiste già un database "${name}". I database senza progetto condividono un unico spazio di nomi.`,
         },
         { status: 409 }
       );

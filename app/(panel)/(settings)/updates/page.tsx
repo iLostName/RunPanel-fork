@@ -288,7 +288,7 @@ function ServerUpdatesPage() {
               <span className="text-muted text-xs">
                 {canUpdate.restart === "manual"
                   ? "Scarica, installa e builda; lo scambio lo fai tu."
-                  : "Il pannello si riavvia da solo. I progetti e i servizi restano su."}
+                  : "Il pannello si riavvia da solo. I progetti e i database restano su."}
               </span>
             </div>
           )}

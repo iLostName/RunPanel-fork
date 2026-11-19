@@ -3,7 +3,8 @@ import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 
 /**
- * What reaches the screen when a request fails, and who may open what.
+ * What reaches the screen when a request fails, who may open what, and what
+ * each page is called.
  *
  * `HTTP 403`, `Failed to fetch` and `ECONNREFUSED` were all shown as they came.
  * The two rules that matter: a code never reaches the reader as the sentence,
@@ -18,7 +19,7 @@ export async function run({ repoRoot }) {
   const r = createReporter("error-text-unit");
   const load = (file) => import(pathToFileURL(join(repoRoot, "lib", file)).href);
   const { readableError, refusalNote, FORBIDDEN_TEXT, isNotFound } = await load("error-text.ts");
-  const { pageAt, passesNavPermission } = await load("nav.ts");
+  const { pageAt, passesNavPermission, titleOfPath, SUBPAGE_TITLES, CRUMBS_WITHOUT_PAGE } = await load("nav.ts");
 
   // --- failures in words ------------------------------------------------------
   {
@@ -68,6 +69,22 @@ export async function run({ repoRoot }) {
     const settings = pageAt("/settings");
     r.check("Pannello opens with either permission", passesNavPermission(settings?.permission, (p) => p === "registries"));
     r.check("and stays shut with neither", !passesNavPermission(settings?.permission, () => false));
+  }
+
+  // --- what a path is called: the crumb, the phone's bar, the heading ---------
+  {
+    r.check("a destination is called what the sidebar calls it", titleOfPath("/services") === "Database" && titleOfPath("/settings") === "Generale");
+    r.check(
+      "new is three pages, each under its own name",
+      titleOfPath("/projects/new") === "Nuovo progetto" && titleOfPath("/services/new") === "Nuovo database" && titleOfPath("/backups/new") === "Nuova pianificazione",
+      [titleOfPath("/projects/new"), titleOfPath("/services/new"), titleOfPath("/backups/new")].join(", ")
+    );
+    r.check("the catalogue is what its heading says", titleOfPath("/projects/new/catalog") === SUBPAGE_TITLES["/projects/new/catalog"]);
+    r.check("a project's settings are not the panel's", titleOfPath("/projects/abc/settings") === undefined);
+    r.check("an id is left to its page", titleOfPath("/projects/abc") === undefined && titleOfPath("/backups/runs/abc") === undefined);
+    r.check("a level with no page is named, not linked", titleOfPath("/backups/runs") === "Esecuzioni" && CRUMBS_WITHOUT_PAGE.has("/backups/runs"));
+    r.check("every sub-page is a real page", Object.keys(SUBPAGE_TITLES).every((path) => !CRUMBS_WITHOUT_PAGE.has(path)));
+    r.check("nothing inherited is a title", titleOfPath("constructor") === undefined && titleOfPath("__proto__") === undefined);
   }
 
   // --- gone, rather than failed -------------------------------------------------

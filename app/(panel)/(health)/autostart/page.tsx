@@ -200,7 +200,7 @@ export default function AutostartPage() {
         title: "Dopo un riavvio il pannello torna su",
         detail:
           willReturn === 0
-            ? "Ma nessun progetto o servizio è marcato per ripartire: sceglili qui sotto."
+            ? "Ma nessun progetto o database è marcato per ripartire: sceglili qui sotto."
             : `E con lui ${willReturn} ${willReturn === 1 ? "elemento" : "elementi"}, nell'ordine che hai scelto.`,
       }
     : {
@@ -402,8 +402,8 @@ export default function AutostartPage() {
               PM2 ci sta dentro, perché è il pannello ad averlo avviato. Ogni{" "}
               <Code>systemctl restart runpanel</Code> porta giù con sé i progetti con runtime nativo.
               Reinstalla la unit da qui: quella generata adesso scrive{" "}
-              <Code>KillMode=process</Code>. I servizi Docker non sono mai stati coinvolti, i loro
-              container appartengono al cgroup di Docker.
+              <Code>KillMode=process</Code>. I database e i progetti Docker non sono mai stati coinvolti,
+              i loro container appartengono al cgroup di Docker.
             </Hint>
           )}
 
@@ -452,7 +452,7 @@ export default function AutostartPage() {
           <div className="p-4 sm:p-5">
             <PanelHeader
               title="Cosa avviare"
-              description="I servizi partono prima dei progetti. L'ordine più basso va per primo."
+              description="I database partono prima dei progetti. L'ordine più basso va per primo."
             />
           </div>
 
@@ -460,7 +460,7 @@ export default function AutostartPage() {
             <EmptyState
               icon="solar:play-circle-linear"
               title="Niente da avviare"
-              description="Appena crei un progetto o un servizio, compare qui."
+              description="Appena crei un progetto o un database, compare qui."
             />
           ) : (
             <>

@@ -498,7 +498,9 @@ export default function ProjectDetailPage() {
         />
       )}
 
-      {shownTab === "files" && <FilesTab projectId={projectId} runtimeType={project.runtime_type} />}
+      {shownTab === "files" && (
+        <FilesTab projectId={projectId} runtimeType={project.runtime_type} onGoToOverview={() => goTo("overview")} />
+      )}
 
       {shownTab === "terminal" && (
         <TerminalTab

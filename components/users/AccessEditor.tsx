@@ -45,10 +45,10 @@ function useTargets() {
 }
 
 const SCOPE_LABEL: Record<Grant["scope"], string> = {
-  all: "Tutti i progetti e servizi",
+  all: "Tutti i progetti e database",
   folder: "Cartella",
   project: "Progetto",
-  service: "Servizio",
+  service: "Database",
 };
 
 /**
@@ -138,7 +138,7 @@ export function AccessEditor({
 
       <Panel className="space-y-4">
         <PanelHeader
-          title="Progetti e servizi"
+          title="Progetti e database"
           description="Il livello più alto tra quelli che valgono per un elemento è quello che conta"
         />
 
@@ -151,7 +151,7 @@ export function AccessEditor({
           <EmptyState
             icon="solar:lock-keyhole-linear"
             title="Nessun accesso"
-            description="Questo account non vede nessun progetto né servizio."
+            description="Questo account non vede nessun progetto né database."
           />
         ) : (
           <ul className="divide-border divide-y">
@@ -243,7 +243,7 @@ export function AccessEditor({
               Aggiungi
             </Button>
           </div>
-          <FieldHint>Un servizio collegato a un progetto segue anche l&apos;accesso al progetto.</FieldHint>
+          <FieldHint>Un database collegato a un progetto segue anche l&apos;accesso al progetto.</FieldHint>
         </div>
       </Panel>
 

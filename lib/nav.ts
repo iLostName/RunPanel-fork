@@ -292,29 +292,54 @@ export function passesNavPermission(
 }
 
 /**
- * Breadcrumb labels, derived from the same list plus the segments that are not
- * destinations of their own — a run id's parent, a wizard step.
+ * The pages below the destinations, by path, with the name their heading
+ * carries. The page prints its `<h1>` from here, and the breadcrumb, the
+ * phone's title and its back button read the same entry, so the four cannot
+ * drift apart again.
+ *
+ * By path, not by URL segment: the labels used to be keyed by segment, and
+ * `new` is three different pages, so all three were "Nuovo" and the phone's
+ * way back from the catalogue read "‹ Nuovo". Pages named by their data — a
+ * project, a run — are not here: they name their own id (`useCrumbLabel`).
  */
-export const SEGMENT_LABELS: Record<string, string> = {
-  ...Object.fromEntries(NAV_PAGES.map((item) => [item.href.replace(/^\//, ""), item.label])),
-  policies: "Pianificazioni",
-  runs: "Esecuzioni",
-  restore: "Ripristino",
-  new: "Nuovo",
-  // The pages' own titles. Raw, these were the phone's title and its back
-  // button ("‹ catalog") as well as a crumb.
-  catalog: "App pronte",
-  upload: "Ripristina da un archivio",
-  api: "Riferimento API",
+export const SUBPAGE_TITLES = {
+  "/projects/new": "Nuovo progetto",
+  "/projects/new/catalog": "App pronte",
+  "/services/new": "Nuovo database",
+  "/backups/new": "Nuova pianificazione",
+  "/backups/upload": "Ripristina da un archivio",
+  "/mcp/api": "Riferimento API",
   // Reached from the bell, not the sidebar: every account has one.
-  notifications: "Notifiche",
+  "/notifications": "Notifiche",
+} as const satisfies Record<string, string>;
+
+/**
+ * Levels of a URL that are not a page: a crumb for one of these is plain
+ * text, because as a link it led to a 404. Named in the plural, as the
+ * collection the id below them belongs to.
+ */
+const LEVELS: Record<string, string> = {
+  "/backups/policies": "Pianificazioni",
+  "/backups/runs": "Esecuzioni",
+  "/backups/restore": "Ripristini",
+};
+
+export const CRUMBS_WITHOUT_PAGE: ReadonlySet<string> = new Set(Object.keys(LEVELS));
+
+const PATH_TITLES: Record<string, string> = {
+  ...Object.fromEntries(NAV_PAGES.map((page) => [page.href, page.label])),
+  ...SUBPAGE_TITLES,
+  ...LEVELS,
 };
 
 /**
- * Paths that are a level of a URL but not a page. A crumb for one of these is
- * plain text: as a link it led to a 404.
+ * The name of what is at exactly this path: a destination as the sidebar
+ * calls it, a page below one, or a level. Undefined for an id, which only
+ * its page can name.
  */
-export const CRUMBS_WITHOUT_PAGE = new Set(["/backups/runs", "/backups/policies", "/backups/restore"]);
+export function titleOfPath(path: string): string | undefined {
+  return Object.hasOwn(PATH_TITLES, path) ? PATH_TITLES[path] : undefined;
+}
 
 export function isActiveNav(pathname: string, item: NavPage): boolean {
   if (pathname === item.href || pathname.startsWith(`${item.href}/`)) return true;

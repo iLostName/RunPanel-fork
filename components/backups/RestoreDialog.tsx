@@ -41,7 +41,7 @@ function consequence(artifact: ArtifactView, target: string): string {
   switch (artifact.kind) {
     case "service-db":
       return artifact.meta?.engine === "redis"
-        ? `I dati di ${target} vengono sostituiti; il servizio si ferma per qualche secondo.`
+        ? `I dati di ${target} vengono sostituiti; il database si ferma per qualche secondo.`
         : `I database di ${target} tornano come nel backup. Se un'app li usa, si ferma e riparte alla fine.`;
     case "project-volume":
       return `I file del volume di ${target} vengono sostituiti; il progetto si ferma durante la copia e riparte dopo.`;
