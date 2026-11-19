@@ -328,6 +328,11 @@ export async function run({ base, dataDir, repoRoot }) {
   const attacker = browser(base);
   const stolen = await attacker.call(victimTrip.returnPath);
   r.check("a return brought to another browser opens nothing there", stolen.location === "/login?github=expired" && (await me(attacker)) === null, String(stolen.location));
+  // Login CSRF: the attacker's own return, planted in the victim's browser.
+  const planted = await trip(attacker, { intent: "login" }, { id: 9001, login: "stranger" }, { skipCallback: true });
+  const plantedReturn = await victim.call(planted.returnPath);
+  r.check("another browser's return planted in this one opens nothing", plantedReturn.location === "/login?github=expired" && (await me(victim)) === null, String(plantedReturn.location));
+  r.check("and does not cost this browser its own sign-in under way", victim.has("runpanel_github_flow"));
   const rightful = await victim.call(victimTrip.returnPath);
   r.check("and does not spend the sign-in of the browser that left", rightful.location === "/login?github=continue", String(rightful.location));
   r.check("which finishes it", (await finish(victim)).body?.success === true && (await me(victim))?.isOwner === true);

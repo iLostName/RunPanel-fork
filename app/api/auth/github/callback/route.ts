@@ -3,16 +3,17 @@ import { audit } from "@/lib/audit";
 import { destroyUserSessions, getSession, isClusterSession } from "@/lib/auth";
 import {
   claimFlow,
+  clearFlowCookie,
   exchangeCode,
   fetchIdentity,
   isGithubLoginReady,
   linkGithub,
+  readFlowCookie,
   readGithubLoginConfig,
   redeemInviteWithGithub,
   refreshGithubLogin,
   revokeToken,
   setPendingCookie,
-  takeFlowCookie,
   userIdForGithub,
   type ClaimedFlow,
 } from "@/lib/github-login";
@@ -54,8 +55,7 @@ function redirect(path: string): NextResponse {
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
-  // Read and cleared whatever happens next: a binding is good for one return.
-  const binding = await takeFlowCookie();
+  const binding = await readFlowCookie();
 
   if (await isNodeOnly()) return redirect("/login?github=managed");
 
@@ -63,7 +63,8 @@ export async function GET(request: NextRequest) {
   if (!flow) {
     // Unknown, expired, already used, or begun in another browser — which is
     // what a forged return looks like. Logged, but within a budget: this is
-    // an address anyone can call.
+    // an address anyone can call. The cookie stays: if this browser has a
+    // sign-in of its own under way, a stray return does not end it.
     const budget = await consumeRateLimit("login:github:bad-return", MAX_BAD_RETURNS_LOGGED, WINDOW_MS);
     if (budget.allowed) {
       await audit({
@@ -77,6 +78,8 @@ export async function GET(request: NextRequest) {
     const session = await getSession();
     return redirect(session ? "/account?github=expired" : "/login?github=expired");
   }
+  // Spent: the binding has done its one job.
+  await clearFlowCookie();
 
   const land = (result: FlowResult) => redirect(landingPath(flow, result));
 

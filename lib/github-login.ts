@@ -319,12 +319,18 @@ export async function setFlowCookie(binding: string, redirectUri: string): Promi
   });
 }
 
-/** The binding this browser holds, if any; the cookie goes either way. */
-export async function takeFlowCookie(): Promise<string | null> {
-  const store = await cookies();
-  const value = store.get(FLOW_COOKIE)?.value ?? null;
-  if (value !== null) store.set(FLOW_COOKIE, "", { httpOnly: true, sameSite: "lax", maxAge: 0, path: FLOW_COOKIE_PATH });
-  return value;
+/** The binding this browser holds, if any. */
+export async function readFlowCookie(): Promise<string | null> {
+  return (await cookies()).get(FLOW_COOKIE)?.value ?? null;
+}
+
+/**
+ * Forget the binding once its sign-in is spent. Only then: a stray return
+ * brought to this browser — someone else's state in a link — must not cost the
+ * sign-in this browser has under way its cookie.
+ */
+export async function clearFlowCookie(): Promise<void> {
+  (await cookies()).set(FLOW_COOKIE, "", { httpOnly: true, sameSite: "lax", maxAge: 0, path: FLOW_COOKIE_PATH });
 }
 
 export async function setPendingCookie(token: string, redirectUri: string): Promise<void> {
