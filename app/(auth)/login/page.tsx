@@ -150,13 +150,15 @@ export default function LoginPage() {
     fetch("/api/auth/check")
       .then((r) => r.json())
       .then((data: Check) => {
-        if (data.authenticated) {
+        // Not while a return from GitHub is being finished: signing in again
+        // from a session (to choose a first password, say) goes where it asked.
+        if (data.authenticated && arrival.github !== "continue") {
           router.push(data.emailRequired ? "/setup-email" : "/home");
         }
         setCheck(data);
       })
       .catch(() => setCheck({ authenticated: false, firstRun: false, emailRequired: false, role: null }));
-  }, [router]);
+  }, [arrival, router]);
 
   // Back from GitHub. Taken off the address bar at once: a reload must neither
   // finish the same sign-in twice nor show an old error again. The ref keeps a
